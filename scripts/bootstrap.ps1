@@ -8,19 +8,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $RequiredPopplerCommands = @('pdfinfo', 'pdftotext', 'pdftoppm')
+. (Join-Path $PSScriptRoot 'windows-tools.ps1')
 
 function Assert-NativeSuccess {
     param([Parameter(Mandatory)][string]$Operation)
     if ($LASTEXITCODE -ne 0) {
         throw "$Operation failed with exit code $LASTEXITCODE."
     }
-}
-
-function Update-ProcessPath {
-    $ProcessEntries = @($env:Path -split ';' | Where-Object { $_ })
-    $UserEntries = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_ })
-    $MachineEntries = @([Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';' | Where-Object { $_ })
-    $env:Path = (@($ProcessEntries) + @($UserEntries) + @($MachineEntries) | Select-Object -Unique) -join ';'
 }
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
@@ -49,6 +43,13 @@ if ($InstallNativeTools) {
         Assert-NativeSuccess 'Ghostscript installation'
     }
     Update-ProcessPath
+    if (-not (Get-Command gswin64c,gswin32c -ErrorAction SilentlyContinue)) {
+        $GhostscriptSearchRoots = @(
+            if ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'gs' }
+            if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} 'gs' }
+        )
+        Add-DiscoveredCommandDirectory -Command @('gswin64c.exe', 'gswin32c.exe') -SearchRoot $GhostscriptSearchRoots | Out-Null
+    }
 
     $MissingPopplerCommands = @($RequiredPopplerCommands | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })
     if ($MissingPopplerCommands.Count -gt 0) {
