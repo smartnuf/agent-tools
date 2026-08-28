@@ -1,8 +1,8 @@
 # Plan status
 
-- Last reconciled: 2026-08-28
-- Current milestone: M0 — distribution foundations
-- Current state: in-progress
+- Last reconciled: 2026-08-29
+- Current milestone: M1 — installable GitHub prerelease
+- Current state: not-started
 - Current user installation: repository clone or source archive
 - Target user installation: `uv tool install <distribution-name>`
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
@@ -11,14 +11,14 @@
 
 | Milestone | Outcome | State | Acceptance gates | Incremental estimate | Estimated remaining |
 |---|---|---|---:|---:|---:|
-| M0 | Distribution decision and executable roadmap | in-progress | 3/5 | 0.5–1 day | 0.25–0.5 day |
+| M0 | Distribution decision and executable roadmap | complete | 5/5 | 0.5–1 day | none |
 | M1 | Installable GitHub prerelease | not-started | 0/9 | 4–7 days | 4–7 days |
 | M2 | Public PyPI release | not-started | 0/5 | 1–2 days | 1–2 days |
 | M3 | Tested update lifecycle | not-started | 0/6 | 2–4 days | 2–4 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated effort through M3: **7.25–13.5 person-days remaining**. Native discovery channels are optional and excluded from that total.
+Estimated implementation effort through M3: **7–13 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
 
 Gate counts are binary readiness measures. Estimates are ranges and must be revised when implementation reveals new facts.
 
@@ -34,18 +34,13 @@ These are foundations, not evidence that the current wheel is ready for public i
 
 ## Recommended next work
 
-Complete M0 with a focused packaging-discovery task (S, **0.25–0.5 day**):
+Begin [issue #4](https://github.com/smartnuf/agent-tools/issues/4), packaging contract and distribution metadata (L, **0.75–1.25 days**), because every other M1 task depends on its product-boundary and metadata decisions.
 
-1. Verify availability and suitability of the intended public distribution name.
-2. Inventory which current commands and resources assume a repository checkout.
-3. Map `requirements.in` entries to required, optional, or development dependencies.
-4. Create or identify the actionable M1 work items and record their evidence links here.
-
-Do not publish the existing `agent-tools-local` wheel as the public release merely because it builds.
+Do not publish the existing `agent-tools-local` wheel merely because it builds.
 
 ## Known risks and assumptions
 
-- The permanent registry distribution name remains undecided.
+- `smartnuf-agent-tools` returned no existing PyPI project on 2026-08-29, but the name is not reserved until publication and must be rechecked.
 - The current wheel declares no runtime dependencies and contains only `src/agent_tools`.
 - Repository wrappers and the shared `.venv` are not part of the wheel contract.
 - M1 may reveal checkout assumptions in the CLI or bootstrap behaviour; its estimate includes limited contingency for that discovery.
