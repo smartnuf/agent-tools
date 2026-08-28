@@ -5,7 +5,9 @@ param(
     [Parameter(DontShow)]
     [scriptblock]$ReadUserPath = { [Environment]::GetEnvironmentVariable('Path', 'User') },
     [Parameter(DontShow)]
-    [scriptblock]$WriteUserPath = { param([string]$Value) [Environment]::SetEnvironmentVariable('Path', $Value, 'User') }
+    [scriptblock]$WriteUserPath = { param([string]$Value) [Environment]::SetEnvironmentVariable('Path', $Value, 'User') },
+    [Parameter(DontShow)]
+    [scriptblock]$GetBackupTimestamp = { [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffffffZ') }
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,9 +31,28 @@ if (-not $BackupDirectory) {
     $BackupDirectory = Join-Path $Root '.backups\path'
 }
 [IO.Directory]::CreateDirectory($BackupDirectory) | Out-Null
-$Timestamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffffffZ')
-$BackupPath = Join-Path $BackupDirectory "user-path-$Timestamp.txt"
-[IO.File]::WriteAllText($BackupPath, [string]$CurrentUserPath, [Text.UTF8Encoding]::new($false))
+$Timestamp = & $GetBackupTimestamp
+$BackupBase = Join-Path $BackupDirectory "user-path-$Timestamp"
+$BackupSuffix = 0
+while ($true) {
+    $Suffix = if ($BackupSuffix) { "-$BackupSuffix" } else { '' }
+    $BackupPath = "$BackupBase$Suffix.txt"
+    try {
+        $Stream = [IO.File]::Open($BackupPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try {
+            $Bytes = [Text.UTF8Encoding]::new($false).GetBytes([string]$CurrentUserPath)
+            $Stream.Write($Bytes, 0, $Bytes.Length)
+        }
+        finally {
+            $Stream.Dispose()
+        }
+        break
+    }
+    catch [IO.IOException] {
+        if (-not (Test-Path -LiteralPath $BackupPath)) { throw }
+        $BackupSuffix++
+    }
+}
 $LatestUserPath = & $ReadUserPath
 if ($LatestUserPath -ne $CurrentUserPath) {
     throw 'The user PATH changed while its backup was being created. No changes were made; rerun the command.'

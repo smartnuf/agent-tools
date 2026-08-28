@@ -48,6 +48,19 @@ try {
         if ($_.Exception.Message -notlike '*changed while its backup was being created*') { throw }
     }
     if ($ConcurrentState.Writes -ne 0) { throw 'Concurrent PATH change reached the persistence boundary.' }
+
+    $CollisionState = [pscustomobject]@{ Path = $TestUserPath }
+    $CollisionReader = { $CollisionState.Path }.GetNewClosure()
+    $CollisionWriter = { param([string]$Value) $CollisionState.Path = $Value }.GetNewClosure()
+    $CollisionTimestamp = { '20000101T0000000000000Z' }
+    $CollisionDirectory = Join-Path $BackupDirectory 'collision'
+    [IO.Directory]::CreateDirectory($CollisionDirectory) | Out-Null
+    $ExistingBackup = Join-Path $CollisionDirectory 'user-path-20000101T0000000000000Z.txt'
+    [IO.File]::WriteAllText($ExistingBackup, 'prior evidence')
+    & $PathScript -Apply -BackupDirectory $CollisionDirectory -ReadUserPath $CollisionReader -WriteUserPath $CollisionWriter -GetBackupTimestamp $CollisionTimestamp
+    if ([IO.File]::ReadAllText($ExistingBackup) -ne 'prior evidence') { throw 'Existing PATH backup was overwritten.' }
+    $CollisionBackup = Join-Path $CollisionDirectory 'user-path-20000101T0000000000000Z-1.txt'
+    if ([IO.File]::ReadAllText($CollisionBackup) -ne $TestUserPath) { throw 'Collision-safe PATH backup has unexpected content.' }
 }
 finally {
     if (Test-Path -LiteralPath $BackupDirectory) {
