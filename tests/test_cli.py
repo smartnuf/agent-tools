@@ -32,7 +32,7 @@ class CliTests(unittest.TestCase):
         with (
             patch.object(cli, "_distribution_version", return_value="not installed"),
             patch.object(cli.importlib, "import_module", side_effect=ModuleNotFoundError("unavailable")),
-            patch.object(cli.shutil, "which", return_value=None),
+            patch.object(cli, "_find_executable", return_value=None),
             redirect_stdout(StringIO()) as output,
         ):
             self.assertEqual(cli.doctor(), 1)
