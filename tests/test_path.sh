@@ -49,12 +49,16 @@ wait "$SECOND_PID"
 [ "$(grep -Fxc "$LINE" "$CONCURRENT_HOME/.bashrc")" -eq 1 ]
 [ ! -e "$CONCURRENT_HOME/.bashrc.agent-tools-lock" ]
 
-# A lock whose recorded owner is no longer alive must be safely reclaimed.
+# An abandoned lock must fail safely without being removed automatically.
 STALE_HOME="$TEST_HOME/stale"
 mkdir "$STALE_HOME"
 printf 'stale profile\n' > "$STALE_HOME/.bashrc"
 printf '99999999\n' > "$STALE_HOME/.bashrc.agent-tools-lock"
-HOME="$STALE_HOME" SHELL=/bin/bash sh "$ROOT/scripts/path.sh" --apply
-[ "$(grep -Fxc "$LINE" "$STALE_HOME/.bashrc")" -eq 1 ]
-[ ! -e "$STALE_HOME/.bashrc.agent-tools-lock" ]
+if AGENT_TOOLS_LOCK_MAX_ATTEMPTS=1 HOME="$STALE_HOME" SHELL=/bin/bash sh "$ROOT/scripts/path.sh" --apply 2> "$STALE_HOME/error"; then
+  echo 'Expected an abandoned lock to stop the update.' >&2
+  exit 1
+fi
+[ "$(cat "$STALE_HOME/.bashrc")" = 'stale profile' ]
+[ "$(cat "$STALE_HOME/.bashrc.agent-tools-lock")" = '99999999' ]
+grep -F "Lock file: $STALE_HOME/.bashrc.agent-tools-lock (recorded owner PID: 99999999)." "$STALE_HOME/error" >/dev/null
 [ "$(find "$STALE_HOME" -maxdepth 1 -name '.bashrc.agent-tools-lock.owner.*' | wc -l | tr -d ' ')" -eq 0 ]

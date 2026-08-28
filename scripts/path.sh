@@ -31,25 +31,23 @@ cleanup_path_update() {
     rm -f "$LOCK_OWNER_FILE"
   fi
 }
-trap cleanup_path_update EXIT HUP INT TERM
+trap cleanup_path_update EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 LOCK_ATTEMPTS=0
+LOCK_MAX_ATTEMPTS=${AGENT_TOOLS_LOCK_MAX_ATTEMPTS:-100}
+case "$LOCK_MAX_ATTEMPTS" in
+  ''|*[!0-9]*|0) echo "AGENT_TOOLS_LOCK_MAX_ATTEMPTS must be a positive integer." >&2; exit 2 ;;
+esac
 while ! ln "$LOCK_OWNER_FILE" "$LOCK" 2>/dev/null; do
-  if [ -f "$LOCK" ]; then
-    LOCK_OWNER=$(cat "$LOCK" 2>/dev/null || true)
-    case "$LOCK_OWNER" in
-      ''|*[!0-9]*) ;;
-      *)
-        if ! kill -0 "$LOCK_OWNER" 2>/dev/null; then
-          rm -f "$LOCK"
-          continue
-        fi
-        ;;
-    esac
-  fi
   LOCK_ATTEMPTS=$((LOCK_ATTEMPTS + 1))
-  if [ "$LOCK_ATTEMPTS" -ge 100 ]; then
-    echo "Timed out waiting for another agent-tools PATH update on $PROFILE" >&2
+  if [ "$LOCK_ATTEMPTS" -ge "$LOCK_MAX_ATTEMPTS" ]; then
+    LOCK_OWNER=$(cat "$LOCK" 2>/dev/null || true)
+    echo "Timed out waiting for another agent-tools PATH update on $PROFILE." >&2
+    echo "Lock file: $LOCK (recorded owner PID: ${LOCK_OWNER:-unknown})." >&2
+    echo "If no update process owns that lock, remove the lock file manually and rerun." >&2
     exit 1
   fi
   sleep 0.1
