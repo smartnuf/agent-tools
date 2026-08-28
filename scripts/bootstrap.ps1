@@ -7,12 +7,20 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
+$RequiredPopplerCommands = @('pdfinfo', 'pdftotext', 'pdftoppm')
 
 function Assert-NativeSuccess {
     param([Parameter(Mandatory)][string]$Operation)
     if ($LASTEXITCODE -ne 0) {
         throw "$Operation failed with exit code $LASTEXITCODE."
     }
+}
+
+function Update-ProcessPath {
+    $ProcessEntries = @($env:Path -split ';' | Where-Object { $_ })
+    $UserEntries = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_ })
+    $MachineEntries = @([Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';' | Where-Object { $_ })
+    $env:Path = (@($ProcessEntries) + @($UserEntries) + @($MachineEntries) | Select-Object -Unique) -join ';'
 }
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
@@ -24,20 +32,30 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     }
     winget install --id astral-sh.uv -e --accept-package-agreements --accept-source-agreements
     Assert-NativeSuccess 'uv installation'
-    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    Update-ProcessPath
 }
 
 if ($InstallNativeTools) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         throw 'WinGet is required for automatic native-tool installation.'
     }
-    if (-not (Get-Command pdfinfo -ErrorAction SilentlyContinue)) {
+    $MissingPopplerCommands = @($RequiredPopplerCommands | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })
+    if ($MissingPopplerCommands.Count -gt 0) {
         winget install --id oschwartz10612.Poppler -e --accept-package-agreements --accept-source-agreements
         Assert-NativeSuccess 'Poppler installation'
     }
     if (-not (Get-Command gswin64c,gswin32c -ErrorAction SilentlyContinue)) {
         winget install --id ArtifexSoftware.GhostScript -e --accept-package-agreements --accept-source-agreements
         Assert-NativeSuccess 'Ghostscript installation'
+    }
+    Update-ProcessPath
+
+    $MissingPopplerCommands = @($RequiredPopplerCommands | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })
+    if ($MissingPopplerCommands.Count -gt 0) {
+        throw "Poppler installation completed but required command(s) are not on PATH: $($MissingPopplerCommands -join ', ')."
+    }
+    if (-not (Get-Command gswin64c,gswin32c -ErrorAction SilentlyContinue)) {
+        throw 'Ghostscript installation completed but no supported console executable is on PATH.'
     }
 }
 
