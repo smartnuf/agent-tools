@@ -48,15 +48,15 @@ Set-Location $HOME\.agent-tools
 agent-tools doctor
 ```
 
-Linux or macOS:
+Linux or macOS (install `uv` with a trusted package manager first):
 
 ```sh
 cd "$HOME/.agent-tools"
-./scripts/bootstrap.sh --install-uv --install-native-tools --add-to-path
+./scripts/bootstrap.sh --install-native-tools --add-to-path
 agent-tools doctor
 ```
 
-All three mutation flags are opt-in. Without them, bootstrap creates or refreshes `.venv` only when `uv` is already available, and prints actionable diagnostics.
+All mutation flags are opt-in. On Windows, `-InstallUv` delegates to WinGet. On systems with Homebrew, `--install-uv` delegates to Homebrew. The scripts never execute a downloaded installer response directly. Without installation flags, bootstrap creates or refreshes `.venv` only when `uv` is already available and prints actionable diagnostics.
 
 To refresh Python packages later:
 

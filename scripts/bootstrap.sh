@@ -18,8 +18,12 @@ if ! command -v uv >/dev/null 2>&1; then
     echo "uv is not installed. Re-run with --install-uv, or install uv yourself." >&2
     exit 1
   fi
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+  if command -v brew >/dev/null 2>&1; then
+    brew install uv
+  else
+    echo "Automatic uv installation requires Homebrew. Install uv with a trusted package manager, then rerun bootstrap." >&2
+    exit 1
+  fi
 fi
 
 if [ "$INSTALL_NATIVE" -eq 1 ]; then
