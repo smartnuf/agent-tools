@@ -28,7 +28,12 @@ if (-not $BackupDirectory) {
 $Timestamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffffffZ')
 $BackupPath = Join-Path $BackupDirectory "user-path-$Timestamp.txt"
 [IO.File]::WriteAllText($BackupPath, [string]$CurrentUserPath, [Text.UTF8Encoding]::new($false))
-$NewPath = (@($Entries) + $Bin) -join ';'
+$LatestUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+if ($LatestUserPath -ne $CurrentUserPath) {
+    throw 'The user PATH changed while its backup was being created. No changes were made; rerun the command.'
+}
+$LatestEntries = @($LatestUserPath -split ';' | Where-Object { $_ })
+$NewPath = (@($LatestEntries) + $Bin) -join ';'
 [Environment]::SetEnvironmentVariable('Path', $NewPath, 'User')
 Write-Host "Backed up the previous user PATH to $BackupPath"
 Write-Host "Added $Bin to the user PATH. Open a new terminal to use it."
