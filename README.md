@@ -20,7 +20,6 @@ The checked-in repository contains source and recipes. Machine-local state stays
 
 ```text
 bin/                    stable user-facing wrappers
-config/tools.toml       desired native tools and executable probes
 docs/platforms.md       platform policy and macOS testing notes
 scripts/                bootstrap, update, PATH, and validation scripts
 src/agent_tools/        reusable standard-library Python helpers
