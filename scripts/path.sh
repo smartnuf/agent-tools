@@ -16,16 +16,32 @@ case "$SHELL_NAME" in
 esac
 
 LOCK="$PROFILE.agent-tools-lock"
+LOCK_OWNER_FILE=$(mktemp "$LOCK.owner.XXXXXX")
+printf '%s\n' "$$" > "$LOCK_OWNER_FILE"
+LOCK_HELD=0
+BACKUP_SNAPSHOT=
+cleanup_path_update() {
+  if [ -n "${BACKUP_SNAPSHOT:-}" ]; then
+    rm -f "$BACKUP_SNAPSHOT"
+  fi
+  if [ "$LOCK_HELD" -eq 1 ]; then
+    rm -f "$LOCK"
+  fi
+  if [ -n "${LOCK_OWNER_FILE:-}" ]; then
+    rm -f "$LOCK_OWNER_FILE"
+  fi
+}
+trap cleanup_path_update EXIT HUP INT TERM
+
 LOCK_ATTEMPTS=0
-while ! mkdir "$LOCK" 2>/dev/null; do
-  if [ -f "$LOCK/pid" ]; then
-    LOCK_OWNER=$(cat "$LOCK/pid" 2>/dev/null || true)
+while ! ln "$LOCK_OWNER_FILE" "$LOCK" 2>/dev/null; do
+  if [ -f "$LOCK" ]; then
+    LOCK_OWNER=$(cat "$LOCK" 2>/dev/null || true)
     case "$LOCK_OWNER" in
       ''|*[!0-9]*) ;;
       *)
         if ! kill -0 "$LOCK_OWNER" 2>/dev/null; then
-          rm -f "$LOCK/pid"
-          rmdir "$LOCK" 2>/dev/null || true
+          rm -f "$LOCK"
           continue
         fi
         ;;
@@ -38,16 +54,9 @@ while ! mkdir "$LOCK" 2>/dev/null; do
   fi
   sleep 0.1
 done
-printf '%s\n' "$$" > "$LOCK/pid"
-BACKUP_SNAPSHOT=
-cleanup_path_update() {
-  if [ -n "${BACKUP_SNAPSHOT:-}" ]; then
-    rm -f "$BACKUP_SNAPSHOT"
-  fi
-  rm -f "$LOCK/pid"
-  rmdir "$LOCK" 2>/dev/null || true
-}
-trap cleanup_path_update EXIT HUP INT TERM
+LOCK_HELD=1
+rm -f "$LOCK_OWNER_FILE"
+LOCK_OWNER_FILE=
 
 if [ -f "$PROFILE" ] && grep -Fx "$LINE" "$PROFILE" >/dev/null 2>&1; then
   echo "$ROOT/bin is already configured in $PROFILE"
