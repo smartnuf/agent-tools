@@ -1,12 +1,19 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [project]
 name = "agent-tools-local"
 version = "0.1.0"
 description = "User-level reusable helpers for local coding agents"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
+
+[project.urls]
+Repository = "https://github.com/smartnuf/agent-tools"
+Issues = "https://github.com/smartnuf/agent-tools/issues"
 
 [project.scripts]
 agent-tools = "agent_tools.cli:main"
