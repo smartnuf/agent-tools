@@ -34,3 +34,4 @@ PATH="$FAKE_BIN:$PATH" HOME="$TEST_HOME" SHELL=/bin/bash sh "$ROOT/scripts/path.
 [ "$(cat "$BACKUP")" = 'original backup' ]
 [ -f "$BACKUP-1" ]
 [ "$(cat "$BACKUP-1")" = 'second profile' ]
+[ "$(find "$TEST_HOME" -maxdepth 1 -name '.bashrc.agent-tools-backup-snapshot.*' | wc -l | tr -d ' ')" -eq 0 ]

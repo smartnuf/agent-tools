@@ -18,14 +18,23 @@ if [ -f "$PROFILE" ] && grep -Fx "$LINE" "$PROFILE" >/dev/null 2>&1; then
   echo "$ROOT/bin is already configured in $PROFILE"
 else
   if [ -f "$PROFILE" ]; then
+    BACKUP_SNAPSHOT=$(mktemp "$PROFILE.agent-tools-backup-snapshot.XXXXXX")
+    cleanup_backup_snapshot() {
+      if [ -n "${BACKUP_SNAPSHOT:-}" ]; then
+        rm -f "$BACKUP_SNAPSHOT"
+      fi
+    }
+    trap cleanup_backup_snapshot EXIT HUP INT TERM
+    cp -p "$PROFILE" "$BACKUP_SNAPSHOT"
     BACKUP_BASE="$PROFILE.agent-tools-backup-$(date -u +%Y%m%dT%H%M%SZ)"
     BACKUP="$BACKUP_BASE"
     BACKUP_SUFFIX=0
-    while [ -e "$BACKUP" ]; do
+    while ! ln "$BACKUP_SNAPSHOT" "$BACKUP" 2>/dev/null; do
       BACKUP_SUFFIX=$((BACKUP_SUFFIX + 1))
       BACKUP="$BACKUP_BASE-$BACKUP_SUFFIX"
     done
-    cp -p "$PROFILE" "$BACKUP"
+    rm -f "$BACKUP_SNAPSHOT"
+    BACKUP_SNAPSHOT=
     echo "Backed up $PROFILE to $BACKUP"
   fi
   printf '\n# User-level agent tools\n%s\n' "$LINE" >> "$PROFILE"
