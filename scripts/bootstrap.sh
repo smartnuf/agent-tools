@@ -33,7 +33,7 @@ fi
 if [ ! -x "$ROOT/.venv/bin/python" ]; then
   uv venv "$ROOT/.venv" --python 3.11
 fi
-uv pip install --python "$ROOT/.venv/bin/python" -r "$ROOT/requirements.txt" -e "$ROOT"
+uv pip install --exact --python "$ROOT/.venv/bin/python" -r "$ROOT/requirements.txt" -e "$ROOT"
 if [ "$ADD_PATH" -eq 1 ]; then
   "$ROOT/scripts/path.sh" --apply
 fi

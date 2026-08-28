@@ -51,7 +51,9 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/bootstrap.ps1
+          uv pip install --python .venv -e tests/fixtures/extraneous
           ./scripts/bootstrap.ps1
+          .venv\Scripts\python.exe -c "import importlib.util; assert importlib.util.find_spec('agent_tools_extraneous') is None"
           ./scripts/path.ps1
 
       - name: Bootstrap twice (Unix)
@@ -59,7 +61,9 @@ jobs:
         shell: bash
         run: |
           sh scripts/bootstrap.sh
+          uv pip install --python .venv -e tests/fixtures/extraneous
           sh scripts/bootstrap.sh
+          .venv/bin/python -c "import importlib.util; assert importlib.util.find_spec('agent_tools_extraneous') is None"
           sh scripts/path.sh
 
       - name: Run unit tests (Windows)

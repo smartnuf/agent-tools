@@ -64,7 +64,7 @@ if (-not (Test-Path -LiteralPath $Python)) {
     & uv venv (Join-Path $Root '.venv') --python 3.11
     Assert-NativeSuccess 'virtual environment creation'
 }
-& uv pip install --python $Python -r (Join-Path $Root 'requirements.txt') -e $Root
+& uv pip install --exact --python $Python -r (Join-Path $Root 'requirements.txt') -e $Root
 Assert-NativeSuccess 'Python package installation'
 
 if ($AddToPath) {
