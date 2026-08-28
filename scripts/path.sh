@@ -14,17 +14,31 @@ case "$SHELL_NAME" in
   bash) PROFILE="$HOME/.bashrc" ;;
   *) echo "Unsupported shell $SHELL_NAME; add this manually: $LINE" >&2; exit 1 ;;
 esac
+
+LOCK="$PROFILE.agent-tools-lock"
+LOCK_ATTEMPTS=0
+while ! mkdir "$LOCK" 2>/dev/null; do
+  LOCK_ATTEMPTS=$((LOCK_ATTEMPTS + 1))
+  if [ "$LOCK_ATTEMPTS" -ge 100 ]; then
+    echo "Timed out waiting for another agent-tools PATH update on $PROFILE" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+BACKUP_SNAPSHOT=
+cleanup_path_update() {
+  if [ -n "${BACKUP_SNAPSHOT:-}" ]; then
+    rm -f "$BACKUP_SNAPSHOT"
+  fi
+  rmdir "$LOCK" 2>/dev/null || true
+}
+trap cleanup_path_update EXIT HUP INT TERM
+
 if [ -f "$PROFILE" ] && grep -Fx "$LINE" "$PROFILE" >/dev/null 2>&1; then
   echo "$ROOT/bin is already configured in $PROFILE"
 else
   if [ -f "$PROFILE" ]; then
     BACKUP_SNAPSHOT=$(mktemp "$PROFILE.agent-tools-backup-snapshot.XXXXXX")
-    cleanup_backup_snapshot() {
-      if [ -n "${BACKUP_SNAPSHOT:-}" ]; then
-        rm -f "$BACKUP_SNAPSHOT"
-      fi
-    }
-    trap cleanup_backup_snapshot EXIT HUP INT TERM
     cp -p "$PROFILE" "$BACKUP_SNAPSHOT"
     BACKUP_BASE="$PROFILE.agent-tools-backup-$(date -u +%Y%m%dT%H%M%SZ)"
     BACKUP="$BACKUP_BASE"

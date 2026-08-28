@@ -35,3 +35,16 @@ PATH="$FAKE_BIN:$PATH" HOME="$TEST_HOME" SHELL=/bin/bash sh "$ROOT/scripts/path.
 [ -f "$BACKUP-1" ]
 [ "$(cat "$BACKUP-1")" = 'second profile' ]
 [ "$(find "$TEST_HOME" -maxdepth 1 -name '.bashrc.agent-tools-backup-snapshot.*' | wc -l | tr -d ' ')" -eq 0 ]
+
+# Concurrent applies must serialize the check, backup, and profile append.
+CONCURRENT_HOME="$TEST_HOME/concurrent"
+mkdir "$CONCURRENT_HOME"
+printf 'concurrent profile\n' > "$CONCURRENT_HOME/.bashrc"
+HOME="$CONCURRENT_HOME" SHELL=/bin/bash sh "$ROOT/scripts/path.sh" --apply &
+FIRST_PID=$!
+HOME="$CONCURRENT_HOME" SHELL=/bin/bash sh "$ROOT/scripts/path.sh" --apply &
+SECOND_PID=$!
+wait "$FIRST_PID"
+wait "$SECOND_PID"
+[ "$(grep -Fxc "$LINE" "$CONCURRENT_HOME/.bashrc")" -eq 1 ]
+[ ! -d "$CONCURRENT_HOME/.bashrc.agent-tools-lock" ]
