@@ -24,7 +24,7 @@ cleanup_path_update() {
   if [ -n "${BACKUP_SNAPSHOT:-}" ]; then
     rm -f "$BACKUP_SNAPSHOT"
   fi
-  if [ "$LOCK_HELD" -eq 1 ]; then
+  if [ "$LOCK_HELD" -eq 1 ] || { [ -e "$LOCK_OWNER_FILE" ] && [ -e "$LOCK" ] && [ "$LOCK_OWNER_FILE" -ef "$LOCK" ]; }; then
     rm -f "$LOCK"
   fi
   if [ -n "${LOCK_OWNER_FILE:-}" ]; then
