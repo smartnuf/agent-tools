@@ -17,6 +17,11 @@ esac
 if [ -f "$PROFILE" ] && grep -Fx "$LINE" "$PROFILE" >/dev/null 2>&1; then
   echo "$ROOT/bin is already configured in $PROFILE"
 else
+  if [ -f "$PROFILE" ]; then
+    BACKUP="$PROFILE.agent-tools-backup-$(date -u +%Y%m%dT%H%M%SZ)"
+    cp -p "$PROFILE" "$BACKUP"
+    echo "Backed up $PROFILE to $BACKUP"
+  fi
   printf '\n# User-level agent tools\n%s\n' "$LINE" >> "$PROFILE"
   echo "Updated $PROFILE. Start a new shell to use the wrappers."
 fi

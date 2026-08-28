@@ -58,6 +58,8 @@ agent-tools doctor
 
 All mutation flags are opt-in. On Windows, `-InstallUv` delegates to WinGet. On systems with Homebrew, `--install-uv` delegates to Homebrew. The scripts never execute a downloaded installer response directly. Without installation flags, bootstrap creates or refreshes `.venv` only when `uv` is already available and prints actionable diagnostics.
 
+PATH changes are also opt-in. Windows backups are written under `.backups/path/`; Unix shell-profile changes create a timestamped sibling backup before editing an existing profile.
+
 To refresh Python packages later:
 
 ```powershell
@@ -94,7 +96,7 @@ For routine operation:
 - Add a documented dependency-upgrade command and automated update PRs; keep `requirements.txt` reviewable and fully pinned.
 - Add fixture-based functional tests that extract text and render a small known PDF with both Python and native tools.
 - Exercise each bootstrap script's native-install branch directly; current CI installs native prerequisites separately before testing bootstrap.
-- Test PATH application against isolated temporary profiles, including repeated application and restoration.
+- Extend PATH tests to cover concurrent Windows user-PATH changes and documented restoration commands.
 - Record installed package versions and executable architecture in `doctor`, especially for Windows ARM64/x64 emulation.
 - Add Linux distribution container coverage beyond Ubuntu and explicit Intel versus Apple-silicon macOS jobs where runner availability and cost justify them.
 - Decide whether native-tool removal/repair commands are useful. Prefer disposable VMs for installation testing rather than promising perfect rollback on a workstation.
