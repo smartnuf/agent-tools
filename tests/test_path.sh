@@ -62,3 +62,23 @@ fi
 [ "$(cat "$STALE_HOME/.bashrc.agent-tools-lock")" = '99999999' ]
 grep -F "Lock file: $STALE_HOME/.bashrc.agent-tools-lock (recorded owner PID: 99999999)." "$STALE_HOME/error" >/dev/null
 [ "$(find "$STALE_HOME" -maxdepth 1 -name '.bashrc.agent-tools-lock.owner.*' | wc -l | tr -d ' ')" -eq 0 ]
+
+# Termination while waiting must exit, preserve the profile and leave no owner temp file.
+SIGNAL_HOME="$TEST_HOME/signal"
+mkdir "$SIGNAL_HOME"
+printf 'signal profile\n' > "$SIGNAL_HOME/.bashrc"
+printf '%s\n' "$$" > "$SIGNAL_HOME/.bashrc.agent-tools-lock"
+AGENT_TOOLS_LOCK_MAX_ATTEMPTS=1000 HOME="$SIGNAL_HOME" SHELL=/bin/bash sh "$ROOT/scripts/path.sh" --apply &
+SIGNAL_PID=$!
+while ! find "$SIGNAL_HOME" -maxdepth 1 -name '.bashrc.agent-tools-lock.owner.*' | grep . >/dev/null; do
+  sleep 0.1
+done
+kill -TERM "$SIGNAL_PID"
+set +e
+wait "$SIGNAL_PID"
+SIGNAL_STATUS=$?
+set -e
+[ "$SIGNAL_STATUS" -eq 143 ]
+[ "$(cat "$SIGNAL_HOME/.bashrc")" = 'signal profile' ]
+[ "$(cat "$SIGNAL_HOME/.bashrc.agent-tools-lock")" = "$$" ]
+[ "$(find "$SIGNAL_HOME" -maxdepth 1 -name '.bashrc.agent-tools-lock.owner.*' | wc -l | tr -d ' ')" -eq 0 ]

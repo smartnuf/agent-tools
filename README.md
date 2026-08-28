@@ -59,6 +59,7 @@ agent-tools doctor
 All mutation flags are opt-in. On Windows, `-InstallUv` delegates to WinGet. On systems with Homebrew, `--install-uv` delegates to Homebrew. The scripts never execute a downloaded installer response directly. Without installation flags, bootstrap creates or refreshes `.venv` only when `uv` is already available and prints actionable diagnostics.
 
 PATH changes are also opt-in. Windows backups are written under `.backups/path/`; Unix shell-profile changes create a timestamped sibling backup before editing an existing profile.
+Unix profile updates use a per-profile lock. If an interrupted update leaves that lock behind, the command stops without changing the profile and reports the exact lock path and recorded PID. Verify that no update process owns it before removing it manually and rerunning.
 
 To refresh Python packages later:
 
