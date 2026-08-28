@@ -48,3 +48,12 @@ wait "$FIRST_PID"
 wait "$SECOND_PID"
 [ "$(grep -Fxc "$LINE" "$CONCURRENT_HOME/.bashrc")" -eq 1 ]
 [ ! -d "$CONCURRENT_HOME/.bashrc.agent-tools-lock" ]
+
+# A lock whose recorded owner is no longer alive must be safely reclaimed.
+STALE_HOME="$TEST_HOME/stale"
+mkdir -p "$STALE_HOME/.bashrc.agent-tools-lock"
+printf 'stale profile\n' > "$STALE_HOME/.bashrc"
+printf '99999999\n' > "$STALE_HOME/.bashrc.agent-tools-lock/pid"
+HOME="$STALE_HOME" SHELL=/bin/bash sh "$ROOT/scripts/path.sh" --apply
+[ "$(grep -Fxc "$LINE" "$STALE_HOME/.bashrc")" -eq 1 ]
+[ ! -d "$STALE_HOME/.bashrc.agent-tools-lock" ]

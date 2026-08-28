@@ -18,6 +18,19 @@ esac
 LOCK="$PROFILE.agent-tools-lock"
 LOCK_ATTEMPTS=0
 while ! mkdir "$LOCK" 2>/dev/null; do
+  if [ -f "$LOCK/pid" ]; then
+    LOCK_OWNER=$(cat "$LOCK/pid" 2>/dev/null || true)
+    case "$LOCK_OWNER" in
+      ''|*[!0-9]*) ;;
+      *)
+        if ! kill -0 "$LOCK_OWNER" 2>/dev/null; then
+          rm -f "$LOCK/pid"
+          rmdir "$LOCK" 2>/dev/null || true
+          continue
+        fi
+        ;;
+    esac
+  fi
   LOCK_ATTEMPTS=$((LOCK_ATTEMPTS + 1))
   if [ "$LOCK_ATTEMPTS" -ge 100 ]; then
     echo "Timed out waiting for another agent-tools PATH update on $PROFILE" >&2
@@ -25,11 +38,13 @@ while ! mkdir "$LOCK" 2>/dev/null; do
   fi
   sleep 0.1
 done
+printf '%s\n' "$$" > "$LOCK/pid"
 BACKUP_SNAPSHOT=
 cleanup_path_update() {
   if [ -n "${BACKUP_SNAPSHOT:-}" ]; then
     rm -f "$BACKUP_SNAPSHOT"
   fi
+  rm -f "$LOCK/pid"
   rmdir "$LOCK" 2>/dev/null || true
 }
 trap cleanup_path_update EXIT HUP INT TERM
