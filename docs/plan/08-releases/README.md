@@ -26,8 +26,9 @@ Outcome: a user can install and run a versioned prerelease artifact without clon
 | Runtime and optional dependencies are correctly declared | not-started | Clean-environment import/CLI tests |
 | Packaged CLI works outside a checkout | not-started | Installed-wheel smoke test |
 | `agent-tools --version` matches package and tag | not-started | Automated assertion against tagged build |
-| Wheel and sdist build reproducibly from a clean tag | not-started | Tag-triggered workflow artifact |
+| Wheel and sdist build successfully from a clean tag | not-started | Tag-triggered workflow artifact |
 | Artifact tests pass on Windows, Linux, and macOS | not-started | Required CI matrix |
+| Release workflow uses explicit least-privilege permissions | not-started | Workflow permission inspection |
 | GitHub prerelease includes artifacts, checksums, and notes | not-started | GitHub Release link |
 | Install, pin, and uninstall documentation is verified | not-started | CI or recorded clean-host smoke test |
 
@@ -35,10 +36,10 @@ Estimate: **4–7 person-days**.
 
 Suggested task order:
 
-1. Packaging contract and installed CLI, 1.5–3 days.
+1. Packaging contract and installed CLI, 1.5–2.5 days.
 2. Artifact isolation and metadata tests, 0.5–1 day.
 3. Tag-driven least-privilege release workflow, 1–1.5 days.
-4. Cross-platform artifact verification and fixes, 0.75–1.5 days.
+4. Cross-platform artifact verification and fixes, 0.5–1 day.
 5. User documentation and prerelease exercise, 0.5–1 day.
 
 ## M2 — Public PyPI release

@@ -12,7 +12,7 @@
 | Milestone | Outcome | State | Acceptance gates | Incremental estimate | Estimated remaining |
 |---|---|---|---:|---:|---:|
 | M0 | Distribution decision and executable roadmap | in-progress | 3/5 | 0.5–1 day | 0.25–0.5 day |
-| M1 | Installable GitHub prerelease | not-started | 0/8 | 4–7 days | 4–7 days |
+| M1 | Installable GitHub prerelease | not-started | 0/9 | 4–7 days | 4–7 days |
 | M2 | Public PyPI release | not-started | 0/5 | 1–2 days | 1–2 days |
 | M3 | Tested update lifecycle | not-started | 0/6 | 2–4 days | 2–4 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
