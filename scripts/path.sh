@@ -14,7 +14,7 @@ case "$SHELL_NAME" in
   bash) PROFILE="$HOME/.bashrc" ;;
   *) echo "Unsupported shell $SHELL_NAME; add this manually: $LINE" >&2; exit 1 ;;
 esac
-if [ -f "$PROFILE" ] && grep -F "$ROOT/bin" "$PROFILE" >/dev/null 2>&1; then
+if [ -f "$PROFILE" ] && grep -Fx "$LINE" "$PROFILE" >/dev/null 2>&1; then
   echo "$ROOT/bin is already configured in $PROFILE"
 else
   printf '\n# User-level agent tools\n%s\n' "$LINE" >> "$PROFILE"
