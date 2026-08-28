@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from contextlib import redirect_stdout
 from io import StringIO
 from unittest.mock import patch
@@ -63,6 +65,18 @@ class CliTests(unittest.TestCase):
             self.assertEqual(cli.doctor(), 1)
         self.assertIn("import failed: OSError: incompatible ABI", output.getvalue())
         self.assertIn("7 check(s) need attention.", output.getvalue())
+
+    def test_windows_ghostscript_is_discovered_outside_path(self) -> None:
+        with TemporaryDirectory() as program_files:
+            executable = Path(program_files, "gs", "10.06.0", "bin", "gswin64c.exe")
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            with (
+                patch.object(cli.shutil, "which", return_value=None),
+                patch.object(cli.platform, "system", return_value="Windows"),
+                patch.dict(cli.os.environ, {"ProgramFiles": program_files}, clear=True),
+            ):
+                self.assertEqual(cli._find_executable("gswin64c"), str(executable))
 
     def test_distribution_version_tries_all_owning_distributions(self) -> None:
         with (

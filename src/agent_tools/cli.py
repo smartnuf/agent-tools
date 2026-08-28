@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import importlib.metadata
+import os
 import platform
 import shutil
 import sys
@@ -28,6 +29,20 @@ def _distribution_version(module: str) -> str:
     return "not installed"
 
 
+def _find_executable(probe: str) -> str | None:
+    found = shutil.which(probe)
+    if found or platform.system() != "Windows" or probe not in {"gswin64c", "gswin32c"}:
+        return found
+    roots = filter(None, (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")))
+    candidates = (
+        candidate
+        for root in roots
+        for candidate in Path(root, "gs").glob(f"*/bin/{probe}.exe")
+        if candidate.is_file()
+    )
+    return str(next(iter(sorted(candidates, reverse=True)), "")) or None
+
+
 def doctor() -> int:
     root = Path(__file__).resolve().parents[2]
     print(f"repository: {root}")
@@ -49,7 +64,7 @@ def doctor() -> int:
 
     print("\nNative tools:")
     for label, probes in REQUIRED_EXECUTABLE_GROUPS.items():
-        found = [(probe, shutil.which(probe)) for probe in probes]
+        found = [(probe, _find_executable(probe)) for probe in probes]
         missing = [probe for probe, path in found if not path]
         if missing:
             print(f"  {label:<12} missing required executable(s): {', '.join(missing)}")
@@ -59,7 +74,7 @@ def doctor() -> int:
             print(f"  {label:<12} {locations}")
 
     for label, alternatives in ALTERNATIVE_EXECUTABLE_GROUPS.items():
-        available = [(probe, shutil.which(probe)) for probe in alternatives]
+        available = [(probe, _find_executable(probe)) for probe in alternatives]
         available = [(probe, path) for probe, path in available if path]
         if available:
             probe, path = available[0]
