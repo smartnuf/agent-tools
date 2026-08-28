@@ -19,6 +19,7 @@ class CliTests(unittest.TestCase):
     def test_doctor_passes_when_packages_and_native_tools_exist(self) -> None:
         with (
             patch.object(cli, "_distribution_version", return_value="1.2.3"),
+            patch.object(cli.importlib, "import_module"),
             patch.object(cli.shutil, "which", side_effect=lambda name: f"/tools/{name}"),
             redirect_stdout(StringIO()) as output,
         ):
@@ -28,6 +29,7 @@ class CliTests(unittest.TestCase):
     def test_doctor_reports_every_unavailable_requirement(self) -> None:
         with (
             patch.object(cli, "_distribution_version", return_value="not installed"),
+            patch.object(cli.importlib, "import_module", side_effect=ModuleNotFoundError("unavailable")),
             patch.object(cli.shutil, "which", return_value=None),
             redirect_stdout(StringIO()) as output,
         ):
@@ -37,6 +39,30 @@ class CliTests(unittest.TestCase):
         self.assertIn("Poppler", text)
         self.assertIn("Ghostscript", text)
         self.assertIn("9 check(s) need attention.", text)
+
+    def test_doctor_rejects_partial_poppler_installation(self) -> None:
+        def find_executable(name: str) -> str | None:
+            return f"/tools/{name}" if name in {"pdfinfo", "gs"} else None
+
+        with (
+            patch.object(cli, "_distribution_version", return_value="1.2.3"),
+            patch.object(cli.importlib, "import_module"),
+            patch.object(cli.shutil, "which", side_effect=find_executable),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(cli.doctor(), 1)
+        self.assertIn("missing required executable(s): pdftotext, pdftoppm", output.getvalue())
+
+    def test_doctor_reports_package_import_failures(self) -> None:
+        with (
+            patch.object(cli, "_distribution_version", return_value="1.2.3"),
+            patch.object(cli.importlib, "import_module", side_effect=OSError("incompatible ABI")),
+            patch.object(cli.shutil, "which", side_effect=lambda name: f"/tools/{name}"),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(cli.doctor(), 1)
+        self.assertIn("import failed: OSError: incompatible ABI", output.getvalue())
+        self.assertIn("7 check(s) need attention.", output.getvalue())
 
     def test_distribution_version_tries_all_owning_distributions(self) -> None:
         with (
