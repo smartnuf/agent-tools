@@ -90,14 +90,8 @@ For routine operation:
 3. Run `agent-tools doctor` and investigate failures before relying on the environment.
 4. Upgrade native programs through the operating system package manager, not by replacing files in this repository.
 
-## Current TODO
+## Roadmap and current status
 
-- Publish installable release artifacts for `smartnuf/agent-tools`, including Python wheels and source distributions, release checksums, and documented upgrade paths; keep clone and source-archive installation supported.
-- Add a release workflow that builds artifacts from a clean checkout, tests them on supported platforms, and publishes only from version tags with least-privilege GitHub permissions.
-- Add a documented dependency-upgrade command and automated update PRs; keep `requirements.txt` reviewable and fully pinned.
-- Add fixture-based functional tests that extract text and render a small known PDF with both Python and native tools.
-- Exercise each bootstrap script's native-install branch directly; current CI installs native prerequisites separately before testing bootstrap.
-- Extend PATH tests to cover concurrent Windows user-PATH changes and documented restoration commands.
-- Record installed package versions and executable architecture in `doctor`, especially for Windows ARM64/x64 emulation.
-- Add Linux distribution container coverage beyond Ubuntu and explicit Intel versus Apple-silicon macOS jobs where runner availability and cost justify them.
-- Decide whether native-tool removal/repair commands are useful. Prefer disposable VMs for installation testing rather than promising perfect rollback on a workstation.
+The maintained roadmap is [`docs/plan/00-index.md`](docs/plan/00-index.md). It records the current milestone, acceptance gates, estimates, evidence, remaining effort, and recommended next work. [`docs/plan/README.md`](docs/plan/README.md) defines how humans and agents plan tasks and report progress consistently.
+
+The immediate objective is a tested GitHub prerelease that can be installed without cloning this repository, followed by a normal PyPI/`uv tool` installation path. The clone-based shared environment remains supported while that work proceeds.
