@@ -29,12 +29,15 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install poppler ghostscript -y --no-progress
-          $searchRoots = 'C:\ProgramData\chocolatey\lib', 'C:\Program Files\gs'
+          winget install --id oschwartz10612.Poppler -e --accept-package-agreements --accept-source-agreements
+          if ($LASTEXITCODE -ne 0) { throw "WinGet Poppler installation failed with exit code $LASTEXITCODE." }
+          choco install ghostscript -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Chocolatey Ghostscript installation failed with exit code $LASTEXITCODE." }
+          $searchRoots = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages", 'C:\Program Files\gs'
           $required = 'pdfinfo.exe', 'pdftotext.exe', 'pdftoppm.exe', 'gswin64c.exe'
           $toolDirectories = foreach ($name in $required) {
             $tool = Get-ChildItem $searchRoots -Filter $name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-            if (-not $tool) { throw "Chocolatey installed packages but $name was not found." }
+            if (-not $tool) { throw "A native package was installed but $name was not found." }
             $tool.DirectoryName
           }
           $machineDirectories = [Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';' | Where-Object { $_ }
