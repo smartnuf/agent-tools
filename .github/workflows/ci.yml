@@ -79,6 +79,10 @@ jobs:
         if: runner.os != 'Windows'
         run: sh tests/test_path.sh
 
+      - name: Test privileged native installation routing (Unix)
+        if: runner.os != 'Windows'
+        run: sh tests/test_install_native.sh
+
       - name: Verify installed tools (Windows)
         if: runner.os == 'Windows'
         run: bin\agent-tools.cmd doctor

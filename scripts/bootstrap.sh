@@ -27,19 +27,7 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 if [ "$INSTALL_NATIVE" -eq 1 ]; then
-  if command -v brew >/dev/null 2>&1; then
-    brew install poppler ghostscript
-  elif command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get update
-    sudo apt-get install -y poppler-utils ghostscript
-  elif command -v dnf >/dev/null 2>&1; then
-    sudo dnf install -y poppler-utils ghostscript
-  elif command -v pacman >/dev/null 2>&1; then
-    sudo pacman -S --needed poppler ghostscript
-  else
-    echo "No supported native package manager found." >&2
-    exit 1
-  fi
+  sh "$ROOT/scripts/install-native.sh"
 fi
 
 if [ ! -x "$ROOT/.venv/bin/python" ]; then
