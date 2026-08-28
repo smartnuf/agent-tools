@@ -11,22 +11,32 @@ function Add-DiscoveredCommandDirectory {
         [Parameter(Mandatory)][string[]]$SearchRoot
     )
 
-    foreach ($Root in $SearchRoot) {
+    $Candidates = foreach ($Root in $SearchRoot) {
         if (-not $Root -or -not (Test-Path -LiteralPath $Root -PathType Container)) {
             continue
         }
-        foreach ($Name in $Command) {
-            $Executable = Get-ChildItem -LiteralPath $Root -Filter $Name -File -Recurse -ErrorAction SilentlyContinue |
-                Sort-Object FullName -Descending |
-                Select-Object -First 1
-            if ($Executable) {
-                $Entries = @($env:Path -split ';' | Where-Object { $_ })
-                if ($Entries -notcontains $Executable.DirectoryName) {
-                    $env:Path = (@($Executable.DirectoryName) + $Entries) -join ';'
+        for ($CommandRank = 0; $CommandRank -lt $Command.Count; $CommandRank++) {
+            foreach ($Executable in Get-ChildItem -LiteralPath $Root -Filter $Command[$CommandRank] -File -Recurse -ErrorAction SilentlyContinue) {
+                $Version = [version]'0.0'
+                $VersionText = $Executable.Directory.Parent.Name -replace '^[^0-9]*', ''
+                [version]::TryParse($VersionText, [ref]$Version) | Out-Null
+                [pscustomobject]@{
+                    Executable = $Executable
+                    Version = $Version
+                    CommandRank = $CommandRank
                 }
-                return $Executable.FullName
             }
         }
+    }
+    $Selected = $Candidates |
+        Sort-Object @{ Expression = 'Version'; Descending = $true }, @{ Expression = 'CommandRank'; Descending = $false }, @{ Expression = { $_.Executable.FullName }; Descending = $true } |
+        Select-Object -First 1
+    if ($Selected) {
+        $Entries = @($env:Path -split ';' | Where-Object { $_ })
+        if ($Entries -notcontains $Selected.Executable.DirectoryName) {
+            $env:Path = (@($Selected.Executable.DirectoryName) + $Entries) -join ';'
+        }
+        return $Selected.Executable.FullName
     }
     return $null
 }

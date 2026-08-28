@@ -5,6 +5,7 @@ import importlib
 import importlib.metadata
 import os
 import platform
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -40,7 +41,11 @@ def _find_executable(probe: str) -> str | None:
         for candidate in Path(root, "gs").glob(f"*/bin/{probe}.exe")
         if candidate.is_file()
     )
-    return str(next(iter(sorted(candidates, reverse=True)), "")) or None
+    def version_key(candidate: Path) -> tuple[int, ...]:
+        match = re.search(r"\d+(?:\.\d+)*", candidate.parent.parent.name)
+        return tuple(map(int, match.group().split("."))) if match else (0,)
+
+    return str(max(candidates, key=version_key, default="")) or None
 
 
 def doctor() -> int:

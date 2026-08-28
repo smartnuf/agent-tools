@@ -71,6 +71,9 @@ class CliTests(unittest.TestCase):
             executable = Path(program_files, "gs", "10.06.0", "bin", "gswin64c.exe")
             executable.parent.mkdir(parents=True)
             executable.touch()
+            old_executable = Path(program_files, "gs", "9.56.1", "bin", "gswin64c.exe")
+            old_executable.parent.mkdir(parents=True)
+            old_executable.touch()
             with (
                 patch.object(cli.shutil, "which", return_value=None),
                 patch.object(cli.platform, "system", return_value="Windows"),
