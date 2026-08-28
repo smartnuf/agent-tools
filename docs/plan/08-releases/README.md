@@ -1,0 +1,95 @@
+# Release milestones and acceptance gates
+
+This file defines what “done” means. Update states and evidence here and summarize them in [`../00-index.md`](../00-index.md).
+
+## M0 — Distribution foundations
+
+Outcome: contributors and agents share one durable product decision, roadmap, and measurable work queue.
+
+| Acceptance criterion | State | Evidence |
+|---|---|---|
+| Public distribution model is decided | complete | [Decision 0001](../../decisions/0001-distribution-model.md) |
+| Milestones have estimates and observable gates | complete | this file and the [status index](../00-index.md) |
+| Agent planning and reporting protocol is documented | complete | [planning protocol](../README.md) and [root instructions](../../../AGENTS.md) |
+| Permanent distribution name is verified and selected | not-started | Record registry check and resulting decision |
+| M1 tasks are inventoried and linked | not-started | Links to issues or repository task records |
+
+Original estimate: **0.5–1 person-day**. Current remaining estimate: **0.25–0.5 person-day**.
+
+## M1 — Installable GitHub prerelease
+
+Outcome: a user can install and run a versioned prerelease artifact without cloning the repository.
+
+| Acceptance criterion | State | Required evidence |
+|---|---|---|
+| Package name, metadata, and supported versions are final | not-started | Built metadata inspection and tests |
+| Runtime and optional dependencies are correctly declared | not-started | Clean-environment import/CLI tests |
+| Packaged CLI works outside a checkout | not-started | Installed-wheel smoke test |
+| `agent-tools --version` matches package and tag | not-started | Automated assertion against tagged build |
+| Wheel and sdist build reproducibly from a clean tag | not-started | Tag-triggered workflow artifact |
+| Artifact tests pass on Windows, Linux, and macOS | not-started | Required CI matrix |
+| GitHub prerelease includes artifacts, checksums, and notes | not-started | GitHub Release link |
+| Install, pin, and uninstall documentation is verified | not-started | CI or recorded clean-host smoke test |
+
+Estimate: **4–7 person-days**.
+
+Suggested task order:
+
+1. Packaging contract and installed CLI, 1.5–3 days.
+2. Artifact isolation and metadata tests, 0.5–1 day.
+3. Tag-driven least-privilege release workflow, 1–1.5 days.
+4. Cross-platform artifact verification and fixes, 0.75–1.5 days.
+5. User documentation and prerelease exercise, 0.5–1 day.
+
+## M2 — Public PyPI release
+
+Outcome: an ordinary user can install the supported CLI with one `uv tool install` command.
+
+| Acceptance criterion | State | Required evidence |
+|---|---|---|
+| PyPI project and trusted publisher are configured | not-started | Registry/project configuration |
+| Reviewed tag publishes without a long-lived upload token | not-started | Successful publish workflow |
+| Package installs from PyPI on all supported platforms | not-started | Post-publication matrix |
+| README promotes tested install/update/remove commands | not-started | Documentation validation |
+| Stable GitHub Release and PyPI metadata agree | not-started | Version and artifact comparison |
+
+Estimate: **1–2 person-days**, excluding registry or review waiting time.
+
+## M3 — Tested update lifecycle
+
+Outcome: installation is not a one-off; supported upgrading, pinning, rollback, and removal are demonstrated behaviours.
+
+| Acceptance criterion | State | Required evidence |
+|---|---|---|
+| Fresh and repeated installation are tested | not-started | Automated lifecycle test |
+| Upgrade from the previous supported release is tested | not-started | Automated upgrade test |
+| Version pinning and rollback are tested | not-started | Automated lifecycle test |
+| Removal leaves documented user-owned state untouched | not-started | Automated or disposable-host test |
+| Native dependency failures are actionable | not-started | `doctor` tests with absent/partial tools |
+| Release procedure requires no unpublished local step | not-started | Maintainer runbook and completed release |
+
+Estimate: **2–4 person-days**.
+
+## M4 — Optional discovery channels
+
+Start only after M3 is complete and user demand justifies the maintenance burden.
+
+### M4a — WinGet
+
+- versioned manifest generated from a published release;
+- architecture, URL, and checksum validated;
+- install and upgrade tested on disposable Windows hosts;
+- community-repository submission accepted.
+
+Estimate: **2–4 person-days**, excluding external review time.
+
+### M4b — Homebrew
+
+- formula or tap generated from a published release;
+- checksum and version updates automated;
+- Intel and Apple-silicon behaviour tested where runners are available;
+- install and upgrade documentation verified.
+
+Estimate: **1.5–3 person-days**.
+
+Do not schedule MSI, macOS package, deb/rpm, standalone binary, self-updater, or bundled native-program work without a new decision record and demonstrated need.
