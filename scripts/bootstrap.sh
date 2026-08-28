@@ -38,7 +38,9 @@ if [ "$INSTALL_NATIVE" -eq 1 ]; then
   fi
 fi
 
-uv venv "$ROOT/.venv" --python 3.11
+if [ ! -x "$ROOT/.venv/bin/python" ]; then
+  uv venv "$ROOT/.venv" --python 3.11
+fi
 uv pip install --python "$ROOT/.venv/bin/python" -r "$ROOT/requirements.txt" -e "$ROOT"
 if [ "$ADD_PATH" -eq 1 ]; then
   "$ROOT/scripts/path.sh" --apply

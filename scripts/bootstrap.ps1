@@ -31,8 +31,11 @@ if ($InstallNativeTools) {
     }
 }
 
-& uv venv (Join-Path $Root '.venv') --python 3.11
-& uv pip install --python (Join-Path $Root '.venv\Scripts\python.exe') -r (Join-Path $Root 'requirements.txt') -e $Root
+$Python = Join-Path $Root '.venv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $Python)) {
+    & uv venv (Join-Path $Root '.venv') --python 3.11
+}
+& uv pip install --python $Python -r (Join-Path $Root 'requirements.txt') -e $Root
 
 if ($AddToPath) {
     & (Join-Path $PSScriptRoot 'path.ps1') -Apply
