@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 
-PACKAGE_PROBES = ("pypdf", "pdfplumber", "fitz", "PIL", "reportlab", "docx", "openpyxl")
+PACKAGE_PROBES = ("pypdf", "pdfplumber", "pymupdf", "PIL", "reportlab", "docx", "openpyxl")
 REQUIRED_EXECUTABLE_GROUPS = {
     "Poppler": ("pdfinfo", "pdftotext", "pdftoppm"),
 }

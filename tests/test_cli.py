@@ -66,14 +66,14 @@ class CliTests(unittest.TestCase):
 
     def test_distribution_version_tries_all_owning_distributions(self) -> None:
         with (
-            patch.object(cli.importlib.metadata, "packages_distributions", return_value={"fitz": ["missing", "PyMuPDF"]}),
+            patch.object(cli.importlib.metadata, "packages_distributions", return_value={"pymupdf": ["missing", "PyMuPDF"]}),
             patch.object(
                 cli.importlib.metadata,
                 "version",
                 side_effect=[cli.importlib.metadata.PackageNotFoundError, "9.9"],
             ),
         ):
-            self.assertEqual(cli._distribution_version("fitz"), "9.9")
+            self.assertEqual(cli._distribution_version("pymupdf"), "9.9")
 
 
 if __name__ == "__main__":
