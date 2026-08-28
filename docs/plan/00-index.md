@@ -34,7 +34,7 @@ These are foundations, not evidence that the current wheel is ready for public i
 
 ## Recommended next work
 
-Begin [issue #4](https://github.com/smartnuf/agent-tools/issues/4), packaging contract and distribution metadata (M, **0.75–1.25 days**), because every other M1 task depends on its product-boundary and metadata decisions.
+Begin [issue #4](https://github.com/smartnuf/agent-tools/issues/4), packaging contract and distribution metadata (L, **0.75–1.25 days**), because every other M1 task depends on its product-boundary and metadata decisions.
 
 Do not publish the existing `agent-tools-local` wheel merely because it builds.
 

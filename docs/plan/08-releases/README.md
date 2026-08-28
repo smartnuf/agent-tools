@@ -11,7 +11,7 @@ Outcome: contributors and agents share one durable product decision, roadmap, an
 | Public distribution model is decided | complete | [Decision 0001](../../decisions/0001-distribution-model.md) |
 | Milestones have estimates and observable gates | complete | this file and the [status index](../00-index.md) |
 | Agent planning and reporting protocol is documented | complete | [planning protocol](../README.md) and [root instructions](../../../AGENTS.md) |
-| Permanent distribution name is verified and selected | complete | [M0 packaging discovery](01-packaging-discovery.md) |
+| Intended distribution name is selected and current availability checked | complete | [M0 packaging discovery](01-packaging-discovery.md) |
 | M1 tasks are inventoried and linked | complete | [M0 packaging discovery](01-packaging-discovery.md#actionable-m1-work) |
 
 Original estimate: **0.5–1 person-day**. Complete; actual effort was not recorded.

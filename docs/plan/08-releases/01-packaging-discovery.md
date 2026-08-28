@@ -1,6 +1,6 @@
 # M0 packaging discovery
 
-- Date: 2026-08-29
+- Date: 2026-08-29 Europe/London (2026-08-28 UTC)
 - Branch: `plan/m0-packaging-discovery`
 - Effort class: S
 - Original estimate: 0.25–0.5 person-day
@@ -9,7 +9,7 @@
 
 Select **`smartnuf-agent-tools`** as the intended public Python distribution name. Keep **`agent-tools`** as the installed command and `agent_tools` as the import package.
 
-The official PyPI JSON endpoint returned HTTP 404 for both `smartnuf-agent-tools` and its normalized underscore spelling on 2026-08-29. The unqualified `agent-tools` distribution is already owned by an unrelated project. A 404 establishes that no public project page currently exists; it does not reserve the name or guarantee that PyPI will accept it later. Recheck during registry setup and treat the first successful trusted-publisher release as the conclusive reservation.
+The official PyPI JSON endpoint returned HTTP 404 for both `smartnuf-agent-tools` and its normalized underscore spelling on 2026-08-29 Europe/London. The unqualified `agent-tools` distribution is already owned by an unrelated project. A 404 establishes that no public project page currently exists; it does not reserve the name or guarantee that PyPI will accept it later. Recheck during registry setup and treat the first successful trusted-publisher release as the conclusive reservation.
 
 ## Current packaging boundary
 
@@ -57,4 +57,4 @@ The ranges total the M1 estimate of 4–7 person-days. Dependencies and acceptan
 
 ## Recommended next task
 
-Begin issue #4 after this discovery change is reviewed and merged. It fixes the product boundary and metadata on which the installed CLI and artifact tests depend.
+Begin issue #4 (L) after this discovery change is reviewed and merged. It fixes the product boundary and metadata on which the installed CLI and artifact tests depend.
