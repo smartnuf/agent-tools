@@ -36,11 +36,12 @@ Estimate: **4–7 person-days**.
 
 Suggested task order:
 
-1. Packaging contract and installed CLI, 1.5–2.5 days.
-2. Artifact isolation and metadata tests, 0.5–1 day.
-3. Tag-driven least-privilege release workflow, 1–1.5 days.
-4. Cross-platform artifact verification and fixes, 0.5–1 day.
-5. User documentation and prerelease exercise, 0.5–1 day.
+1. Packaging contract and metadata, 0.75–1.25 days.
+2. Checkout-independent installed CLI, 0.75–1.25 days.
+3. Artifact isolation and metadata tests, 0.5–1 day.
+4. Tag-driven least-privilege release workflow, 1–1.5 days.
+5. Cross-platform artifact verification and fixes, 0.5–1 day.
+6. User documentation and prerelease exercise, 0.5–1 day.
 
 ## M2 — Public PyPI release
 
@@ -77,19 +78,22 @@ Start only after M3 is complete and user demand justifies the maintenance burden
 
 ### M4a — WinGet
 
-- versioned manifest generated from a published release;
-- architecture, URL, and checksum validated;
-- install and upgrade tested on disposable Windows hosts;
-- community-repository submission accepted.
+| Acceptance criterion | State | Required evidence |
+|---|---|---|
+| Versioned manifest is generated from a published release | deferred | Generated manifest review |
+| Architecture, URL, and checksum are validated | deferred | Manifest validation output |
+| Install and upgrade work on disposable Windows hosts | deferred | Disposable-host test |
+| Community-repository submission is accepted | deferred | Accepted submission link |
 
 Estimate: **2–4 person-days**, excluding external review time.
 
 ### M4b — Homebrew
 
-- formula or tap generated from a published release;
-- checksum and version updates automated;
-- Intel and Apple-silicon behaviour tested where runners are available;
-- install and upgrade documentation verified.
+| Acceptance criterion | State | Required evidence |
+| Formula or tap is generated from a published release | deferred | Formula or tap review |
+| Checksum and version updates are automated | deferred | Update workflow test |
+| Intel and Apple-silicon behaviour is tested where runners are available | deferred | Platform test results |
+| Install and upgrade documentation is verified | deferred | Documentation smoke test |
 
 Estimate: **1.5–3 person-days**.
 
