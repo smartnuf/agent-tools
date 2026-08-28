@@ -18,7 +18,13 @@ if [ -f "$PROFILE" ] && grep -Fx "$LINE" "$PROFILE" >/dev/null 2>&1; then
   echo "$ROOT/bin is already configured in $PROFILE"
 else
   if [ -f "$PROFILE" ]; then
-    BACKUP="$PROFILE.agent-tools-backup-$(date -u +%Y%m%dT%H%M%SZ)"
+    BACKUP_BASE="$PROFILE.agent-tools-backup-$(date -u +%Y%m%dT%H%M%SZ)"
+    BACKUP="$BACKUP_BASE"
+    BACKUP_SUFFIX=0
+    while [ -e "$BACKUP" ]; do
+      BACKUP_SUFFIX=$((BACKUP_SUFFIX + 1))
+      BACKUP="$BACKUP_BASE-$BACKUP_SUFFIX"
+    done
     cp -p "$PROFILE" "$BACKUP"
     echo "Backed up $PROFILE to $BACKUP"
   fi
