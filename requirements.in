@@ -1,0 +1,8 @@
+# Shared document-processing packages. Project-local environments remain authoritative.
+pypdf
+pdfplumber
+PyMuPDF
+Pillow
+reportlab
+python-docx
+openpyxl

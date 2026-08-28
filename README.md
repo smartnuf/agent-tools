@@ -25,7 +25,8 @@ docs/platforms.md       platform policy and macOS testing notes
 scripts/                bootstrap, update, PATH, and validation scripts
 src/agent_tools/        reusable standard-library Python helpers
 tests/                  unit tests
-requirements.txt        shared third-party Python packages
+requirements.in         reviewed direct Python dependencies
+requirements.txt        generated, fully pinned Python environment lock
 ```
 
 ## Get the source
@@ -91,7 +92,7 @@ For routine operation:
 
 - Publish installable release artifacts for `smartnuf/agent-tools`, including Python wheels and source distributions, release checksums, and documented upgrade paths; keep clone and source-archive installation supported.
 - Add a release workflow that builds artifacts from a clean checkout, tests them on supported platforms, and publishes only from version tags with least-privilege GitHub permissions.
-- Add a generated, reviewed lock file so ordinary updates are reproducible; retain a separate explicit dependency-upgrade workflow.
+- Add a documented dependency-upgrade command and automated update PRs; keep `requirements.txt` reviewable and fully pinned.
 - Add fixture-based functional tests that extract text and render a small known PDF with both Python and native tools.
 - Exercise each bootstrap script's native-install branch directly; current CI installs native prerequisites separately before testing bootstrap.
 - Test PATH application against isolated temporary profiles, including repeated application and restoration.
