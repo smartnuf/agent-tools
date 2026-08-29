@@ -66,8 +66,10 @@ Stage the CLI:
   `agent-tools tools status [CAPABILITY]`. Keep `doctor` focused on the default
   supported product and add `doctor --all` only with explicit semantics for
   absent optional capabilities (absence is informational, not a failure).
-- Add `tools install` only after provider plans, explicit mutation approval,
-  and disposable-host tests exist.
+- Add `tools install` only after provider plans, a dedicated explicit mutation
+  flag, and disposable-host tests exist. Interactive confirmation alone does
+  not authorize system-package mutation. Report every requested and observed
+  host change, including the provider/package-manager action and outcome.
 - Add desired-state `enable`/`disable` only when user configuration has a clear
   consumer. Disabling desired state must not uninstall anything.
 - Keep provider-package uninstall out of the initial interface. If it is ever

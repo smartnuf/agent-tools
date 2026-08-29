@@ -75,7 +75,7 @@ Outcome: installation is not a one-off; supported upgrading, pinning, rollback, 
 | Removal leaves documented user-owned state untouched | not-started | Automated or disposable-host test |
 | Native dependency failures are actionable | not-started | `doctor` tests with absent/partial tools |
 | Release procedure requires no unpublished local step | not-started | Maintainer runbook and completed release |
-| Provider mutation is explicit, provenance-recorded, and shared by clone wrappers | not-started | Unit/disposable-host tests plus bootstrap wrappers delegating without duplicate package mappings |
+| Provider mutation requires a flag, reports changes, records provenance, and is shared by clone wrappers | not-started | Unit/disposable-host tests prove flag enforcement and complete change reports; bootstrap wrappers delegate without duplicate package mappings |
 | Disable/integration removal cannot uninstall shared provider packages | not-started | Safety tests covering Git for Windows and user-owned state |
 
 Estimate: **3–6 person-days**. Split provider execution, persistent state, and
