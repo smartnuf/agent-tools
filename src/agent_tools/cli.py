@@ -31,6 +31,8 @@ def _application_version() -> str:
 def _distribution_version(module: str) -> str:
     distributions = importlib.metadata.packages_distributions().get(module, [module])
     for distribution in distributions:
+        if not isinstance(distribution, str) or not distribution.strip():
+            continue
         try:
             return importlib.metadata.version(distribution)
         except importlib.metadata.PackageNotFoundError:
