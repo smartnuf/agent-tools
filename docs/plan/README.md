@@ -2,6 +2,11 @@
 
 This directory is the durable answer to “where are we, what should happen next, and how much work remains?” The canonical snapshot is [`00-index.md`](00-index.md); detailed release gates are in [`08-releases/README.md`](08-releases/README.md).
 
+This protocol owns roadmap selection, status, estimates, and progress reporting.
+Implementation, pull-request review, concurrent merge ownership, integration,
+and cleanup follow the canonical [development and review
+workflow](../development-workflow.md).
+
 ## Starting roadmap work
 
 Before changing code or automation:

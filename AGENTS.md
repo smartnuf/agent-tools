@@ -15,4 +15,5 @@ This repository contains reusable, user-level tools for coding agents and humans
 - Read `docs/plan/00-index.md` before planning roadmap work. Keep its status, effort forecast, and evidence links current in the same change that advances a milestone.
 - For non-trivial work, identify the milestone and acceptance criterion, write a task plan with estimated effort before implementation, and report completed work, validation, changed estimates, and the recommended next task afterward.
 - Mark roadmap criteria complete only with durable evidence such as a merged change, passing test, published artifact, or release. Do not infer completion from prose or issue counts.
+- Follow [`docs/development-workflow.md`](docs/development-workflow.md) for branch, pull-request, review, and merge work. Merge evidence must apply to the exact current head, concurrent autonomous streams must serialize integration through one merge owner, and pre-existing repository or user state must be preserved.
 - Respect any more-specific `AGENTS.md` in subdirectories.
