@@ -21,4 +21,4 @@
 - Current `origin/main`:
 - [ ] The base has not moved, or latest `origin/main` was incorporated and the new head was revalidated and rereviewed.
 - [ ] This stream owns merging. If not, stop merge-ready and await ownership.
-- [ ] The separate merge action will atomically require the verified head SHA.
+- [ ] The integration mechanism atomically guards both the verified head and verified base (for example, a validated merge queue group).

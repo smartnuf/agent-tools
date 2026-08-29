@@ -47,8 +47,10 @@ when `main` advances. Before that stream assumes merge ownership, it must:
 3. resolve conflicts semantically, reconciling intent and current roadmap
    truth rather than accepting either side mechanically;
 4. rerun the complete repository-defined local validation;
-5. push the new head safely, using `--force-with-lease` and never plain
-   `--force` when rebasing a published branch;
+5. push the new head safely, recording the previously verified remote branch
+   SHA and using an explicit lease such as
+   `--force-with-lease=refs/heads/<branch>:<expected-old-sha>`—never plain
+   `--force` or a lease whose expectation was silently moved by a later fetch;
 6. wait for CI and automated review of that exact new head; and
 7. repeat the fresh unresolved-thread and current-head merge gate.
 
@@ -150,7 +152,7 @@ repository-managed Python: python -m unittest discover -s tests
 git diff --check <base>...HEAD
 PowerShell parser/syntax checks for repository PowerShell files
 bash -n checks for repository POSIX shell files
-agent-tools doctor, when relevant
+repository launcher: agent-tools doctor, when relevant
 build/distribution checks, when packaging or installed behaviour may change
 ```
 
@@ -160,6 +162,10 @@ this repository after bootstrap, use `bin\agent-python.cmd` on Windows or
 `bin/agent-python` on POSIX systems. An explicitly configured source-tree test,
 such as setting `PYTHONPATH=src`, is acceptable when its environment is recorded
 with the result.
+
+Likewise, run diagnostics through `bin\agent-tools.cmd doctor` on Windows or
+`bin/agent-tools doctor` on POSIX systems. Do not assume bootstrap made the
+launcher globally discoverable, because PATH changes are deliberately opt-in.
 
 `<base>` is the recorded integration base, normally `origin/main`. The ranged
 `git diff --check` is required after commits so it examines the review wave;
@@ -274,10 +280,18 @@ ownership**.
 
 Only the merge owner may merge. Immediately before the separate merge action,
 repeat any volatile parts of the gate needed to ensure its decision is still
-current. The merge action itself must atomically require the verified head SHA,
-for example with `gh pr merge --match-head-commit <verified-sha>` or an
-equivalent expected-head condition in the hosting API. An unconditional merge
-is prohibited even after a successful preceding query.
+current. Integration must guard both the verified head and the verified base:
+
+- require the expected head, for example with
+  `gh pr merge --match-head-commit <verified-head>`; and
+- use a hosting merge queue that validates the resulting merge group, or an
+  equivalent server-side compare-and-swap/expected-base condition that refuses
+  integration if `main` no longer equals `<verified-base>`.
+
+`--match-head-commit` alone does not guard movement of the base. If the hosting
+and branch policy cannot atomically protect both inputs, halt autonomous merge
+rather than weakening the current-base validation contract. An unconditional
+merge is prohibited even after a successful preceding query.
 
 After merge:
 
