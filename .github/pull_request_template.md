@@ -12,6 +12,7 @@
 - [ ] Repository-defined local validation passed, including `git diff --check`.
 - [ ] CI and automated review completed for the exact current head.
 - [ ] Findings have evidence-backed dispositions and no actionable thread remains unresolved.
+- [ ] [Adaptation review](https://github.com/smartnuf/agent-tools/blob/main/docs/development-workflow.md#9-review-adaptations) was not triggered, or applicable impact, recovery, reusable lessons, evidence, and durable follow-ups are recorded.
 - [ ] Roadmap/evidence was reconciled when this change advances readiness.
 - [ ] Unrelated dirty state, stashes, branches, worktrees, and user configuration were preserved.
 
