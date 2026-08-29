@@ -30,11 +30,11 @@ Outcome: a user can install and run a versioned prerelease artifact without clon
 | Artifact tests pass on Windows, Linux, and macOS | complete | `release-dist` CI artifact installed and checked by every platform job |
 | Release workflow uses explicit least-privilege permissions | complete | `release.yml`: read by default; only the tag-push release job has `contents: write` |
 | GitHub prerelease includes artifacts, checksums, and notes | complete | [v0.1.1 GitHub prerelease](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.1) |
-| Install, pin, and uninstall documentation is verified | in-progress | README commands and tool-bin lookup pass in three-platform CI; rerun the revised contract against the published release |
+| Install, pin, and uninstall documentation is verified | complete | [Revised published-release smoke run 33232110219](https://github.com/smartnuf/agent-tools/actions/runs/33232110219) passed on Windows, Ubuntu, and macOS |
 
 Estimate: **4–7 person-days**.
 
-Evidence correction in progress on 2026-08-29. Actual engineering effort was not recorded. The immutable `v0.1.0` tag failed workflow validation before creating a release; the incident and recovery are preserved in `docs/releases/v0.1.0.md`. Version `v0.1.1` supplied the release artifacts. The documented install now pins Python 3.13 and locates the executable through `uv tool dir --bin`; three-platform CI exercises that contract against the built wheel, and a fresh published-release lifecycle run remains required before M1 closes.
+Complete on 2026-08-29. Actual engineering effort was not recorded. The immutable `v0.1.0` tag failed workflow validation before creating a release; the incident and recovery are preserved in `docs/releases/v0.1.0.md`. Version `v0.1.1` supplied the release artifacts. The documented install pins Python 3.13 and locates the executable through `uv tool dir --bin`; three-platform CI exercises that contract against the built wheel, and [run 33232110219](https://github.com/smartnuf/agent-tools/actions/runs/33232110219) repeated it against the published release.
 
 Suggested task order:
 
