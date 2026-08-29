@@ -113,12 +113,12 @@ jobs:
           }
 
       - name: Report Windows native-tool installation failure
-        if: runner.os == 'Windows' && steps.windows_native_tools.outcome == 'failure'
+        if: failure() && runner.os == 'Windows' && steps.windows_native_tools.outcome == 'failure'
         shell: pwsh
         run: |
           Write-Host "[$(Get-Date -Format o)] Windows native-tool installation did not complete."
           Get-Process -ErrorAction SilentlyContinue |
-            Where-Object { $_.ProcessName -match '^(choco|gs|msiexec)' } |
+            Where-Object { $_.ProcessName -match '^(AppInstallerCLI|choco|gs|msiexec|winget)' } |
             Select-Object ProcessName, Id, StartTime
           $chocolateyLog = 'C:\ProgramData\chocolatey\logs\chocolatey.log'
           if (Test-Path -LiteralPath $chocolateyLog) {
