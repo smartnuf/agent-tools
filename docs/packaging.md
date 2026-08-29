@@ -8,6 +8,8 @@ The wheel is the ordinary-user command-line application. It contains portable Py
 
 The clone workflow remains supported for contributors and advanced users who want the shared `agent-python` environment. Its bootstrap scripts install the same project editable and synchronize the complete environment from `requirements.txt`. A project-specific environment and lock remain authoritative over either installation.
 
+`agent-tools doctor` reports `mode: checkout` and the verified repository root when invoked through that source layout. A wheel installation reports `mode: installed` and the package directory instead; it never labels a `site-packages` parent as a repository. `agent-tools --version` reads installed distribution metadata and falls back to the source version only when running directly from an uninstalled checkout.
+
 ## Dependencies
 
 The seven document libraries probed by `agent-tools doctor` are direct runtime dependencies of the ordinary installation:
@@ -30,4 +32,4 @@ There are currently no optional dependency groups: omitting the document librari
 - License: MIT.
 - Maturity: alpha until the release lifecycle milestones are complete.
 
-`tests/check_wheel_metadata.py` validates the built wheel without importing from the checkout. Isolated installation and CLI execution are tracked separately by issue #6.
+`tests/check_wheel_metadata.py` validates the built wheel without importing from the checkout. `tests/check_installed_cli.py` installs without dependencies to prove the console script and diagnostics do not depend on the checkout. Full isolated dependency installation and execution are tracked separately by issue #6.
