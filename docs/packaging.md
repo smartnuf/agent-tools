@@ -33,3 +33,5 @@ There are currently no optional dependency groups: omitting the document librari
 - Maturity: alpha until the release lifecycle milestones are complete.
 
 `tests/check_distribution.py` validates wheel and source-distribution metadata, required contents, archive safety, and exclusion of machine-local state without importing from the checkout. CI installs the wheel and all declared dependencies in a clean environment, then `tests/check_installed_cli.py` requires `--version` and `doctor` to pass from an unrelated directory. Build and smoke-test state is kept outside the checkout, which must remain unchanged.
+
+CI builds one release bundle on Ubuntu, verifies its checksum manifest, and passes the same wheel to Windows, Ubuntu, and macOS jobs for isolated `uv tool` installation. This proves operating-system portability of the pure-Python artifact, but it is not native ARM64 coverage. Windows ARM64 may use x64-emulated uv-managed Python; native interpreter selection and architecture reporting are tracked in issue #14.
