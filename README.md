@@ -133,4 +133,4 @@ For routine operation:
 
 The maintained roadmap is [`docs/plan/00-index.md`](docs/plan/00-index.md). It records the current milestone, acceptance gates, estimates, evidence, remaining effort, and recommended next work. [`docs/plan/README.md`](docs/plan/README.md) defines how humans and agents plan tasks and report progress consistently.
 
-The next objective is a normal PyPI/`uv tool install smartnuf-agent-tools` installation path. The versioned GitHub prerelease and clone-based shared environment remain supported while that work proceeds.
+The next objective is the bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md), beginning with the shared catalogue and detection core in [issue #23](https://github.com/smartnuf/agent-tools/issues/23). Normal PyPI/`uv tool install smartnuf-agent-tools` publication resumes after M1.5. The versioned GitHub prerelease and clone-based shared environment remain supported while that work proceeds.

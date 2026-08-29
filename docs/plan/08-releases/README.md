@@ -49,6 +49,10 @@ Suggested task order:
 
 Outcome: an ordinary user can install the supported CLI with one `uv tool install` command.
 
+Starts after the bounded [M1.5 capability foundation](../09-capabilities/README.md)
+clarifies the installed product boundary. M1.5 does not include native package
+mutation and must not expand into the M3 lifecycle work.
+
 | Acceptance criterion | State | Required evidence |
 |---|---|---|
 | PyPI project and trusted publisher are configured | not-started | Registry/project configuration |
@@ -59,7 +63,7 @@ Outcome: an ordinary user can install the supported CLI with one `uv tool instal
 
 Estimate: **1–2 person-days**, excluding registry or review waiting time.
 
-## M3 — Tested update lifecycle
+## M3 — Tested update and capability lifecycle
 
 Outcome: installation is not a one-off; supported upgrading, pinning, rollback, and removal are demonstrated behaviours.
 
@@ -71,8 +75,11 @@ Outcome: installation is not a one-off; supported upgrading, pinning, rollback, 
 | Removal leaves documented user-owned state untouched | not-started | Automated or disposable-host test |
 | Native dependency failures are actionable | not-started | `doctor` tests with absent/partial tools |
 | Release procedure requires no unpublished local step | not-started | Maintainer runbook and completed release |
+| Provider mutation consumes an inspectable plan, requires a flag, reports changes, records provenance, and is shared by clone wrappers | not-started | Unit/disposable-host tests prove plan generation and executor consumption, installation flag enforcement, complete change reports, and persisted record contents; if provider removal is added, its separate flag and refusal rules are tested; bootstrap wrappers delegate without duplicate package mappings |
+| Desired-state and integration configuration changes are authorized, backed up, validated, reversible, preserve unrelated state, and never uninstall providers | not-started | Tests for existing configuration prove explicit authorization, recoverable backup, resulting-state validation, failure restoration, unrelated-state preservation, and no provider uninstall; integration cases cover shared/dedicated providers and Git for Windows |
 
-Estimate: **2–4 person-days**.
+Estimate: **3–6 person-days**. Split provider execution, persistent state, and
+agent integrations into separate reviewed tasks before implementation.
 
 ## M4 — Optional discovery channels
 

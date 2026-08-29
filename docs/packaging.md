@@ -6,6 +6,13 @@ The public Python distribution is `smartnuf-agent-tools`. It installs the `agent
 
 The wheel is the ordinary-user command-line application. It contains portable Python code from `src/agent_tools/`; it does not contain the repository's clone-oriented `bin/`, `scripts/`, configuration, exact environment lock, or `.venv`.
 
+[Decision 0002](decisions/0002-native-capability-provider-model.md) extends
+this boundary: native capability catalogue, discovery, and future provider
+orchestration belong in packaged Python. Clone-oriented scripts will become
+thin front ends rather than a second implementation. The first read-only
+capability slice precedes PyPI publication; native package mutation remains
+later lifecycle work.
+
 The clone workflow remains supported for contributors and advanced users who want the shared `agent-python` environment. Its bootstrap scripts install the same project editable and synchronize the complete environment from `requirements.txt`. A project-specific environment and lock remain authoritative over either installation.
 
 `agent-tools doctor` reports `mode: checkout` and the verified repository root when invoked through that source layout. A wheel installation reports `mode: installed` and the package directory instead; it never labels a `site-packages` parent as a repository. `agent-tools --version` reads installed distribution metadata and falls back to the source version only when running directly from an uninstalled checkout.
