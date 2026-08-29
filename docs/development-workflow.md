@@ -253,7 +253,37 @@ bound is reached or when successive waves reveal new architectural obligations
 rather than bounded defects. A human may deliberately authorize another wave.
 Waiting for an active current-head review is not non-convergence.
 
-### 9. Verify merge readiness
+### 9. Review adaptations
+
+Run this checkpoint when work encountered unexpected external behaviour,
+provider instability, a partial-state failure, a changed assumption or process,
+or reconciliation produced a materially different implementation. Routine
+changes with none of these conditions record the checkpoint as not triggered;
+they do not require a retrospective.
+
+Answer the applicable questions concisely in the pull request or linked durable
+record:
+
+- Could the failure or changed assumption also affect users, releases, another
+  platform, or another execution context?
+- Is execution bounded, observable, retry-safe, and idempotent? What partial
+  state remains after failure, and how can a user or operator recover safely?
+- Can a dependency or command falsely report success? Which outcome is
+  independently verified instead?
+- Is the response repository-specific or a reusable cross-project pattern?
+  Which tests, documentation, automation, or standing instructions preserve
+  the lesson?
+- Did the adaptation expose an independent defect? If valid, track it durably
+  and explain why immediate correctness does not depend on fixing it here.
+- Should the new rule apply more broadly, or must its scope remain deliberately
+  narrow?
+
+Adaptation review does not expand the current acceptance criterion. Fix
+anything required for the current change to be safe and correct; track valid
+independent defects and reusable follow-up separately rather than silently
+absorbing them or leaving them only in review discussion.
+
+### 10. Verify merge readiness
 
 After automated review reports completion, perform a fresh, read-only gate as
 a distinct operation:
@@ -277,7 +307,7 @@ tool batch: the head, base, review, or thread state may change between them.
 A non-merge-owner stops here and reports **merge-ready, awaiting merge
 ownership**.
 
-### 10. Merge and clean up
+### 11. Merge and clean up
 
 Only the merge owner may merge. Immediately before the separate merge action,
 repeat any volatile parts of the gate needed to ensure its decision is still
@@ -354,3 +384,20 @@ The policy was checked against recent repository history:
   that stream merged, governance incorporated the new `main`, remained
   unauthorized to merge, and had to stop merge-ready pending a newly assigned
   owner.
+- PRs #37 and #39 adapted to an unreliable external Windows package provider by
+  separating deterministic required CI from real provider integration, bounding
+  installer execution, preserving diagnostics, rejecting false-success exit
+  codes through executable verification, and allowing only one inspected
+  same-head retry. A failed provider may leave partial package-manager state;
+  after the provider recovers, the existing idempotent install route is safe to
+  rerun and executable verification determines the usable outcome. Those
+  controls are a reusable external-provider pattern and remain in automation
+  and standing instructions. The same review raises a separate user-bootstrap
+  question: comparable provider failure may affect an opt-in workstation
+  install, but neither PR needed to redesign bootstrap to be correct, so any
+  investigation belongs in focused follow-up rather than their acceptance
+  scope.
+- Reconciliation of PR #37 also exposed the editable-install `doctor` crash.
+  That independent defect did not invalidate the PR's one-line retry rule; it
+  was tracked as issue #40 and fixed separately by PR #42, preserving both
+  immediate scope control and a durable path to correction.
