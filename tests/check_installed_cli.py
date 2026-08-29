@@ -25,7 +25,7 @@ def wheel_version(artifact: Path) -> str:
     return version
 
 
-def run(executable: Path, expected_version: str) -> None:
+def run(executable: Path, expected_version: str, require_complete: bool) -> None:
     with TemporaryDirectory() as unrelated_directory:
         version = subprocess.run(
             [executable, "--version"],
@@ -43,19 +43,23 @@ def run(executable: Path, expected_version: str) -> None:
             capture_output=True,
             text=True,
         )
-    assert doctor.returncode in {0, 1}, doctor.stderr
+    expected_return_codes = {0} if require_complete else {0, 1}
+    assert doctor.returncode in expected_return_codes, doctor.stderr or doctor.stdout
     assert "Traceback" not in doctor.stderr
     assert "mode:       installed" in doctor.stdout
     assert "package:" in doctor.stdout
     assert "repository:" not in doctor.stdout
+    if require_complete:
+        assert "All checks passed." in doctor.stdout
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("executable", type=Path)
     parser.add_argument("artifact", type=Path)
+    parser.add_argument("--require-complete", action="store_true")
     args = parser.parse_args()
-    run(args.executable, wheel_version(args.artifact))
+    run(args.executable, wheel_version(args.artifact), args.require_complete)
     print(f"installed CLI passed: {args.executable}")
     return 0
 

@@ -14,23 +14,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  package-metadata:
+  package-artifacts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: "0.12.7"
-      - name: Build wheel
-        run: uv build --wheel --out-dir "${{ runner.temp }}/dist"
-      - name: Validate wheel metadata and contents
-        run: python tests/check_wheel_metadata.py "${{ runner.temp }}/dist"
-      - name: Install wheel without dependency or checkout assumptions
+      - name: Build wheel and source distribution
+        run: uv build --out-dir "${{ runner.temp }}/dist"
+      - name: Validate artifact metadata and contents
+        run: python tests/check_distribution.py "${{ runner.temp }}/dist"
+      - name: Install native runtime prerequisites
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils ghostscript
+      - name: Install wheel and declared dependencies
         run: |
           uv venv "${{ runner.temp }}/installed" --python 3.11
-          uv pip install --python "${{ runner.temp }}/installed/bin/python" --no-deps "${{ runner.temp }}"/dist/*.whl
-      - name: Smoke-test installed CLI from an unrelated directory
-        run: python tests/check_installed_cli.py "${{ runner.temp }}/installed/bin/agent-tools" "${{ runner.temp }}/dist"
+          uv pip install --python "${{ runner.temp }}/installed/bin/python" "${{ runner.temp }}"/dist/*.whl
+      - name: Test complete installed CLI from an unrelated directory
+        run: python tests/check_installed_cli.py "${{ runner.temp }}/installed/bin/agent-tools" "${{ runner.temp }}/dist" --require-complete
+      - name: Verify build and tests leave the checkout unchanged
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
   install-and-test:
     strategy:
