@@ -18,15 +18,71 @@ class CliTests(unittest.TestCase):
             self.assertEqual(cli.main(["doctor"]), 0)
             doctor.assert_called_once_with()
 
-    def test_doctor_passes_when_packages_and_native_tools_exist(self) -> None:
+    def test_version_prefers_installed_distribution_metadata(self) -> None:
+        with patch.object(cli.importlib.metadata, "version", return_value="2.3.4") as version:
+            self.assertEqual(cli._application_version(), "2.3.4")
+        version.assert_called_once_with("smartnuf-agent-tools")
+
+    def test_version_falls_back_for_uninstalled_source(self) -> None:
+        with patch.object(
+            cli.importlib.metadata,
+            "version",
+            side_effect=cli.importlib.metadata.PackageNotFoundError,
+        ):
+            self.assertEqual(cli._application_version(), "0.1.0")
+
+    def test_version_option_reports_application_version(self) -> None:
         with (
+            patch.object(cli, "_application_version", return_value="2.3.4"),
+            redirect_stdout(StringIO()) as output,
+            self.assertRaises(SystemExit) as raised,
+        ):
+            cli.build_parser().parse_args(["--version"])
+        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(output.getvalue(), "agent-tools 2.3.4\n")
+
+    def test_doctor_passes_when_packages_and_native_tools_exist(self) -> None:
+        checkout = Path("/checkout")
+        with (
+            patch.object(cli, "_checkout_root", return_value=checkout),
+            patch.object(cli, "_application_version", return_value="2.3.4"),
             patch.object(cli, "_distribution_version", return_value="1.2.3"),
             patch.object(cli.importlib, "import_module"),
             patch.object(cli.shutil, "which", side_effect=lambda name: f"/tools/{name}"),
             redirect_stdout(StringIO()) as output,
         ):
             self.assertEqual(cli.doctor(), 0)
-        self.assertIn("All checks passed.", output.getvalue())
+        text = output.getvalue()
+        self.assertIn("mode:       checkout", text)
+        self.assertIn(f"repository: {checkout}", text)
+        self.assertIn("agent-tools: 2.3.4", text)
+        self.assertIn("All checks passed.", text)
+
+    def test_doctor_labels_installed_package_without_repository_claim(self) -> None:
+        with (
+            patch.object(cli, "_checkout_root", return_value=None),
+            patch.object(cli, "_distribution_version", return_value="1.2.3"),
+            patch.object(cli.importlib, "import_module"),
+            patch.object(cli.shutil, "which", side_effect=lambda name: f"/tools/{name}"),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(cli.doctor(), 0)
+        text = output.getvalue()
+        self.assertIn("mode:       installed", text)
+        self.assertIn("package:", text)
+        self.assertNotIn("repository:", text)
+
+    def test_checkout_root_requires_repository_markers(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = root / "src" / "agent_tools" / "cli.py"
+            module.parent.mkdir(parents=True)
+            module.touch()
+            self.assertIsNone(cli._checkout_root(module))
+            (root / "pyproject.toml").touch()
+            (root / "bin").mkdir()
+            (root / "scripts").mkdir()
+            self.assertEqual(cli._checkout_root(module), root.resolve())
 
     def test_doctor_reports_every_unavailable_requirement(self) -> None:
         with (

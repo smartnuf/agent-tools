@@ -25,6 +25,12 @@ jobs:
         run: uv build --wheel --out-dir "${{ runner.temp }}/dist"
       - name: Validate wheel metadata and contents
         run: python tests/check_wheel_metadata.py "${{ runner.temp }}/dist"
+      - name: Install wheel without dependency or checkout assumptions
+        run: |
+          uv venv "${{ runner.temp }}/installed" --python 3.11
+          uv pip install --python "${{ runner.temp }}/installed/bin/python" --no-deps "${{ runner.temp }}"/dist/*.whl
+      - name: Smoke-test installed CLI from an unrelated directory
+        run: python tests/check_installed_cli.py "${{ runner.temp }}/installed/bin/agent-tools" "${{ runner.temp }}/dist"
 
   install-and-test:
     strategy:

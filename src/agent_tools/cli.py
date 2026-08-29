@@ -10,7 +10,9 @@ import shutil
 import sys
 from pathlib import Path
 
+from . import __version__
 
+DISTRIBUTION_NAME = "smartnuf-agent-tools"
 PACKAGE_PROBES = ("pypdf", "pdfplumber", "pymupdf", "PIL", "reportlab", "docx", "openpyxl")
 REQUIRED_EXECUTABLE_GROUPS = {
     "Poppler": ("pdfinfo", "pdftotext", "pdftoppm"),
@@ -18,6 +20,13 @@ REQUIRED_EXECUTABLE_GROUPS = {
 ALTERNATIVE_EXECUTABLE_GROUPS = {
     "Ghostscript": ("gs", "gswin64c", "gswin32c"),
 }
+
+
+def _application_version() -> str:
+    try:
+        return importlib.metadata.version(DISTRIBUTION_NAME)
+    except importlib.metadata.PackageNotFoundError:
+        return __version__
 
 
 def _distribution_version(module: str) -> str:
@@ -28,6 +37,21 @@ def _distribution_version(module: str) -> str:
         except importlib.metadata.PackageNotFoundError:
             pass
     return "not installed"
+
+
+def _checkout_root(module_path: Path | None = None) -> Path | None:
+    module_path = (module_path or Path(__file__)).resolve()
+    try:
+        candidate = module_path.parents[2]
+    except IndexError:
+        return None
+    markers = (
+        candidate / "pyproject.toml",
+        candidate / "src" / "agent_tools",
+        candidate / "bin",
+        candidate / "scripts",
+    )
+    return candidate if all(marker.exists() for marker in markers) else None
 
 
 def _find_executable(probe: str) -> str | None:
@@ -49,8 +73,14 @@ def _find_executable(probe: str) -> str | None:
 
 
 def doctor() -> int:
-    root = Path(__file__).resolve().parents[2]
-    print(f"repository: {root}")
+    checkout = _checkout_root()
+    if checkout is None:
+        print("mode:       installed")
+        print(f"package:    {Path(__file__).resolve().parent}")
+    else:
+        print("mode:       checkout")
+        print(f"repository: {checkout}")
+    print(f"agent-tools: {_application_version()}")
     print(f"platform:   {platform.platform()}")
     print(f"python:     {sys.executable} ({platform.python_version()})")
 
@@ -97,6 +127,7 @@ def doctor() -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-tools")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {_application_version()}")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("doctor", help="show Python and native-tool availability")
     return parser
