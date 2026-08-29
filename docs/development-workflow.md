@@ -281,18 +281,28 @@ ownership**.
 
 Only the merge owner may merge. Immediately before the separate merge action,
 repeat any volatile parts of the gate needed to ensure its decision is still
-current. Integration must guard both the verified head and the verified base:
+current. Integration must guard both the verified head and the verified base.
+For this repository, the supported mechanism is:
 
-- require the expected head, for example with
+- pass the exact verified head to
   `gh pr merge --match-head-commit <verified-head>`; and
-- use a hosting merge queue that validates the resulting merge group, or an
-  equivalent server-side compare-and-swap/expected-base condition that refuses
-  integration if `main` no longer equals `<verified-base>`.
+- rely on strict required status checks on `main`, which require the pull
+  request branch to be up to date and invalidate merge readiness when `main`
+  advances.
 
-`--match-head-commit` alone does not guard movement of the base. If the hosting
-and branch policy cannot atomically protect both inputs, halt autonomous merge
-rather than weakening the current-base validation contract. An unconditional
-merge is prohibited even after a successful preceding query.
+The command's head guard and strict branch protection's base-freshness guard are
+both required; `--match-head-commit` alone is insufficient. Final verification
+and merge remain separate operations, so the server-side guards must reject a
+stale decision if either input changes between them. If branch policy is absent,
+disabled, or no longer strict, halt autonomous merge rather than weakening the
+current-base validation contract. An unconditional merge is prohibited even
+after a successful preceding query.
+
+A hosting merge queue that validates the resulting merge group could replace
+this mechanism in future. Although CI accepts the `merge_group` event, GitHub
+does not currently offer merge queues to this public repository because it is
+owned by a personal account rather than an organization. Do not present a merge
+queue as available until repository ownership and settings make it observable.
 
 After merge:
 
