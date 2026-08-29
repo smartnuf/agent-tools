@@ -6,7 +6,7 @@ GitHub tags and releases are the canonical artifact history. The M1 workflow cre
 
 1. Update `src/agent_tools/__init__.py`, every version-sensitive test, and `docs/releases/v<version>.md` in a reviewed pull request.
 2. Confirm `main` is clean and all required CI checks pass after that pull request is merged.
-3. Create an annotated `v<version>` tag at the reviewed `main` commit, for example `v0.1.0`.
+3. Create an annotated `v<version>` tag at the reviewed `main` commit, for example `v1.2.3`.
 4. Push only that tag. Do not move or reuse a published version tag.
 
 The tag workflow rejects a tag whose name differs from the package version, lacks reviewed release notes, or points to a commit outside the repository's default branch. It then builds and validates one wheel and one source distribution, writes deterministic `SHA256SUMS`, creates a GitHub prerelease with the checked-in notes, and exercises install, pin, and uninstall against the published wheel on Windows, Ubuntu, and macOS.
