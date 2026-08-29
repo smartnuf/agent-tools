@@ -25,7 +25,7 @@ The trusted-publisher identity must match these values exactly:
 - Workflow: `publish-pypi.yml`
 - GitHub environment: `pypi`
 
-This pending publisher and the protected `pypi` environment were configured and verified on 2026-08-30. The environment requires approval from `smartnuf`, permits that sole maintainer to approve their own deployment, accepts only protected branches, and contains no secrets. The publisher remains pending until its first successful upload creates the PyPI project.
+This pending publisher and the protected `pypi` environment were configured and verified on 2026-08-30. The environment requires approval from `smartnuf`, permits that sole maintainer to approve their own deployment, accepts only the `main` branch and `v[0-9]*` tags, and contains no secrets. The publisher remains pending until its first successful upload creates the PyPI project.
 
 Configure the GitHub `pypi` environment with required reviewer protection so publication requires a maintainer's explicit approval. Do not add a PyPI API token, username, password, repository secret, or environment secret.
 
@@ -39,4 +39,4 @@ Download all three release assets and verify the checksums when auditing a relea
 
 If the workflow fails before creating a release, correct the cause through a pull request and create a new version rather than moving a published tag. If GitHub created an incomplete draft or prerelease, record what happened before removing it, then use a new version for the replacement. Never overwrite an artifact attached to an existing release.
 
-If trusted publication fails before PyPI accepts an upload, leave the GitHub tag and release immutable. Diagnose the exact owner, repository, workflow filename, environment, and OIDC permission against the trusted-publisher configuration. Correct workflow code through a reviewed pull request or correct the external configuration as an authenticated maintainer, then retry the failed job only when the same release artifacts and tag remain valid. If PyPI accepted any file, do not overwrite or reuse that version; record the partial publication and release a new version.
+If trusted publication fails before PyPI accepts an upload, leave the GitHub tag and release immutable. Diagnose the exact owner, repository, workflow filename, environment, and OIDC permission against the trusted-publisher configuration. If no code change is needed, retry the failed job only when the same release artifacts and tag remain valid. A rerun uses the original workflow revision; after correcting workflow code through a reviewed pull request, run the merged workflow manually from `main` with the existing stable `release_tag`. The recovery job revalidates the stable release, tag ancestry, artifact names, and checksums and still requires `pypi` environment approval. If PyPI accepted any file, do not overwrite or reuse that version; record the partial publication and release a new version.

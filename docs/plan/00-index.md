@@ -45,7 +45,7 @@ estimate remains the historical forecast; review and CI wait were excluded.
 
 ## Recommended next work
 
-Implement [issue #19](https://github.com/smartnuf/agent-tools/issues/19), configuring the PyPI project and narrowly scoped GitHub OIDC trusted publisher without a long-lived upload token (M, **0.5–1 day**). Do not publish an untagged development wheel merely because it builds.
+Prepare the first reviewed stable release and exercise the environment-approved PyPI publication, then verify the PyPI files and cross-platform installation before promoting the public install command (M, **0.75–1.5 days**). Do not publish an untagged development wheel merely because it builds.
 
 ## Known risks and assumptions
 

@@ -2,14 +2,20 @@ name: Publish stable release to PyPI
 
 on:
   release:
-    types: [published]
+    types: [published, released]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing stable GitHub release tag to publish or recover
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   publish:
-    if: github.event.release.prerelease == false && github.event.release.draft == false
+    if: github.event_name == 'workflow_dispatch' || (github.event.release.prerelease == false && github.event.release.draft == false)
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -18,18 +24,20 @@ jobs:
       contents: read
       id-token: write
     env:
-      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.event.release.tag_name }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-          ref: ${{ github.event.release.tag_name }}
-      - name: Verify reviewed release tag
+      - name: Verify reviewed stable release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          python scripts/release.py verify-tag "$RELEASE_TAG"
-          test -f "docs/releases/$RELEASE_TAG.md"
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.draft or .prerelease')" = false
+          git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
           git fetch --no-tags origin "$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
           tag_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
           git merge-base --is-ancestor "$tag_commit" "origin/$DEFAULT_BRANCH"
@@ -44,7 +52,10 @@ jobs:
             --pattern '*.tar.gz' \
             --pattern SHA256SUMS \
             --dir dist
-          python scripts/release.py verify-checksums dist/SHA256SUMS
+          (cd dist && sha256sum --check SHA256SUMS)
+          version="${RELEASE_TAG#v}"
+          test -f "dist/smartnuf_agent_tools-$version-py3-none-any.whl"
+          test -f "dist/smartnuf_agent_tools-$version.tar.gz"
           cp dist/*.whl dist/*.tar.gz publish/
           test "$(find publish -maxdepth 1 -type f -name '*.whl' | wc -l)" -eq 1
           test "$(find publish -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 1

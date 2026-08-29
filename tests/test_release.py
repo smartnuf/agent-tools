@@ -19,10 +19,15 @@ class ReleaseTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("release:\n    types: [published]", workflow)
+        self.assertIn("release:\n    types: [published, released]", workflow)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("release_tag:", workflow)
         self.assertNotIn("pull_request:", workflow)
         self.assertNotIn("push:", workflow)
         self.assertIn("github.event.release.prerelease == false", workflow)
+        self.assertIn("github.event_name == 'workflow_dispatch'", workflow)
+        self.assertIn("gh api", workflow)
+        self.assertIn("sha256sum --check SHA256SUMS", workflow)
         self.assertIn("name: pypi", workflow)
         self.assertIn("id-token: write", workflow)
         self.assertIn("contents: read", workflow)
