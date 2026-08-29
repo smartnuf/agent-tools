@@ -57,8 +57,10 @@ conflicting roadmap authority, halt and reconcile ownership and order. Do not
 race to merge.
 
 Issue #32 and its governance pull request are the first deliberate exercise of
-this rule: the concurrent M1.5 stream owns merging, while the governance stream
-may become merge-ready only.
+this rule. The M1.5 stream owned merging when governance work began and merged
+while the governance branch was being prepared. This run remains explicitly
+unauthorized to merge, and no successor merge owner has been assigned; the
+governance stream must stop merge-ready and await ownership.
 
 ## Outer loop: roadmap and acceptance criteria
 
@@ -144,13 +146,25 @@ Before every push, run all validation relevant to the complete wave. The
 repository baseline is:
 
 ```text
-python -m unittest discover -s tests
-git diff --check
+repository-managed Python: python -m unittest discover -s tests
+git diff --check <base>...HEAD
 PowerShell parser/syntax checks for repository PowerShell files
 bash -n checks for repository POSIX shell files
 agent-tools doctor, when relevant
 build/distribution checks, when packaging or installed behaviour may change
 ```
+
+Run Python commands through the environment established by repository setup;
+do not assume an unconfigured system interpreter can import checkout code. In
+this repository after bootstrap, use `bin\agent-python.cmd` on Windows or
+`bin/agent-python` on POSIX systems. An explicitly configured source-tree test,
+such as setting `PYTHONPATH=src`, is acceptable when its environment is recorded
+with the result.
+
+`<base>` is the recorded integration base, normally `origin/main`. The ranged
+`git diff --check` is required after commits so it examines the review wave;
+the no-revision form alone checks only unstaged working-tree changes and is not
+sufficient on a clean committed branch.
 
 Known unavailable optional host tools may be reported as environmental facts;
 do not conceal them or misrepresent them as passing. Documentation-only work
@@ -260,7 +274,10 @@ ownership**.
 
 Only the merge owner may merge. Immediately before the separate merge action,
 repeat any volatile parts of the gate needed to ensure its decision is still
-current.
+current. The merge action itself must atomically require the verified head SHA,
+for example with `gh pr merge --match-head-commit <verified-sha>` or an
+equivalent expected-head condition in the hosting API. An unconditional merge
+is prohibited even after a successful preceding query.
 
 After merge:
 
@@ -268,8 +285,9 @@ After merge:
 2. fetch origin;
 3. synchronize the primary local `main` with `origin/main` without discarding
    unrelated state;
-4. remove only task-owned worktrees and local branches;
-5. prune stale remote-tracking refs;
+4. remove only task-owned worktrees, branches, and remote-tracking refs;
+5. preserve and report unrelated stale refs rather than running an
+   unconditional repository-wide prune;
 6. verify local `main` equals `origin/main`; and
 7. report status and preserved stashes or dirty state.
 
@@ -307,5 +325,7 @@ The policy was checked against recent repository history:
 - PR #28 demonstrates focused correction waves, evidence-backed thread
   resolution, a halt when architectural review stopped being bounded, and a
   subsequent explicitly authorized reconciliation before current-head review.
-- Issue #32's governance PR demonstrates concurrent authoring while the M1.5
-  stream retains merge ownership; it must stop merge-ready rather than merge.
+- Issue #32's governance PR began with the M1.5 stream as merge owner. After
+  that stream merged, governance incorporated the new `main`, remained
+  unauthorized to merge, and had to stop merge-ready pending a newly assigned
+  owner.
