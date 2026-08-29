@@ -13,7 +13,7 @@
 |---|---|---|---:|---:|---:|
 | M0 | Distribution decision and executable roadmap | complete | 5/5 | 0.5–1 day | none |
 | M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
-| M1.5 | Packaged capability discovery | not-started | 1/5 | 2–3 days | 2–3 days |
+| M1.5 | Packaged capability discovery | in-progress | 1/5 | 2–3 days | 2–3 days |
 | M2 | Public PyPI release | not-started | 0/5 | 1–2 days | 1–2 days |
 | M3 | Tested update and capability lifecycle | not-started | 0/8 | 3–6 days | 3–6 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
