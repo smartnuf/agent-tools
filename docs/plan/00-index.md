@@ -12,13 +12,13 @@
 | Milestone | Outcome | State | Acceptance gates | Incremental estimate | Estimated remaining |
 |---|---|---|---:|---:|---:|
 | M0 | Distribution decision and executable roadmap | complete | 5/5 | 0.5–1 day | none |
-| M1 | Installable GitHub prerelease | in-progress | 3/9 | 4–7 days | 2–3.5 days |
+| M1 | Installable GitHub prerelease | in-progress | 4/9 | 4–7 days | 1–2.5 days |
 | M2 | Public PyPI release | not-started | 0/5 | 1–2 days | 1–2 days |
 | M3 | Tested update lifecycle | not-started | 0/6 | 2–4 days | 2–4 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **5–9.5 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
+Estimated implementation effort through M3: **4–8.5 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
 
 Gate counts are binary readiness measures. Estimates are ranges and must be revised when implementation reveals new facts.
 
@@ -34,7 +34,7 @@ These are foundations, not evidence that the current wheel is ready for public i
 
 ## Recommended next work
 
-Begin [issue #7](https://github.com/smartnuf/agent-tools/issues/7), the tag-driven least-privilege release workflow (L, **1–1.5 days**), using the validated wheel, sdist, and installed-CLI checks established by issue #6.
+Begin [issue #8](https://github.com/smartnuf/agent-tools/issues/8), cross-platform verification of the same built release artifact (M, **0.5–1 day**), using the tag workflow and artifact checks established by issues #6 and #7.
 
 Do not publish an untagged development wheel merely because it builds.
 
@@ -46,6 +46,7 @@ Do not publish an untagged development wheel merely because it builds.
 - M1 may reveal checkout assumptions in the CLI or bootstrap behaviour; its estimate includes limited contingency for that discovery.
 - Windows ARM64/x64 emulation and macOS Intel/Apple-silicon coverage may require later expansion.
 - On Windows ARM64, unconstrained Python 3.14 selected a native interpreter but `cryptography` lacked a wheel and required an unavailable MSVC linker. The initial `<3.14` Python bound makes `uv tool` choose a supported managed interpreter; Python 3.14 support must be revalidated before widening it.
+- Native-versus-emulated interpreter selection and reporting is preserved as [issue #14](https://github.com/smartnuf/agent-tools/issues/14); it is deferred unless release validation makes it an M1 blocker.
 
 ## Other backlog
 

@@ -28,7 +28,7 @@ Outcome: a user can install and run a versioned prerelease artifact without clon
 | `agent-tools --version` matches package and tag | in-progress | Installed metadata assertion complete; tag assertion remains in issue #7 |
 | Wheel and sdist build successfully from a clean tag | not-started | Tag-triggered workflow artifact |
 | Artifact tests pass on Windows, Linux, and macOS | not-started | Required CI matrix |
-| Release workflow uses explicit least-privilege permissions | not-started | Workflow permission inspection |
+| Release workflow uses explicit least-privilege permissions | complete | Tag-only `release.yml`: read by default and job-scoped `contents: write` |
 | GitHub prerelease includes artifacts, checksums, and notes | not-started | GitHub Release link |
 | Install, pin, and uninstall documentation is verified | not-started | CI or recorded clean-host smoke test |
 
