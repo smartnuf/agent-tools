@@ -34,14 +34,29 @@ requirements.txt        generated, fully pinned Python environment lock
 The current [v0.1.1 GitHub prerelease](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.1) is pinned to its reviewed release asset. Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) through a trusted package manager, then run:
 
 ```sh
-uv tool install "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl"
-agent-tools --version
+uv tool install --python 3.13 "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl"
 ```
+
+Verify it without assuming uv's executable directory is already on `PATH`.
+
+PowerShell:
+
+```powershell
+& "$(uv tool dir --bin)\agent-tools.exe" --version
+```
+
+Linux or macOS:
+
+```sh
+"$(uv tool dir --bin)/agent-tools" --version
+```
+
+To make `agent-tools` directly discoverable in future shells, `uv tool update-shell` can update the user shell configuration. That is an explicit profile change; review uv's reported change and open a new shell afterward.
 
 The versioned URL is the pin. To restore that exact release if its isolated environment is damaged:
 
 ```sh
-uv tool install --reinstall "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl"
+uv tool install --python 3.13 --reinstall "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl"
 ```
 
 To remove it:

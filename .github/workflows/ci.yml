@@ -116,8 +116,8 @@ jobs:
         run: |
           python scripts/release.py verify-checksums "$env:RUNNER_TEMP\release-dist\SHA256SUMS"
           $wheel = Get-ChildItem "$env:RUNNER_TEMP\release-dist" -Filter '*.whl' | Select-Object -ExpandProperty FullName -First 1
-          uv tool install --python 3.11 $wheel
-          python tests/check_installed_cli.py "$env:UV_TOOL_BIN_DIR\agent-tools.exe" "$env:RUNNER_TEMP\release-dist" --require-complete
+          uv tool install --python 3.13 $wheel
+          python tests/check_installed_cli.py "$(uv tool dir --bin)\agent-tools.exe" "$env:RUNNER_TEMP\release-dist" --require-complete
 
       - name: Install and test shared release wheel (Unix)
         if: runner.os != 'Windows'
@@ -127,8 +127,8 @@ jobs:
           UV_TOOL_BIN_DIR: ${{ runner.temp }}/release-bin
         run: |
           python scripts/release.py verify-checksums "$RUNNER_TEMP/release-dist/SHA256SUMS"
-          uv tool install --python 3.11 "$RUNNER_TEMP"/release-dist/*.whl
-          python tests/check_installed_cli.py "$UV_TOOL_BIN_DIR/agent-tools" "$RUNNER_TEMP/release-dist" --require-complete
+          uv tool install --python 3.13 "$RUNNER_TEMP"/release-dist/*.whl
+          python tests/check_installed_cli.py "$(uv tool dir --bin)/agent-tools" "$RUNNER_TEMP/release-dist" --require-complete
 
       - name: Bootstrap twice (Windows)
         if: runner.os == 'Windows'
