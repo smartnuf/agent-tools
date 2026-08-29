@@ -74,9 +74,14 @@ jobs:
           $wheel = "smartnuf_agent_tools-$version-py3-none-any.whl"
           $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/$wheel"
           uv tool install $url
-          & "$env:UV_TOOL_BIN_DIR\agent-tools.exe" --version | Select-String -SimpleMatch "agent-tools $version"
+          if ($LASTEXITCODE -ne 0) { throw "initial tool install failed with exit code $LASTEXITCODE" }
+          $reportedVersion = & "$env:UV_TOOL_BIN_DIR\agent-tools.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "version command failed with exit code $LASTEXITCODE" }
+          if ($reportedVersion -ne "agent-tools $version") { throw "unexpected version output: $reportedVersion" }
           uv tool install --reinstall $url
+          if ($LASTEXITCODE -ne 0) { throw "pinned tool reinstall failed with exit code $LASTEXITCODE" }
           uv tool uninstall smartnuf-agent-tools
+          if ($LASTEXITCODE -ne 0) { throw "tool uninstall failed with exit code $LASTEXITCODE" }
           if (Test-Path "$env:UV_TOOL_BIN_DIR\agent-tools.exe") { throw 'agent-tools executable remains after uninstall' }
       - name: Install, pin, and uninstall published wheel (Unix)
         if: runner.os != 'Windows'

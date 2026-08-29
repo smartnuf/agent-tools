@@ -34,7 +34,7 @@ These are foundations, not evidence that the current wheel is ready for public i
 
 ## Recommended next work
 
-Begin [issue #9](https://github.com/smartnuf/agent-tools/issues/9), document and exercise the first GitHub prerelease (M, **0.5–1 day**), using the release and cross-platform artifact evidence established by issues #7 and #8.
+Complete [issue #9](https://github.com/smartnuf/agent-tools/issues/9) by merging the reviewed notes and lifecycle smoke workflow, publishing `v0.1.0`, inspecting its assets and checks, and reconciling the M1 evidence (M, **0.5–1 day**). The documentation and automation are prepared; the tag and release do not yet exist.
 
 Do not publish an untagged development wheel merely because it builds.
 
