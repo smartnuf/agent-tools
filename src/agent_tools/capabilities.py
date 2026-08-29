@@ -50,6 +50,7 @@ class ExecutableProbe:
     name: str
     version_args: tuple[str, ...]
     locator_strategy: str = "path"
+    nonzero_version_pattern: str | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,16 @@ class ProviderState:
     executables: tuple[ExecutableState, ...]
 
     @property
+    def missing_probes(self) -> tuple[str, ...]:
+        return tuple(item.probe.name for item in self.executables if item.path is None)
+
+    @property
+    def unverified_executables(self) -> tuple[ExecutableState, ...]:
+        return tuple(
+            item for item in self.executables if item.path is not None and item.version is None
+        )
+
+    @property
     def unavailable_probes(self) -> tuple[str, ...]:
         return tuple(item.probe.name for item in self.executables if not item.verified)
 
@@ -139,9 +150,9 @@ POPPLER = CapabilitySpec(
             platforms=frozenset({"Windows", "Linux", "Darwin"}),
             execution_environments=frozenset({"host"}),
             probes=(
-                ExecutableProbe("pdfinfo", ("-v",)),
-                ExecutableProbe("pdftotext", ("-v",)),
-                ExecutableProbe("pdftoppm", ("-v",)),
+                ExecutableProbe("pdfinfo", ("-v",), nonzero_version_pattern=r"\bversion\b"),
+                ExecutableProbe("pdftotext", ("-v",), nonzero_version_pattern=r"\bversion\b"),
+                ExecutableProbe("pdftoppm", ("-v",), nonzero_version_pattern=r"\bversion\b"),
             ),
             probe_policy=ProbePolicy.ALL,
         ),
@@ -228,10 +239,16 @@ def read_executable_version(probe: ExecutableProbe, executable: str) -> str | No
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    if result.returncode != 0:
-        return None
     lines = [line.strip() for line in (result.stdout + "\n" + result.stderr).splitlines() if line.strip()]
-    return lines[0] if lines else None
+    if not lines:
+        return None
+    first_line = lines[0]
+    if result.returncode != 0 and (
+        probe.nonzero_version_pattern is None
+        or re.search(probe.nonzero_version_pattern, first_line, re.IGNORECASE) is None
+    ):
+        return None
+    return first_line
 
 
 def detect_provider(

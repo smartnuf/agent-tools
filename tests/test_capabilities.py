@@ -50,6 +50,10 @@ class CapabilityTests(unittest.TestCase):
         provider = state.providers[0]
         self.assertEqual(provider.executables[0].path, "/tools/gs")
         self.assertIsNone(provider.executables[0].version)
+        self.assertEqual(provider.missing_probes, ("gswin64c", "gswin32c"))
+        self.assertEqual(
+            tuple(item.probe.name for item in provider.unverified_executables), ("gs",)
+        )
         self.assertEqual(provider.unavailable_probes, ("gs", "gswin64c", "gswin32c"))
 
     def test_unsupported_is_distinct_from_absent_without_running_probes(self) -> None:
@@ -126,11 +130,21 @@ class CapabilityTests(unittest.TestCase):
                 )
 
     def test_version_probe_accepts_stderr_and_rejects_failures(self) -> None:
-        probe = capabilities.ExecutableProbe("pdfinfo", ("-v",))
+        probe = capabilities.ExecutableProbe(
+            "pdfinfo", ("-v",), nonzero_version_pattern=r"\bversion\b"
+        )
         success = subprocess.CompletedProcess(["pdfinfo", "-v"], 0, "", "pdfinfo 1.2.3\n")
+        nonzero_version = subprocess.CompletedProcess(
+            ["pdfinfo", "-v"], 99, "", "pdfinfo version 1.2.3\n"
+        )
         failure = subprocess.CompletedProcess(["pdfinfo", "-v"], 1, "", "failed\n")
         with patch.object(capabilities.subprocess, "run", return_value=success):
             self.assertEqual(capabilities.read_executable_version(probe, "/tools/pdfinfo"), "pdfinfo 1.2.3")
+        with patch.object(capabilities.subprocess, "run", return_value=nonzero_version):
+            self.assertEqual(
+                capabilities.read_executable_version(probe, "/tools/pdfinfo"),
+                "pdfinfo version 1.2.3",
+            )
         with patch.object(capabilities.subprocess, "run", return_value=failure):
             self.assertIsNone(capabilities.read_executable_version(probe, "/tools/pdfinfo"))
         with patch.object(
