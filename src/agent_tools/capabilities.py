@@ -51,6 +51,7 @@ class ExecutableProbe:
     version_args: tuple[str, ...]
     locator_strategy: str = "path"
     nonzero_version_pattern: str | None = None
+    architecture_args: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,8 @@ class ProviderSpec:
     installation_unit: str | None = None
     shared_package: bool = True
     removal_policy: RemovalPolicy = RemovalPolicy.PROHIBITED
+    provided_environment: str = "host"
+    satisfies_capability: bool = True
 
     def supports(self, machine: MachineState) -> bool:
         return (
@@ -93,6 +96,7 @@ class ExecutableState:
     probe: ExecutableProbe
     path: str | None
     version: str | None
+    architecture: str | None = None
 
     @property
     def verified(self) -> bool:
@@ -134,7 +138,12 @@ class CapabilityState:
     @property
     def selected_provider(self) -> ProviderState | None:
         return next(
-            (provider for provider in self.providers if provider.availability is Availability.AVAILABLE),
+            (
+                provider
+                for provider in self.providers
+                if provider.availability is Availability.AVAILABLE
+                and provider.provider.satisfies_capability
+            ),
             None,
         )
 
@@ -179,10 +188,68 @@ GHOSTSCRIPT = CapabilitySpec(
     ),
 )
 
-CAPABILITY_CATALOGUE = (POPPLER, GHOSTSCRIPT)
+BASH = CapabilitySpec(
+    capability_id="bash",
+    label="Bash",
+    required_by_default=False,
+    providers=(
+        ProviderSpec(
+            provider_id="git-bash",
+            label="Git Bash",
+            platforms=frozenset({"Windows"}),
+            execution_environments=frozenset({"host"}),
+            probes=(
+                ExecutableProbe(
+                    "bash",
+                    ("--version",),
+                    "git-bash",
+                    architecture_args=("-c", "uname -m"),
+                ),
+            ),
+            probe_policy=ProbePolicy.ANY,
+            installation_unit="Git.Git",
+            provided_environment="windows-host",
+        ),
+        ProviderSpec(
+            provider_id="system-bash",
+            label="system Bash",
+            platforms=frozenset({"Linux", "Darwin"}),
+            execution_environments=frozenset({"host"}),
+            probes=(
+                ExecutableProbe(
+                    "bash",
+                    ("--version",),
+                    "system-bash",
+                    architecture_args=("-c", "uname -m"),
+                ),
+            ),
+            probe_policy=ProbePolicy.ANY,
+        ),
+        ProviderSpec(
+            provider_id="wsl-bash",
+            label="WSL Bash",
+            platforms=frozenset({"Windows"}),
+            execution_environments=frozenset({"host"}),
+            probes=(
+                ExecutableProbe(
+                    "bash",
+                    ("-e", "bash", "--version"),
+                    "wsl-bash",
+                    architecture_args=("-e", "uname", "-m"),
+                ),
+            ),
+            probe_policy=ProbePolicy.ANY,
+            provided_environment="wsl",
+            satisfies_capability=False,
+        ),
+    ),
+)
+
+CAPABILITY_CATALOGUE = (POPPLER, GHOSTSCRIPT, BASH)
 
 ExecutableLocator = Callable[[ExecutableProbe, MachineState], str | None]
 VersionReader = Callable[[ExecutableProbe, str], str | None]
+ArchitectureReader = Callable[[ExecutableProbe, str], str | None]
 
 
 def current_machine() -> MachineState:
@@ -212,16 +279,66 @@ def _windows_ghostscript_path(probe: str) -> str | None:
     return str(max(candidates, key=version_key, default="")) or None
 
 
+def _git_bash_path() -> str | None:
+    roots: list[Path] = []
+    for command in (shutil.which("bash"), shutil.which("git")):
+        if not command:
+            continue
+        for parent in Path(command).parents:
+            if (parent / "cmd" / "git.exe").is_file():
+                roots.append(parent)
+                break
+
+    standard_roots = (
+        Path(root, "Git")
+        for root in (
+            os.environ.get("ProgramFiles"),
+            os.environ.get("ProgramFiles(x86)"),
+        )
+        if root
+    )
+    roots.extend(standard_roots)
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        roots.append(Path(local_app_data, "Programs", "Git"))
+
+    seen: set[str] = set()
+    for root in roots:
+        key = str(root).casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        for relative in (Path("bin", "bash.exe"), Path("usr", "bin", "bash.exe")):
+            candidate = root / relative
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
+def _wsl_path() -> str | None:
+    found = shutil.which("wsl.exe") or shutil.which("wsl")
+    if found:
+        return found
+    system_root = os.environ.get("SystemRoot")
+    candidate = Path(system_root, "System32", "wsl.exe") if system_root else None
+    return str(candidate) if candidate is not None and candidate.is_file() else None
+
+
 def locate_executable(probe: ExecutableProbe, machine: MachineState) -> str | None:
     """Locate an executable using one of the catalogue's closed strategies."""
 
-    found = shutil.which(probe.name)
-    if found:
-        return found
     if probe.locator_strategy == "path":
-        return None
+        return shutil.which(probe.name)
     if probe.locator_strategy == "windows-ghostscript":
-        return _windows_ghostscript_path(probe.name) if machine.platform == "Windows" else None
+        return shutil.which(probe.name) or (
+            _windows_ghostscript_path(probe.name) if machine.platform == "Windows" else None
+        )
+    if probe.locator_strategy == "git-bash":
+        return _git_bash_path() if machine.platform == "Windows" else None
+    if probe.locator_strategy == "system-bash":
+        return shutil.which(probe.name) if machine.platform in {"Linux", "Darwin"} else None
+    if probe.locator_strategy == "wsl-bash":
+        return _wsl_path() if machine.platform == "Windows" else None
     raise ValueError(f"unknown executable locator strategy: {probe.locator_strategy}")
 
 
@@ -251,12 +368,33 @@ def read_executable_version(probe: ExecutableProbe, executable: str) -> str | No
     return first_line
 
 
+def read_executable_architecture(probe: ExecutableProbe, executable: str) -> str | None:
+    """Return executable architecture when the provider exposes a safe probe."""
+
+    if probe.architecture_args is None:
+        return None
+    try:
+        result = subprocess.run(
+            [executable, *probe.architecture_args],
+            check=False,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return lines[0] if result.returncode == 0 and lines else None
+
+
 def detect_provider(
     provider: ProviderSpec,
     machine: MachineState,
     *,
     locator: ExecutableLocator | None = None,
     version_reader: VersionReader | None = None,
+    architecture_reader: ArchitectureReader | None = None,
 ) -> ProviderState:
     """Evaluate provider support and probes without consulting persistent state."""
 
@@ -265,8 +403,10 @@ def detect_provider(
 
     locator = locator or locate_executable
     version_reader = version_reader or read_executable_version
+    architecture_reader = architecture_reader or read_executable_architecture
     executables = tuple(
-        _detect_executable(probe, machine, locator, version_reader) for probe in provider.probes
+        _detect_executable(probe, machine, locator, version_reader, architecture_reader)
+        for probe in provider.probes
     )
     verified = tuple(item.verified for item in executables)
     available = all(verified) if provider.probe_policy is ProbePolicy.ALL else any(verified)
@@ -279,10 +419,21 @@ def _detect_executable(
     machine: MachineState,
     locator: ExecutableLocator,
     version_reader: VersionReader,
+    architecture_reader: ArchitectureReader,
 ) -> ExecutableState:
     path = locator(probe, machine)
     version = version_reader(probe, path) if path is not None else None
-    return ExecutableState(probe, path, version)
+    architecture = (
+        architecture_reader(probe, path) if path is not None and version is not None else None
+    )
+    if architecture is None and version is not None:
+        architecture = _architecture_from_version(version)
+    return ExecutableState(probe, path, version, architecture)
+
+
+def _architecture_from_version(version: str) -> str | None:
+    match = re.search(r"\(([^()\s]+)\)\s*$", version)
+    return match.group(1).split("-", 1)[0] if match else None
 
 
 def detect_capability(
@@ -291,17 +442,25 @@ def detect_capability(
     *,
     locator: ExecutableLocator | None = None,
     version_reader: VersionReader | None = None,
+    architecture_reader: ArchitectureReader | None = None,
 ) -> CapabilityState:
     """Return immutable detected state for one capability."""
 
     machine = machine or current_machine()
     providers = tuple(
-        detect_provider(provider, machine, locator=locator, version_reader=version_reader)
+        detect_provider(
+            provider,
+            machine,
+            locator=locator,
+            version_reader=version_reader,
+            architecture_reader=architecture_reader,
+        )
         for provider in capability.providers
     )
-    if any(provider.availability is Availability.AVAILABLE for provider in providers):
+    satisfying = tuple(provider for provider in providers if provider.provider.satisfies_capability)
+    if any(provider.availability is Availability.AVAILABLE for provider in satisfying):
         availability = Availability.AVAILABLE
-    elif any(provider.availability is Availability.ABSENT for provider in providers):
+    elif any(provider.availability is Availability.ABSENT for provider in satisfying):
         availability = Availability.ABSENT
     else:
         availability = Availability.UNSUPPORTED
@@ -314,6 +473,7 @@ def detect_capabilities(
     *,
     locator: ExecutableLocator | None = None,
     version_reader: VersionReader | None = None,
+    architecture_reader: ArchitectureReader | None = None,
 ) -> tuple[CapabilityState, ...]:
     """Return detected state for each catalogue entry in deterministic order."""
 
@@ -324,6 +484,7 @@ def detect_capabilities(
             machine,
             locator=locator,
             version_reader=version_reader,
+            architecture_reader=architecture_reader,
         )
         for capability in catalogue
     )
