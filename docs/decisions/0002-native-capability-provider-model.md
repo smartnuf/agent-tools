@@ -74,7 +74,9 @@ Stage the CLI:
   consumer. Disabling desired state must not uninstall anything.
 - Keep provider-package uninstall out of the initial interface. If it is ever
   added, name it explicitly, show collateral packages/capabilities, require a
-  separate confirmation, and refuse when provenance or safety is uncertain.
+  dedicated mutation flag in addition to separate confirmation, report every
+  requested and observed host change, and refuse when provenance or safety is
+  uncertain.
 
 ## Bash capability
 
