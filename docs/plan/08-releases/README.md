@@ -30,7 +30,7 @@ Outcome: a user can install and run a versioned prerelease artifact without clon
 | Artifact tests pass on Windows, Linux, and macOS | complete | `release-dist` CI artifact installed and checked by every platform job |
 | Release workflow uses explicit least-privilege permissions | complete | Tag-only `release.yml`: read by default and job-scoped `contents: write` |
 | GitHub prerelease includes artifacts, checksums, and notes | not-started | GitHub Release link |
-| Install, pin, and uninstall documentation is verified | not-started | CI or recorded clean-host smoke test |
+| Install, pin, and uninstall documentation is verified | in-progress | Reviewed commands and tag smoke workflow prepared; published-release run remains in issue #9 |
 
 Estimate: **4–7 person-days**.
 

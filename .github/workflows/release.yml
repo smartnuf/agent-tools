@@ -27,6 +27,7 @@ jobs:
         shell: bash
         run: |
           python scripts/release.py verify-tag "$RELEASE_TAG"
+          test -f "docs/releases/$RELEASE_TAG.md"
           git fetch --no-tags origin "$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
           tag_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
           git merge-base --is-ancestor "$tag_commit" "origin/$DEFAULT_BRANCH"
@@ -45,5 +46,52 @@ jobs:
             dist/*.whl dist/*.tar.gz dist/SHA256SUMS \
             --verify-tag \
             --prerelease \
-            --generate-notes \
+            --notes-file "docs/releases/$RELEASE_TAG.md" \
             --title "agent-tools $RELEASE_TAG"
+
+  smoke-release:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      UV_TOOL_DIR: ${{ runner.temp }}/release-tools
+      UV_TOOL_BIN_DIR: ${{ runner.temp }}/release-bin
+    steps:
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.7"
+      - name: Install, pin, and uninstall published wheel (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = $env:RELEASE_TAG.TrimStart('v')
+          $wheel = "smartnuf_agent_tools-$version-py3-none-any.whl"
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/$wheel"
+          uv tool install $url
+          if ($LASTEXITCODE -ne 0) { throw "initial tool install failed with exit code $LASTEXITCODE" }
+          $reportedVersion = & "$env:UV_TOOL_BIN_DIR\agent-tools.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "version command failed with exit code $LASTEXITCODE" }
+          if ($reportedVersion -ne "agent-tools $version") { throw "unexpected version output: $reportedVersion" }
+          uv tool install --reinstall $url
+          if ($LASTEXITCODE -ne 0) { throw "pinned tool reinstall failed with exit code $LASTEXITCODE" }
+          uv tool uninstall smartnuf-agent-tools
+          if ($LASTEXITCODE -ne 0) { throw "tool uninstall failed with exit code $LASTEXITCODE" }
+          if (Test-Path "$env:UV_TOOL_BIN_DIR\agent-tools.exe") { throw 'agent-tools executable remains after uninstall' }
+      - name: Install, pin, and uninstall published wheel (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          version="${RELEASE_TAG#v}"
+          wheel="smartnuf_agent_tools-$version-py3-none-any.whl"
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$wheel"
+          uv tool install "$url"
+          test "$("$UV_TOOL_BIN_DIR/agent-tools" --version)" = "agent-tools $version"
+          uv tool install --reinstall "$url"
+          uv tool uninstall smartnuf-agent-tools
+          test ! -e "$UV_TOOL_BIN_DIR/agent-tools"

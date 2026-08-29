@@ -16,6 +16,7 @@ import release  # noqa: E402
 class ReleaseTests(unittest.TestCase):
     def test_current_tag_matches_package_version(self) -> None:
         self.assertEqual(release.verify_tag("v0.1.0"), "v0.1.0")
+        self.assertTrue((ROOT / "docs" / "releases" / "v0.1.0.md").is_file())
 
     def test_mismatched_tag_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "does not match"):
