@@ -32,6 +32,7 @@ class CapabilityTests(unittest.TestCase):
         )
         self.assertEqual(capabilities.BASH.providers[0].provided_environment, "windows-host")
         self.assertEqual(capabilities.BASH.providers[2].provided_environment, "wsl")
+        self.assertEqual(capabilities.BASH.providers[2].label, "default WSL Bash")
         self.assertFalse(capabilities.BASH.providers[2].satisfies_capability)
 
     def test_windows_git_bash_is_preferred_and_reports_architecture(self) -> None:
@@ -216,6 +217,48 @@ class CapabilityTests(unittest.TestCase):
                     ),
                     str(bash),
                 )
+
+    def test_git_bash_locator_includes_native_program_files_for_32_bit_python(self) -> None:
+        with TemporaryDirectory() as directory:
+            native = Path(directory, "native")
+            emulated = Path(directory, "x86")
+            bash = native / "Git" / "bin" / "bash.exe"
+            bash.parent.mkdir(parents=True)
+            bash.touch()
+            probe = capabilities.BASH.providers[0].probes[0]
+            with (
+                patch.object(capabilities.shutil, "which", return_value=None),
+                patch.dict(
+                    capabilities.os.environ,
+                    {
+                        "ProgramW6432": str(native),
+                        "ProgramFiles": str(emulated),
+                        "ProgramFiles(x86)": str(emulated),
+                    },
+                    clear=True,
+                ),
+            ):
+                self.assertEqual(
+                    capabilities.locate_executable(
+                        probe, capabilities.MachineState("Windows", "x86")
+                    ),
+                    str(bash),
+                )
+
+    def test_windows_program_roots_are_ordered_and_deduplicated(self) -> None:
+        with patch.dict(
+            capabilities.os.environ,
+            {
+                "ProgramW6432": "C:/Program Files",
+                "ProgramFiles": "c:/program files",
+                "ProgramFiles(x86)": "C:/Program Files (x86)",
+            },
+            clear=True,
+        ):
+            self.assertEqual(
+                capabilities._windows_program_roots(),
+                ("C:/Program Files", "C:/Program Files (x86)"),
+            )
 
     def test_version_probe_accepts_stderr_and_rejects_failures(self) -> None:
         probe = capabilities.ExecutableProbe(

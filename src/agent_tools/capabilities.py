@@ -227,7 +227,7 @@ BASH = CapabilitySpec(
         ),
         ProviderSpec(
             provider_id="wsl-bash",
-            label="WSL Bash",
+            label="default WSL Bash",
             platforms=frozenset({"Windows"}),
             execution_environments=frozenset({"host"}),
             probes=(
@@ -264,10 +264,9 @@ def get_capability(capability_id: str) -> CapabilitySpec:
 
 
 def _windows_ghostscript_path(probe: str) -> str | None:
-    roots = filter(None, (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")))
     candidates = (
         candidate
-        for root in roots
+        for root in _windows_program_roots()
         for candidate in Path(root, "gs").glob(f"*/bin/{probe}.exe")
         if candidate.is_file()
     )
@@ -277,6 +276,18 @@ def _windows_ghostscript_path(probe: str) -> str | None:
         return tuple(map(int, match.group().split("."))) if match else (0,)
 
     return str(max(candidates, key=version_key, default="")) or None
+
+
+def _windows_program_roots() -> tuple[str, ...]:
+    roots = []
+    seen = set()
+    for variable in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
+        value = os.environ.get(variable)
+        key = value.casefold() if value else None
+        if value and key not in seen:
+            roots.append(value)
+            seen.add(key)
+    return tuple(roots)
 
 
 def _git_bash_path() -> str | None:
@@ -291,11 +302,7 @@ def _git_bash_path() -> str | None:
 
     standard_roots = (
         Path(root, "Git")
-        for root in (
-            os.environ.get("ProgramFiles"),
-            os.environ.get("ProgramFiles(x86)"),
-        )
-        if root
+        for root in _windows_program_roots()
     )
     roots.extend(standard_roots)
     local_app_data = os.environ.get("LOCALAPPDATA")
