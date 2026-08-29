@@ -254,7 +254,11 @@ class CliTests(unittest.TestCase):
 
     def test_distribution_version_tries_all_owning_distributions(self) -> None:
         with (
-            patch.object(cli.importlib.metadata, "packages_distributions", return_value={"pymupdf": ["missing", "PyMuPDF"]}),
+            patch.object(
+                cli.importlib.metadata,
+                "packages_distributions",
+                return_value={"pymupdf": [None, "", "missing", "PyMuPDF"]},
+            ),
             patch.object(
                 cli.importlib.metadata,
                 "version",
@@ -262,6 +266,28 @@ class CliTests(unittest.TestCase):
             ),
         ):
             self.assertEqual(cli._distribution_version("pymupdf"), "9.9")
+
+    def test_distribution_version_reports_invalid_or_missing_metadata(self) -> None:
+        for distributions in ([None], [], None):
+            with self.subTest(distributions=distributions):
+                mapping = {} if distributions is None else {"pypdf": distributions}
+                with (
+                    patch.object(
+                        cli.importlib.metadata,
+                        "packages_distributions",
+                        return_value=mapping,
+                    ),
+                    patch.object(
+                        cli.importlib.metadata,
+                        "version",
+                        side_effect=cli.importlib.metadata.PackageNotFoundError,
+                    ) as version,
+                ):
+                    self.assertEqual(cli._distribution_version("pypdf"), "not installed")
+                if distributions is None:
+                    version.assert_called_once_with("pypdf")
+                else:
+                    version.assert_not_called()
 
 
 if __name__ == "__main__":

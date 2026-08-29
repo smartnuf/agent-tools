@@ -120,6 +120,29 @@ jobs:
           .venv/bin/python -c "import importlib.util; assert importlib.util.find_spec('agent_tools_extraneous') is None"
           sh scripts/path.sh
 
+      - name: Exercise checkout doctor (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $output = & .\bin\agent-tools.cmd doctor 2>&1 | Out-String
+          $exitCode = $LASTEXITCODE
+          $output
+          if ($exitCode -notin 0, 1) { throw "checkout doctor failed with exit code $exitCode" }
+          if ($output -match 'Traceback') { throw 'checkout doctor emitted a traceback' }
+          exit 0
+
+      - name: Exercise checkout doctor (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set +e
+          output=$(./bin/agent-tools doctor 2>&1)
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$status" -eq 0 || test "$status" -eq 1
+          case "$output" in *Traceback*) exit 1;; esac
+
       - name: Run unit tests (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
