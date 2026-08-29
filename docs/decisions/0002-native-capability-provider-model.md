@@ -71,7 +71,12 @@ Stage the CLI:
   not authorize system-package mutation. Report every requested and observed
   host change, including the provider/package-manager action and outcome.
 - Add desired-state `enable`/`disable` only when user configuration has a clear
-  consumer. Disabling desired state must not uninstall anything.
+  consumer. Each change requires explicit authorization, preserves unrelated
+  pre-existing state, creates a recoverable backup before modifying or
+  replacing existing configuration, and validates the resulting configuration
+  before reporting success. A write or validation failure must leave the
+  previous usable state intact or restore it. Disabling desired state must not
+  uninstall anything.
 - Keep provider-package uninstall out of the initial interface. If it is ever
   added, name it explicitly, show collateral packages/capabilities, require a
   dedicated mutation flag in addition to separate confirmation, report every

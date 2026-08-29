@@ -76,7 +76,7 @@ Outcome: installation is not a one-off; supported upgrading, pinning, rollback, 
 | Native dependency failures are actionable | not-started | `doctor` tests with absent/partial tools |
 | Release procedure requires no unpublished local step | not-started | Maintainer runbook and completed release |
 | Provider mutation requires a flag, reports changes, records provenance, and is shared by clone wrappers | not-started | Unit/disposable-host tests prove install/removal flag enforcement, complete change reports, and persisted record contents; bootstrap wrappers delegate without duplicate package mappings |
-| Integration apply/remove is authorized, backed up, validated, reversible, and never uninstalls providers | not-started | Apply/remove tests preserve or restore user state and cover shared/dedicated providers and Git for Windows |
+| Desired-state and integration configuration changes are authorized, backed up, validated, reversible, preserve unrelated state, and never uninstall providers | not-started | Tests for existing configuration prove explicit authorization, recoverable backup, resulting-state validation, failure restoration, unrelated-state preservation, and no provider uninstall; integration cases cover shared/dedicated providers and Git for Windows |
 
 Estimate: **3–6 person-days**. Split provider execution, persistent state, and
 agent integrations into separate reviewed tasks before implementation.
