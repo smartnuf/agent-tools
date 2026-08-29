@@ -19,7 +19,8 @@ capabilities without a repository checkout.
 | Bash discovery distinguishes Git Bash, host system Bash, and WSL | not-started | Windows, Linux, and macOS tests with provider/path/version evidence |
 | Product metadata, platform docs, and CI reflect the catalogue boundary | not-started | Distribution metadata test and cross-platform CI |
 
-Estimate: **2–3 person-days**, excluding review and CI waiting time.
+Estimate: **2–3.25 person-days**, excluding review and CI waiting time. This is
+the sum of the three reviewable slices below.
 
 ### Scope constraints
 
