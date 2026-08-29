@@ -37,6 +37,7 @@ class ReleaseTests(unittest.TestCase):
                 f"{hashlib.sha256(b'second').hexdigest()}  second.tar.gz\n"
             )
             self.assertEqual(destination.read_text(encoding="utf-8"), expected)
+            release.verify_checksums(destination)
 
     def test_checksum_file_cannot_include_itself(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -44,6 +45,28 @@ class ReleaseTests(unittest.TestCase):
             destination.touch()
             with self.assertRaisesRegex(ValueError, "cannot checksum itself"):
                 release.write_checksums(destination, [destination])
+
+    def test_changed_artifact_fails_checksum_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            artifact = directory / "package.whl"
+            artifact.write_bytes(b"original")
+            manifest = directory / "SHA256SUMS"
+            release.write_checksums(manifest, [artifact])
+            artifact.write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                release.verify_checksums(manifest)
+
+    def test_unlisted_artifact_fails_checksum_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            artifact = directory / "package.whl"
+            artifact.write_bytes(b"original")
+            manifest = directory / "SHA256SUMS"
+            release.write_checksums(manifest, [artifact])
+            (directory / "unlisted.tar.gz").touch()
+            with self.assertRaisesRegex(ValueError, "do not match artifacts"):
+                release.verify_checksums(manifest)
 
 
 if __name__ == "__main__":
