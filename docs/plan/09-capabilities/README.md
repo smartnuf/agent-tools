@@ -17,13 +17,13 @@ of these commands begins with M2.
 |---|---|---|
 | Capability/provider boundary and safety semantics are decided | complete | [Decision 0002](../../decisions/0002-native-capability-provider-model.md) |
 | Packaged catalogue and pure detection results cover Poppler and Ghostscript | complete | [Packaged catalogue](../../../src/agent_tools/capabilities.py), [fixture-driven tests](../../../tests/test_capabilities.py), and `doctor` using the shared detection results |
-| `tools list` and `tools status [CAPABILITY]` work from an installed wheel | not-started | Isolated wheel tests from an unrelated directory |
-| Bash discovery distinguishes Git Bash, host system Bash, and WSL | not-started | Windows, Linux, and macOS tests with provider/path/version evidence |
+| `tools list` and `tools status [CAPABILITY]` work from an installed wheel | complete | [Packaged CLI](../../../src/agent_tools/cli.py) and [isolated installed-wheel checks](../../../tests/check_installed_cli.py) |
+| Bash discovery distinguishes Git Bash, host system Bash, and WSL | complete | [Provider catalogue and locators](../../../src/agent_tools/capabilities.py) plus [platform/provider fixtures](../../../tests/test_capabilities.py) with path, version, architecture, and environment evidence |
 | Product metadata, platform docs, and CI reflect the catalogue boundary | not-started | Distribution metadata test and cross-platform CI |
 
 Estimate: **2–3.25 person-days**, excluding review and CI waiting time. This is
-the sum of the three reviewable slices below. After the catalogue/detection
-slice, **1–1.75 person-days** remain for Bash discovery and artifact/metadata
+the sum of the three reviewable slices below. After Bash discovery and the
+read-only CLI slice, **0.25–0.5 person-day** remains for artifact/metadata
 reconciliation.
 
 ### Scope constraints
