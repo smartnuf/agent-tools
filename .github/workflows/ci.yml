@@ -88,11 +88,15 @@ jobs:
         run: brew install poppler ghostscript
 
       - name: Install native tools (Windows)
+        id: windows_native_tools
         if: runner.os == 'Windows'
+        timeout-minutes: 10
         shell: pwsh
         run: |
+          Write-Host "[$(Get-Date -Format o)] Installing Poppler with WinGet."
           winget install --id oschwartz10612.Poppler -e --accept-package-agreements --accept-source-agreements
           if ($LASTEXITCODE -ne 0) { throw "WinGet Poppler installation failed with exit code $LASTEXITCODE." }
+          Write-Host "[$(Get-Date -Format o)] Installing Ghostscript with Chocolatey."
           choco install ghostscript -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw "Chocolatey Ghostscript installation failed with exit code $LASTEXITCODE." }
           $searchRoots = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages", 'C:\Program Files\gs'
@@ -106,6 +110,22 @@ jobs:
           $directories = @($toolDirectories) + @($machineDirectories) | Select-Object -Unique
           foreach ($directory in $directories) {
             $directory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+      - name: Report Windows native-tool installation failure
+        if: runner.os == 'Windows' && steps.windows_native_tools.outcome == 'failure'
+        shell: pwsh
+        run: |
+          Write-Host "[$(Get-Date -Format o)] Windows native-tool installation did not complete."
+          Get-Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProcessName -match '^(choco|gs|msiexec)' } |
+            Select-Object ProcessName, Id, StartTime
+          $chocolateyLog = 'C:\ProgramData\chocolatey\logs\chocolatey.log'
+          if (Test-Path -LiteralPath $chocolateyLog) {
+            Write-Host 'Last 200 lines of the Chocolatey log:'
+            Get-Content -LiteralPath $chocolateyLog -Tail 200
+          } else {
+            Write-Warning "Chocolatey log not found at $chocolateyLog."
           }
 
       - name: Install and test shared release wheel (Windows)
