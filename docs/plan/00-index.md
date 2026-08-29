@@ -41,7 +41,7 @@ Do not publish an untagged development wheel merely because it builds.
 ## Known risks and assumptions
 
 - `smartnuf-agent-tools` returned no existing PyPI project on 2026-08-29, but the name is not reserved until publication and must be rechecked.
-- The wheel and sdist pass artifact checks, and the wheel plus declared dependencies pass isolated installation; cross-platform consumption of the same artifact remains in issue #8.
+- The wheel and sdist pass artifact checks, and the same wheel plus declared dependencies pass isolated installation on the Windows, Ubuntu, and macOS CI runners; a published prerelease remains to be exercised in issue #9.
 - Repository wrappers and the shared `.venv` are not part of the wheel contract.
 - M1 may reveal checkout assumptions in the CLI or bootstrap behaviour; its estimate includes limited contingency for that discovery.
 - Windows ARM64/x64 emulation and macOS Intel/Apple-silicon coverage may require later expansion.
