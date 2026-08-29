@@ -1,6 +1,6 @@
 # Agent Tools
 
-A user-level, agent-neutral home for reusable Python helpers, command wrappers, and native document-tool setup. The repository is intended to live at `~/.agent-tools` and to be usable by Codex, Claude Code, terminal users, and other local agents.
+A user-level, agent-neutral home for workstation capability discovery, reusable Python and document helpers, command wrappers, and native-tool setup. The repository is intended to live at `~/.agent-tools` and to be usable by Codex, Claude Code, terminal users, and other local agents.
 
 The checked-in repository contains source and recipes. Machine-local state stays untracked:
 
@@ -15,6 +15,7 @@ The checked-in repository contains source and recipes. Machine-local state stays
 - **Debian/Ubuntu:** use `apt`; Fedora/RHEL use `dnf`; Arch uses `pacman`.
 - **macOS:** use Homebrew. Test scripts on GitHub-hosted macOS runners until physical Mac hardware is available.
 - **Poppler and Ghostscript:** install through the native package manager. Do not copy opaque executables into this repository.
+- **Capability discovery:** keep detection read-only. Git Bash is the preferred Windows-hosted Bash provider; the default WSL distribution is reported as a separate environment.
 
 ## Layout
 
@@ -66,6 +67,25 @@ uv tool uninstall smartnuf-agent-tools
 ```
 
 Poppler and Ghostscript are not bundled. Install them through the operating-system package manager before expecting `agent-tools doctor` to pass completely. See the [v0.1.1 release notes](docs/releases/v0.1.1.md) for current limitations.
+
+## Capability discovery in reviewed source
+
+The reviewed M1.5 source build adds an immutable native-capability catalogue and
+these read-only commands:
+
+```sh
+agent-tools tools list
+agent-tools tools status
+agent-tools tools status bash
+```
+
+`tools status bash` verifies the provider, executable path, version, execution
+environment, and executable architecture where observable. On Windows it
+discovers Git Bash outside the normal process `PATH`; the default WSL
+distribution is reported separately and never silently treated as
+Windows-hosted Bash. These commands do not install software, alter `PATH`, or
+configure an agent. The published v0.1.1 prerelease predates M1.5; public
+availability of these commands begins with M2.
 
 ## Get the source
 
@@ -133,4 +153,4 @@ For routine operation:
 
 The maintained roadmap is [`docs/plan/00-index.md`](docs/plan/00-index.md). It records the current milestone, acceptance gates, estimates, evidence, remaining effort, and recommended next work. [`docs/plan/README.md`](docs/plan/README.md) defines how humans and agents plan tasks and report progress consistently.
 
-The next objective is the bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md), beginning with the shared catalogue and detection core in [issue #23](https://github.com/smartnuf/agent-tools/issues/23). Normal PyPI/`uv tool install smartnuf-agent-tools` publication resumes after M1.5. The versioned GitHub prerelease and clone-based shared environment remain supported while that work proceeds.
+The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md) is complete. The next objective is [issue #19](https://github.com/smartnuf/agent-tools/issues/19), the first M2 trusted-publishing slice. The versioned GitHub prerelease and clone-based shared environment remain supported until a reviewed M2 release makes the M1.5 commands public.

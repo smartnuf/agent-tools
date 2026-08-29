@@ -12,6 +12,23 @@
 
 On Windows ARM64, a package may currently install an x64 build and run through Windows emulation. `agent-tools doctor` reports the executable actually found; architecture-sensitive work should be tested explicitly.
 
+## Read-only capability discovery
+
+The reviewed M1.5 package build supports `agent-tools tools list` and
+`agent-tools tools status [CAPABILITY]` without changing the host. Bash
+discovery behaves as follows:
+
+| Platform | Host provider | Separate environment |
+|---|---|---|
+| Windows | Git Bash, discovered from Git for Windows even when Bash is outside process `PATH` | Bash in the default WSL distribution is reported separately and does not satisfy Windows-hosted Bash |
+| Linux | System Bash on `PATH` | not applicable |
+| macOS | System Bash on `PATH` | not applicable |
+
+Status output includes the verified executable path and version, the execution
+environment, and architecture where the executable exposes it. Discovery does
+not install Git, Bash, or WSL; update `PATH`; or configure Codex, Claude Code,
+or another agent.
+
 ## macOS without owning a Mac
 
 Docker is not a macOS emulator: Docker Desktop runs Linux containers in a Linux virtual machine. A container therefore cannot validate macOS package management, launch services, filesystem behavior, or Apple-specific binaries.
