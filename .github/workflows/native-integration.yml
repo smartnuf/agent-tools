@@ -1,0 +1,96 @@
+name: Native integration
+
+on:
+  pull_request:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  select-native-integration:
+    runs-on: ubuntu-latest
+    outputs:
+      run-native: ${{ steps.select.outputs.run-native }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Select native integration
+        id: select
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if test "$EVENT_NAME" = pull_request; then
+            selected="$(python scripts/select_native_integration.py --base "$BASE_SHA" --head "$HEAD_SHA")"
+          else
+            selected=true
+          fi
+          echo "run-native=$selected" | tee -a "$GITHUB_OUTPUT"
+          echo "Native integration selected: $selected"
+
+  build-native-test-artifact:
+    needs: select-native-integration
+    if: needs.select-native-integration.outputs.run-native == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.7"
+      - run: uv build --out-dir "${{ runner.temp }}/dist"
+      - run: python tests/check_distribution.py "${{ runner.temp }}/dist"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-test-dist
+          path: ${{ runner.temp }}/dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  native-install-and-test:
+    needs: build-native-test-artifact
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.7"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: native-test-dist
+          path: ${{ runner.temp }}/native-test-dist
+      - name: Install native tools through external providers
+        timeout-minutes: 10
+        uses: ./.github/actions/install-native
+      - name: Install and test wheel (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          UV_TOOL_DIR: ${{ runner.temp }}\native-tools
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}\native-bin
+        run: |
+          $wheel = Get-ChildItem "$env:RUNNER_TEMP\native-test-dist" -Filter '*.whl' | Select-Object -ExpandProperty FullName -First 1
+          uv tool install --python 3.13 $wheel
+          python tests/check_installed_cli.py "$(uv tool dir --bin)\agent-tools.exe" "$env:RUNNER_TEMP\native-test-dist" --native-tools require
+      - name: Install and test wheel (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          UV_TOOL_DIR: ${{ runner.temp }}/native-tools
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}/native-bin
+        run: |
+          uv tool install --python 3.13 "$RUNNER_TEMP"/native-test-dist/*.whl
+          python tests/check_installed_cli.py "$(uv tool dir --bin)/agent-tools" "$RUNNER_TEMP/native-test-dist" --native-tools require

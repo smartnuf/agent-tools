@@ -26,7 +26,7 @@ def wheel_version(artifact: Path) -> str:
     return version
 
 
-def run(executable: Path, expected_version: str, require_complete: bool) -> None:
+def run(executable: Path, expected_version: str, require_native: bool) -> None:
     with TemporaryDirectory() as unrelated_directory:
         version = subprocess.run(
             [executable, "--version"],
@@ -58,13 +58,18 @@ def run(executable: Path, expected_version: str, require_complete: bool) -> None
             capture_output=True,
             text=True,
         )
-    expected_return_codes = {0} if require_complete else {0, 1}
+    expected_return_codes = {0} if require_native else {0, 1}
     assert doctor.returncode in expected_return_codes, doctor.stderr or doctor.stdout
     assert "Traceback" not in doctor.stderr
     assert "mode:       installed" in doctor.stdout
     assert "package:" in doctor.stdout
     assert "repository:" not in doctor.stdout
-    if require_complete:
+    python_section = doctor.stdout.split("\nPython packages:\n", 1)[1].split(
+        "\nNative tools:\n", 1
+    )[0]
+    assert "not installed" not in python_section
+    assert "import failed" not in python_section
+    if require_native:
         assert "All checks passed." in doctor.stdout
     assert "bash" in tools_list.stdout
     assert "git-bash, system-bash, wsl-bash" in tools_list.stdout
@@ -78,9 +83,14 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("executable", type=Path)
     parser.add_argument("artifact", type=Path)
-    parser.add_argument("--require-complete", action="store_true")
+    parser.add_argument(
+        "--native-tools",
+        choices=("allow-missing", "require"),
+        default="allow-missing",
+        help="whether Poppler and Ghostscript must be available",
+    )
     args = parser.parse_args()
-    run(args.executable, wheel_version(args.artifact), args.require_complete)
+    run(args.executable, wheel_version(args.artifact), args.native_tools == "require")
     print(f"installed CLI passed: {args.executable}")
     return 0
 
