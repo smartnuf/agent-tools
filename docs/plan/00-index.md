@@ -1,8 +1,8 @@
 # Plan status
 
 - Last reconciled: 2026-08-29
-- Current milestone: M2 — public PyPI release
-- Current state: not-started
+- Current milestone: M1 — installable GitHub prerelease
+- Current state: evidence correction in progress
 - Current user installation: versioned GitHub prerelease asset, repository clone, or source archive
 - Target user installation: `uv tool install smartnuf-agent-tools`
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
@@ -12,7 +12,7 @@
 | Milestone | Outcome | State | Acceptance gates | Incremental estimate | Estimated remaining |
 |---|---|---|---:|---:|---:|
 | M0 | Distribution decision and executable roadmap | complete | 5/5 | 0.5–1 day | none |
-| M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
+| M1 | Installable GitHub prerelease | in-progress | 8/9 | 4–7 days | less than 0.5 day |
 | M2 | Public PyPI release | not-started | 0/5 | 1–2 days | 1–2 days |
 | M3 | Tested update lifecycle | not-started | 0/6 | 2–4 days | 2–4 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
@@ -32,11 +32,11 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
 - [v0.1.1](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.1) is an audited GitHub prerelease with a wheel, source distribution, checksums, and reviewed notes.
 - [Release run 33231066203](https://github.com/smartnuf/agent-tools/actions/runs/33231066203) installed, pinned, version-checked, and uninstalled the public wheel on Windows, Ubuntu, and macOS.
 
-M1 is complete. Its factual record is frozen except for corrections; subsequent release work belongs to M2.
+M1 awaits a fresh three-platform run of the revised published-release smoke contract. Its release artifact remains valid; only the evidence for the PATH-independent, Python-3.13-pinned user command is outstanding.
 
 ## Recommended next work
 
-Begin [issue #19](https://github.com/smartnuf/agent-tools/issues/19), configure the PyPI project and trusted publisher without a long-lived upload token (M, **0.5–1 day**). Recheck name availability immediately before registry configuration.
+Run the manually dispatched published-release smoke workflow against `v0.1.1`, record its result, and close M1. Then begin [issue #19](https://github.com/smartnuf/agent-tools/issues/19), configuring the PyPI project and trusted publisher without a long-lived upload token (M, **0.5–1 day**).
 
 Do not publish an untagged development wheel merely because it builds.
 

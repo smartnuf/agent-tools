@@ -4,12 +4,19 @@ on:
   push:
     tags:
       - "v[0-9]*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub release tag to smoke-test
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   release:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -51,6 +58,7 @@ jobs:
 
   smoke-release:
     needs: release
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.release.result == 'success')
     strategy:
       fail-fast: false
       matrix:
@@ -59,7 +67,7 @@ jobs:
     permissions:
       contents: read
     env:
-      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
     steps:
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
