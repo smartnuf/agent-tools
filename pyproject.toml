@@ -3,15 +3,46 @@ requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agent-tools-local"
-version = "0.1.0"
-description = "User-level reusable helpers for local coding agents"
+name = "smartnuf-agent-tools"
+dynamic = ["version"]
+description = "Reusable document-processing tools and diagnostics for coding agents and humans"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
+authors = [
+    { name = "smartnuf contributors" },
+]
+keywords = ["agents", "document-processing", "pdf", "developer-tools"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "pypdf>=6.16,<7",
+    "pdfplumber>=0.11,<0.12",
+    "PyMuPDF>=1.28,<2",
+    "Pillow>=12.3,<13",
+    "reportlab>=5,<6",
+    "python-docx>=1.2,<2",
+    "openpyxl>=3.1,<4",
+]
 
 [project.urls]
+Homepage = "https://github.com/smartnuf/agent-tools"
 Repository = "https://github.com/smartnuf/agent-tools"
 Issues = "https://github.com/smartnuf/agent-tools/issues"
 
@@ -20,3 +51,6 @@ agent-tools = "agent_tools.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_tools"]
+
+[tool.hatch.version]
+path = "src/agent_tools/__init__.py"

@@ -2,7 +2,7 @@
 
 - Last reconciled: 2026-08-29
 - Current milestone: M1 — installable GitHub prerelease
-- Current state: not-started
+- Current state: in-progress
 - Current user installation: repository clone or source archive
 - Target user installation: `uv tool install <distribution-name>`
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
@@ -12,13 +12,13 @@
 | Milestone | Outcome | State | Acceptance gates | Incremental estimate | Estimated remaining |
 |---|---|---|---:|---:|---:|
 | M0 | Distribution decision and executable roadmap | complete | 5/5 | 0.5–1 day | none |
-| M1 | Installable GitHub prerelease | not-started | 0/9 | 4–7 days | 4–7 days |
+| M1 | Installable GitHub prerelease | in-progress | 1/9 | 4–7 days | 3.25–5.75 days |
 | M2 | Public PyPI release | not-started | 0/5 | 1–2 days | 1–2 days |
 | M3 | Tested update lifecycle | not-started | 0/6 | 2–4 days | 2–4 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **7–13 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
+Estimated implementation effort through M3: **6.25–11.75 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
 
 Gate counts are binary readiness measures. Estimates are ranges and must be revised when implementation reveals new facts.
 
@@ -34,14 +34,14 @@ These are foundations, not evidence that the current wheel is ready for public i
 
 ## Recommended next work
 
-Begin [issue #4](https://github.com/smartnuf/agent-tools/issues/4), packaging contract and distribution metadata (L, **0.75–1.25 days**), because every other M1 task depends on its product-boundary and metadata decisions.
+Begin [issue #5](https://github.com/smartnuf/agent-tools/issues/5), checkout-independent installed CLI (L, **0.75–1.25 days**), using the package name, version source, dependency contract, and artifact metadata established by issue #4.
 
 Do not publish the existing `agent-tools-local` wheel merely because it builds.
 
 ## Known risks and assumptions
 
 - `smartnuf-agent-tools` returned no existing PyPI project on 2026-08-29, but the name is not reserved until publication and must be rechecked.
-- The current wheel declares no runtime dependencies and contains only `src/agent_tools`.
+- The wheel declares the supported document libraries as runtime dependencies and contains only `src/agent_tools`; isolated installation remains to be proven by issue #6.
 - Repository wrappers and the shared `.venv` are not part of the wheel contract.
 - M1 may reveal checkout assumptions in the CLI or bootstrap behaviour; its estimate includes limited contingency for that discovery.
 - Windows ARM64/x64 emulation and macOS Intel/Apple-silicon coverage may require later expansion.
