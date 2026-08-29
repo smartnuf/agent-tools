@@ -12,13 +12,13 @@
 | Milestone | Outcome | State | Acceptance gates | Incremental estimate | Estimated remaining |
 |---|---|---|---:|---:|---:|
 | M0 | Distribution decision and executable roadmap | complete | 5/5 | 0.5–1 day | none |
-| M1 | Installable GitHub prerelease | in-progress | 4/9 | 4–7 days | 1–2.5 days |
+| M1 | Installable GitHub prerelease | in-progress | 5/9 | 4–7 days | 0.5–1 day |
 | M2 | Public PyPI release | not-started | 0/5 | 1–2 days | 1–2 days |
 | M3 | Tested update lifecycle | not-started | 0/6 | 2–4 days | 2–4 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **4–8.5 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
+Estimated implementation effort through M3: **3.5–7 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
 
 Gate counts are binary readiness measures. Estimates are ranges and must be revised when implementation reveals new facts.
 
@@ -34,7 +34,7 @@ These are foundations, not evidence that the current wheel is ready for public i
 
 ## Recommended next work
 
-Begin [issue #8](https://github.com/smartnuf/agent-tools/issues/8), cross-platform verification of the same built release artifact (M, **0.5–1 day**), using the tag workflow and artifact checks established by issues #6 and #7.
+Begin [issue #9](https://github.com/smartnuf/agent-tools/issues/9), document and exercise the first GitHub prerelease (M, **0.5–1 day**), using the release and cross-platform artifact evidence established by issues #7 and #8.
 
 Do not publish an untagged development wheel merely because it builds.
 
