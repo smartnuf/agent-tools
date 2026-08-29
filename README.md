@@ -29,9 +29,32 @@ requirements.in         reviewed direct Python dependencies
 requirements.txt        generated, fully pinned Python environment lock
 ```
 
+## Packaged prerelease (pending)
+
+The command below becomes supported only after the [v0.1.0 GitHub prerelease](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.0) exists and its release checks pass. Until then, use the clone or source-archive instructions below. Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) through a trusted package manager, then run:
+
+```sh
+uv tool install "https://github.com/smartnuf/agent-tools/releases/download/v0.1.0/smartnuf_agent_tools-0.1.0-py3-none-any.whl"
+agent-tools --version
+```
+
+The versioned URL is the pin. To restore that exact release if its isolated environment is damaged:
+
+```sh
+uv tool install --reinstall "https://github.com/smartnuf/agent-tools/releases/download/v0.1.0/smartnuf_agent_tools-0.1.0-py3-none-any.whl"
+```
+
+To remove it:
+
+```sh
+uv tool uninstall smartnuf-agent-tools
+```
+
+Poppler and Ghostscript are not bundled. Install them through the operating-system package manager before expecting `agent-tools doctor` to pass completely. See the [v0.1.0 release notes](docs/releases/v0.1.0.md) for current limitations.
+
 ## Get the source
 
-Until packaged releases are available, clone the repository into the conventional user-level location:
+For the shared `agent-python` development environment and repository automation, clone into the conventional user-level location:
 
 ```sh
 git clone https://github.com/smartnuf/agent-tools.git "$HOME/.agent-tools"
@@ -95,4 +118,4 @@ For routine operation:
 
 The maintained roadmap is [`docs/plan/00-index.md`](docs/plan/00-index.md). It records the current milestone, acceptance gates, estimates, evidence, remaining effort, and recommended next work. [`docs/plan/README.md`](docs/plan/README.md) defines how humans and agents plan tasks and report progress consistently.
 
-The immediate objective is a tested GitHub prerelease that can be installed without cloning this repository, followed by a normal PyPI/`uv tool` installation path. The clone-based shared environment remains supported while that work proceeds.
+The immediate objective is to exercise the first GitHub prerelease, followed by a normal PyPI/`uv tool` installation path. The clone-based shared environment remains supported while that work proceeds.
