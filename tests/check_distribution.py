@@ -24,6 +24,14 @@ EXPECTED_URLS = {
     "Repository, https://github.com/smartnuf/agent-tools",
     "Issues, https://github.com/smartnuf/agent-tools/issues",
 }
+EXPECTED_SUMMARY = "Agent workstation capability discovery, diagnostics, and reusable document tools"
+EXPECTED_KEYWORDS = {
+    "agents",
+    "capability-discovery",
+    "developer-tools",
+    "document-processing",
+    "pdf",
+}
 FORBIDDEN_PARTS = {".git", ".venv", ".tools", ".cache", ".backups", "__pycache__"}
 
 
@@ -37,6 +45,8 @@ def _one_match(names: list[str], suffix: str) -> str:
 def _check_metadata(metadata: Message) -> str:
     assert metadata["Name"] == "smartnuf-agent-tools"
     assert metadata["Version"] == "0.1.1"
+    assert metadata["Summary"] == EXPECTED_SUMMARY
+    assert {keyword.strip() for keyword in metadata["Keywords"].split(",")} == EXPECTED_KEYWORDS
     python_constraints = {
         constraint.strip()
         for constraint in metadata["Requires-Python"].split(",")

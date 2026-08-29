@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "smartnuf-agent-tools"
 dynamic = ["version"]
-description = "Reusable document-processing tools and diagnostics for coding agents and humans"
+description = "Agent workstation capability discovery, diagnostics, and reusable document tools"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -13,7 +13,7 @@ requires-python = ">=3.11,<3.14"
 authors = [
     { name = "smartnuf contributors" },
 ]
-keywords = ["agents", "document-processing", "pdf", "developer-tools"]
+keywords = ["agents", "capability-discovery", "developer-tools", "document-processing", "pdf"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",

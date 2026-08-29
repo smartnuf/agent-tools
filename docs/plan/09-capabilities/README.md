@@ -19,12 +19,10 @@ of these commands begins with M2.
 | Packaged catalogue and pure detection results cover Poppler and Ghostscript | complete | [Packaged catalogue](../../../src/agent_tools/capabilities.py), [fixture-driven tests](../../../tests/test_capabilities.py), and `doctor` using the shared detection results |
 | `tools list` and `tools status [CAPABILITY]` work from an installed wheel | complete | [Packaged CLI](../../../src/agent_tools/cli.py) and [isolated installed-wheel checks](../../../tests/check_installed_cli.py) |
 | Bash discovery distinguishes Git Bash, host system Bash, and WSL | complete | [Provider catalogue and locators](../../../src/agent_tools/capabilities.py) plus [platform/provider fixtures](../../../tests/test_capabilities.py) with path, version, architecture, and environment evidence |
-| Product metadata, platform docs, and CI reflect the catalogue boundary | not-started | Distribution metadata test and cross-platform CI |
+| Product metadata, platform docs, and CI reflect the catalogue boundary | complete | [Distribution metadata checks](../../../tests/check_distribution.py), [platform guidance](../../platforms.md), and one transferred wheel exercised by [installed-CLI checks](../../../tests/check_installed_cli.py) on Windows, Ubuntu, and macOS CI |
 
-Estimate: **2–3.25 person-days**, excluding review and CI waiting time. This is
-the sum of the three reviewable slices below. After Bash discovery and the
-read-only CLI slice, **0.25–0.5 person-day** remains for artifact/metadata
-reconciliation.
+Estimate: **2–3.25 person-days**, excluding review and CI waiting time. Complete
+on 2026-08-29; actual engineering effort was not recorded.
 
 ### Scope constraints
 
