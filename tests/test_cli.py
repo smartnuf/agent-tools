@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from unittest.mock import patch
 
@@ -17,6 +17,14 @@ class CliTests(unittest.TestCase):
         with patch.object(cli, "doctor", return_value=0) as doctor:
             self.assertEqual(cli.main(["doctor"]), 0)
             doctor.assert_called_once_with()
+
+    def test_tools_commands_dispatch(self) -> None:
+        with patch.object(cli, "tools_list", return_value=0) as tools_list:
+            self.assertEqual(cli.main(["tools", "list"]), 0)
+        tools_list.assert_called_once_with()
+        with patch.object(cli, "tools_status", return_value=1) as tools_status:
+            self.assertEqual(cli.main(["tools", "status", "bash"]), 1)
+        tools_status.assert_called_once_with("bash")
 
     def test_version_prefers_installed_distribution_metadata(self) -> None:
         with patch.object(cli.importlib.metadata, "version", return_value="2.3.4") as version:
@@ -145,6 +153,104 @@ class CliTests(unittest.TestCase):
             self.assertEqual(cli.doctor(), 1)
         self.assertIn("import failed: OSError: incompatible ABI", output.getvalue())
         self.assertIn("7 check(s) need attention.", output.getvalue())
+
+    def test_doctor_does_not_probe_optional_bash(self) -> None:
+        def locate(
+            probe: capabilities.ExecutableProbe, machine: capabilities.MachineState
+        ) -> str | None:
+            self.assertNotIn(probe.locator_strategy, {"git-bash", "system-bash", "wsl-bash"})
+            return f"/tools/{probe.name}"
+
+        with (
+            patch.object(cli, "_distribution_version", return_value="1.2.3"),
+            patch.object(cli.importlib, "import_module"),
+            patch.object(capabilities, "locate_executable", side_effect=locate),
+            patch.object(capabilities, "read_executable_version", return_value="1.2.3"),
+            redirect_stdout(StringIO()),
+        ):
+            self.assertEqual(cli.doctor(), 0)
+
+    def test_tools_list_is_catalogue_only(self) -> None:
+        with (
+            patch.object(capabilities, "locate_executable", side_effect=AssertionError),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(cli.tools_list(), 0)
+        text = output.getvalue()
+        self.assertIn("poppler", text)
+        self.assertIn("ghostscript", text)
+        self.assertIn("bash", text)
+        self.assertIn("git-bash, system-bash, wsl-bash", text)
+
+    def test_tools_status_reports_windows_git_bash(self) -> None:
+        def locate(
+            probe: capabilities.ExecutableProbe, machine: capabilities.MachineState
+        ) -> str | None:
+            return "C:/Git/bin/bash.exe" if probe.locator_strategy == "git-bash" else None
+
+        with (
+            patch.object(
+                capabilities,
+                "current_machine",
+                return_value=capabilities.MachineState("Windows", "ARM64"),
+            ),
+            patch.object(capabilities, "locate_executable", side_effect=locate),
+            patch.object(
+                capabilities, "read_executable_version", return_value="GNU bash, version 5.2"
+            ),
+            patch.object(capabilities, "read_executable_architecture", return_value="x86_64"),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(cli.tools_status("bash"), 0)
+        text = output.getvalue()
+        self.assertIn("bash: available (optional)", text)
+        self.assertIn("git-bash: available", text)
+        self.assertIn("environment: windows-host", text)
+        self.assertIn("executable: C:/Git/bin/bash.exe", text)
+        self.assertIn("version: GNU bash, version 5.2", text)
+        self.assertIn("architecture: x86_64", text)
+
+    def test_tools_status_reports_wsl_without_satisfying_host(self) -> None:
+        def locate(
+            probe: capabilities.ExecutableProbe, machine: capabilities.MachineState
+        ) -> str | None:
+            return "C:/Windows/System32/wsl.exe" if probe.locator_strategy == "wsl-bash" else None
+
+        with (
+            patch.object(
+                capabilities,
+                "current_machine",
+                return_value=capabilities.MachineState("Windows", "AMD64"),
+            ),
+            patch.object(capabilities, "locate_executable", side_effect=locate),
+            patch.object(
+                capabilities, "read_executable_version", return_value="GNU bash, version 5.1"
+            ),
+            patch.object(capabilities, "read_executable_architecture", return_value="x86_64"),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(cli.tools_status("bash"), 1)
+        text = output.getvalue()
+        self.assertIn("bash: absent (optional)", text)
+        self.assertIn("wsl-bash: available", text)
+        self.assertIn("environment: wsl", text)
+        self.assertIn("does not satisfy the host capability", text)
+
+    def test_tools_status_distinguishes_unsupported_and_unknown(self) -> None:
+        with (
+            patch.object(
+                capabilities,
+                "current_machine",
+                return_value=capabilities.MachineState("Plan9", "mips"),
+            ),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(cli.tools_status("bash"), 2)
+        self.assertIn("bash: unsupported", output.getvalue())
+
+        with redirect_stderr(StringIO()) as error:
+            self.assertEqual(cli.tools_status("unknown"), 2)
+        self.assertIn("unknown capability: unknown", error.getvalue())
 
     def test_distribution_version_tries_all_owning_distributions(self) -> None:
         with (

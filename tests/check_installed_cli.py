@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import platform
 import subprocess
 from email.parser import BytesParser
 from pathlib import Path
@@ -43,6 +44,20 @@ def run(executable: Path, expected_version: str, require_complete: bool) -> None
             capture_output=True,
             text=True,
         )
+        tools_list = subprocess.run(
+            [executable, "tools", "list"],
+            cwd=unrelated_directory,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        bash_status = subprocess.run(
+            [executable, "tools", "status", "bash"],
+            cwd=unrelated_directory,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
     expected_return_codes = {0} if require_complete else {0, 1}
     assert doctor.returncode in expected_return_codes, doctor.stderr or doctor.stdout
     assert "Traceback" not in doctor.stderr
@@ -51,6 +66,12 @@ def run(executable: Path, expected_version: str, require_complete: bool) -> None
     assert "repository:" not in doctor.stdout
     if require_complete:
         assert "All checks passed." in doctor.stdout
+    assert "bash" in tools_list.stdout
+    assert "git-bash, system-bash, wsl-bash" in tools_list.stdout
+    assert bash_status.returncode == 0, bash_status.stderr or bash_status.stdout
+    assert "bash: available (optional)" in bash_status.stdout
+    expected_provider = "git-bash" if platform.system() == "Windows" else "system-bash"
+    assert f"{expected_provider}: available" in bash_status.stdout
 
 
 def main() -> int:

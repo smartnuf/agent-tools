@@ -8,7 +8,14 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .capabilities import Availability, ProbePolicy, detect_capabilities
+from .capabilities import (
+    CAPABILITY_CATALOGUE,
+    Availability,
+    CapabilityState,
+    ProbePolicy,
+    detect_capabilities,
+    get_capability,
+)
 
 DISTRIBUTION_NAME = "smartnuf-agent-tools"
 PACKAGE_PROBES = ("pypdf", "pdfplumber", "pymupdf", "PIL", "reportlab", "docx", "openpyxl")
@@ -72,7 +79,10 @@ def doctor() -> int:
             problems += version == "not installed"
 
     print("\nNative tools:")
-    for state in detect_capabilities():
+    required_capabilities = tuple(
+        capability for capability in CAPABILITY_CATALOGUE if capability.required_by_default
+    )
+    for state in detect_capabilities(required_capabilities):
         label = state.capability.label
         if state.availability is Availability.UNSUPPORTED:
             machine = state.machine
@@ -121,11 +131,87 @@ def doctor() -> int:
     return 0
 
 
+def tools_list() -> int:
+    """List immutable project-supported capabilities without probing the host."""
+
+    print("CAPABILITY     DEFAULT   PROVIDERS")
+    for capability in CAPABILITY_CATALOGUE:
+        requirement = "required" if capability.required_by_default else "optional"
+        providers = ", ".join(provider.provider_id for provider in capability.providers)
+        print(f"{capability.capability_id:<14} {requirement:<9} {providers}")
+    return 0
+
+
+def _print_capability_status(state: CapabilityState) -> None:
+    requirement = "required" if state.capability.required_by_default else "optional"
+    print(f"{state.capability.capability_id}: {state.availability.value} ({requirement})")
+    for provider in state.providers:
+        spec = provider.provider
+        print(f"  {spec.provider_id}: {provider.availability.value}")
+        print(f"    provider: {spec.label}")
+        print(f"    environment: {spec.provided_environment}")
+        if not spec.satisfies_capability:
+            print("    note: separate environment; does not satisfy the host capability")
+        for executable in provider.executables:
+            if executable.path is None:
+                continue
+            print(f"    executable: {executable.path}")
+            if executable.probe.locator_strategy == "wsl-bash":
+                print(f"    command: {executable.probe.name}")
+            if executable.version is None:
+                print("    verification: failed")
+                continue
+            print(f"    version: {executable.version}")
+            if executable.architecture is not None:
+                print(f"    architecture: {executable.architecture}")
+
+
+def tools_status(capability_id: str | None = None) -> int:
+    """Report ephemeral detected state for one or every built-in capability."""
+
+    if capability_id is not None:
+        try:
+            catalogue = (get_capability(capability_id),)
+        except KeyError:
+            supported = ", ".join(item.capability_id for item in CAPABILITY_CATALOGUE)
+            print(
+                f"unknown capability: {capability_id}; supported capabilities: {supported}",
+                file=sys.stderr,
+            )
+            return 2
+    else:
+        catalogue = CAPABILITY_CATALOGUE
+
+    states = detect_capabilities(catalogue)
+    for index, state in enumerate(states):
+        if index:
+            print()
+        _print_capability_status(state)
+
+    if capability_id is not None:
+        availability = states[0].availability
+        if availability is Availability.AVAILABLE:
+            return 0
+        return 1 if availability is Availability.ABSENT else 2
+    return int(
+        any(
+            state.capability.required_by_default
+            and state.availability is not Availability.AVAILABLE
+            for state in states
+        )
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-tools")
     parser.add_argument("--version", action="version", version=f"%(prog)s {_application_version()}")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("doctor", help="show Python and native-tool availability")
+    tools_parser = subparsers.add_parser("tools", help="list capabilities or detect host state")
+    tools_subparsers = tools_parser.add_subparsers(dest="tools_command", required=True)
+    tools_subparsers.add_parser("list", help="list project-supported capabilities")
+    status_parser = tools_subparsers.add_parser("status", help="show detected capability state")
+    status_parser.add_argument("capability", nargs="?", help="capability identity")
     return parser
 
 
@@ -133,4 +219,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "doctor":
         return doctor()
+    if args.command == "tools" and args.tools_command == "list":
+        return tools_list()
+    if args.command == "tools" and args.tools_command == "status":
+        return tools_status(args.capability)
     return 2
