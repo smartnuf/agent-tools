@@ -2,7 +2,7 @@
 
 - Last reconciled: 2026-08-29
 - Current milestone: M1.5 — packaged capability discovery
-- Current state: in-progress (architecture accepted; implementation not started)
+- Current state: in-progress (catalogue/detection core complete; Bash discovery next)
 - Current user installation: versioned GitHub prerelease asset, repository clone, or source archive
 - Target user installation: `uv tool install smartnuf-agent-tools`
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
@@ -13,13 +13,13 @@
 |---|---|---|---:|---:|---:|
 | M0 | Distribution decision and executable roadmap | complete | 5/5 | 0.5–1 day | none |
 | M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
-| M1.5 | Reviewed capability-ready package build | in-progress | 1/5 | 2–3.25 days | 2–3.25 days |
+| M1.5 | Reviewed capability-ready package build | in-progress | 2/5 | 2–3.25 days | 1–1.75 days |
 | M2 | Public PyPI release | not-started | 0/5 | 1–2 days | 1–2 days |
 | M3 | Tested update and capability lifecycle | not-started | 0/8 | 3–6 days | 3–6 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **6–11.25 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
+Estimated implementation effort through M3: **5–9.75 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
 
 Gate counts are binary readiness measures. Estimates are ranges and must be revised when implementation reveals new facts.
 
@@ -30,6 +30,7 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
 - The repository has platform bootstrap, update, PATH, and diagnostic implementations.
 - [Decision 0001](../decisions/0001-distribution-model.md) establishes the intended public distribution model.
 - [Decision 0002](../decisions/0002-native-capability-provider-model.md) establishes the packaged native-capability boundary and safe provider semantics.
+- The packaged [capability catalogue and detected-state model](../../src/agent_tools/capabilities.py) covers Poppler and Ghostscript with fixture-driven tests and `doctor` integration.
 - [Planning protocol](README.md) defines task planning and progress reporting.
 - [v0.1.1](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.1) is an audited GitHub prerelease with a wheel, source distribution, checksums, and reviewed notes.
 - [Release run 33231066203](https://github.com/smartnuf/agent-tools/actions/runs/33231066203) installed, pinned, version-checked, and uninstalled the public wheel on Windows, Ubuntu, and macOS.
@@ -41,7 +42,7 @@ after M1.5 is complete.
 
 ## Recommended next work
 
-Implement [issue #23](https://github.com/smartnuf/agent-tools/issues/23), the packaged catalogue and pure detection core, migrating Poppler and Ghostscript diagnostics before adding Bash (L, **1–1.5 days**). This supplies one source of product knowledge for every later capability command.
+Implement [issue #24](https://github.com/smartnuf/agent-tools/issues/24), adding verified Git Bash, system Bash, and distinct WSL discovery plus the read-only `tools list/status` interface (L, **0.75–1.25 days**).
 
 Resume [issue #19](https://github.com/smartnuf/agent-tools/issues/19) after M1.5. Do not publish an untagged development wheel merely because it builds.
 

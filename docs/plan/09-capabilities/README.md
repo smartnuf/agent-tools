@@ -16,13 +16,15 @@ of these commands begins with M2.
 | Acceptance criterion | State | Required evidence |
 |---|---|---|
 | Capability/provider boundary and safety semantics are decided | complete | [Decision 0002](../../decisions/0002-native-capability-provider-model.md) |
-| Packaged catalogue and pure detection results cover Poppler and Ghostscript | not-started | Unit tests plus `doctor` using the shared catalogue |
+| Packaged catalogue and pure detection results cover Poppler and Ghostscript | complete | [Packaged catalogue](../../../src/agent_tools/capabilities.py), [fixture-driven tests](../../../tests/test_capabilities.py), and `doctor` using the shared detection results |
 | `tools list` and `tools status [CAPABILITY]` work from an installed wheel | not-started | Isolated wheel tests from an unrelated directory |
 | Bash discovery distinguishes Git Bash, host system Bash, and WSL | not-started | Windows, Linux, and macOS tests with provider/path/version evidence |
 | Product metadata, platform docs, and CI reflect the catalogue boundary | not-started | Distribution metadata test and cross-platform CI |
 
 Estimate: **2–3.25 person-days**, excluding review and CI waiting time. This is
-the sum of the three reviewable slices below.
+the sum of the three reviewable slices below. After the catalogue/detection
+slice, **1–1.75 person-days** remain for Bash discovery and artifact/metadata
+reconciliation.
 
 ### Scope constraints
 
