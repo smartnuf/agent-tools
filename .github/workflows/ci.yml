@@ -152,6 +152,7 @@ jobs:
 
       - name: Run unit tests (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: .venv\Scripts\python.exe -m unittest discover -s tests
 
       - name: Test PATH backup and restoration (Windows)
@@ -178,6 +179,7 @@ jobs:
 
       - name: Verify installed tools (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: bin\agent-tools.cmd doctor
 
       - name: Verify installed tools (Unix)
