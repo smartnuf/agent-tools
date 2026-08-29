@@ -21,6 +21,16 @@ jobs:
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: "0.12.7"
+      - name: Validate GitHub workflow syntax and expressions
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl --fail --silent --show-error --location \
+            --output "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $archive" | sha256sum --check --strict
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint"
       - name: Build wheel and source distribution
         run: uv build --out-dir "${{ runner.temp }}/dist"
       - name: Validate artifact metadata and contents
@@ -28,7 +38,7 @@ jobs:
       - name: Validate release version and checksums
         shell: bash
         run: |
-          python scripts/release.py verify-tag v0.1.0
+          python scripts/release.py verify-tag v0.1.1
           python scripts/release.py checksums "${{ runner.temp }}/dist/SHA256SUMS" "${{ runner.temp }}"/dist/*.whl "${{ runner.temp }}"/dist/*.tar.gz
       - name: Install native runtime prerequisites
         run: sudo apt-get update && sudo apt-get install -y poppler-utils ghostscript
