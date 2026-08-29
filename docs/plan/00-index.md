@@ -1,10 +1,10 @@
 # Plan status
 
 - Last reconciled: 2026-08-29
-- Current milestone: M1 — installable GitHub prerelease
-- Current state: in-progress
-- Current user installation: repository clone or source archive
-- Target user installation: `uv tool install <distribution-name>`
+- Current milestone: M2 — public PyPI release
+- Current state: not-started
+- Current user installation: versioned GitHub prerelease asset, repository clone, or source archive
+- Target user installation: `uv tool install smartnuf-agent-tools`
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
 
 ## Status summary
@@ -12,13 +12,13 @@
 | Milestone | Outcome | State | Acceptance gates | Incremental estimate | Estimated remaining |
 |---|---|---|---:|---:|---:|
 | M0 | Distribution decision and executable roadmap | complete | 5/5 | 0.5–1 day | none |
-| M1 | Installable GitHub prerelease | in-progress | 5/9 | 4–7 days | 0.5–1 day |
+| M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
 | M2 | Public PyPI release | not-started | 0/5 | 1–2 days | 1–2 days |
 | M3 | Tested update lifecycle | not-started | 0/6 | 2–4 days | 2–4 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **3.5–7 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
+Estimated implementation effort through M3: **3–6 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
 
 Gate counts are binary readiness measures. Estimates are ranges and must be revised when implementation reveals new facts.
 
@@ -29,24 +29,25 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
 - The repository has platform bootstrap, update, PATH, and diagnostic implementations.
 - [Decision 0001](../decisions/0001-distribution-model.md) establishes the intended public distribution model.
 - [Planning protocol](README.md) defines task planning and progress reporting.
+- [v0.1.1](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.1) is an audited GitHub prerelease with a wheel, source distribution, checksums, and reviewed notes.
+- [Release run 33231066203](https://github.com/smartnuf/agent-tools/actions/runs/33231066203) installed, pinned, version-checked, and uninstalled the public wheel on Windows, Ubuntu, and macOS.
 
-These are foundations, not evidence that the current wheel is ready for public installation.
+M1 is complete. Its factual record is frozen except for corrections; subsequent release work belongs to M2.
 
 ## Recommended next work
 
-Complete [issue #9](https://github.com/smartnuf/agent-tools/issues/9) by merging the workflow-lint recovery, publishing `v0.1.1`, inspecting its assets and checks, and reconciling the M1 evidence (M, **0.5–1 day**). The immutable `v0.1.0` attempt failed workflow validation before creating a release; incident evidence is preserved in its tag record and issue #9.
+Begin [issue #19](https://github.com/smartnuf/agent-tools/issues/19), configure the PyPI project and trusted publisher without a long-lived upload token (M, **0.5–1 day**). Recheck name availability immediately before registry configuration.
 
 Do not publish an untagged development wheel merely because it builds.
 
 ## Known risks and assumptions
 
 - `smartnuf-agent-tools` returned no existing PyPI project on 2026-08-29, but the name is not reserved until publication and must be rechecked.
-- The wheel and sdist pass artifact checks, and the same wheel plus declared dependencies pass isolated installation on the Windows, Ubuntu, and macOS CI runners; a published prerelease remains to be exercised in issue #9.
+- The published wheel and sdist pass independent checksum and metadata audits; install, pin, and uninstall pass on Windows, Ubuntu, and macOS runners.
 - Repository wrappers and the shared `.venv` are not part of the wheel contract.
-- M1 may reveal checkout assumptions in the CLI or bootstrap behaviour; its estimate includes limited contingency for that discovery.
 - Windows ARM64/x64 emulation and macOS Intel/Apple-silicon coverage may require later expansion.
 - On Windows ARM64, unconstrained Python 3.14 selected a native interpreter but `cryptography` lacked a wheel and required an unavailable MSVC linker. The initial `<3.14` Python bound makes `uv tool` choose a supported managed interpreter; Python 3.14 support must be revalidated before widening it.
-- Native-versus-emulated interpreter selection and reporting is preserved as [issue #14](https://github.com/smartnuf/agent-tools/issues/14); it is deferred unless release validation makes it an M1 blocker.
+- Native-versus-emulated interpreter selection and reporting is preserved as [issue #14](https://github.com/smartnuf/agent-tools/issues/14); it remains outside the completed M1 scope.
 
 ## Other backlog
 

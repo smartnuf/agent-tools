@@ -74,16 +74,18 @@ jobs:
           $version = $env:RELEASE_TAG.TrimStart('v')
           $wheel = "smartnuf_agent_tools-$version-py3-none-any.whl"
           $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/$wheel"
-          uv tool install $url
+          uv tool install --python 3.13 $url
           if ($LASTEXITCODE -ne 0) { throw "initial tool install failed with exit code $LASTEXITCODE" }
-          $reportedVersion = & "$env:UV_TOOL_BIN_DIR\agent-tools.exe" --version
+          $executable = "$(uv tool dir --bin)\agent-tools.exe"
+          if ($LASTEXITCODE -ne 0) { throw "tool bin lookup failed with exit code $LASTEXITCODE" }
+          $reportedVersion = & $executable --version
           if ($LASTEXITCODE -ne 0) { throw "version command failed with exit code $LASTEXITCODE" }
           if ($reportedVersion -ne "agent-tools $version") { throw "unexpected version output: $reportedVersion" }
-          uv tool install --reinstall $url
+          uv tool install --python 3.13 --reinstall $url
           if ($LASTEXITCODE -ne 0) { throw "pinned tool reinstall failed with exit code $LASTEXITCODE" }
           uv tool uninstall smartnuf-agent-tools
           if ($LASTEXITCODE -ne 0) { throw "tool uninstall failed with exit code $LASTEXITCODE" }
-          if (Test-Path "$env:UV_TOOL_BIN_DIR\agent-tools.exe") { throw 'agent-tools executable remains after uninstall' }
+          if (Test-Path $executable) { throw 'agent-tools executable remains after uninstall' }
       - name: Install, pin, and uninstall published wheel (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -94,8 +96,9 @@ jobs:
           version="${RELEASE_TAG#v}"
           wheel="smartnuf_agent_tools-$version-py3-none-any.whl"
           url="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$wheel"
-          uv tool install "$url"
-          test "$("$UV_TOOL_BIN_DIR/agent-tools" --version)" = "agent-tools $version"
-          uv tool install --reinstall "$url"
+          uv tool install --python 3.13 "$url"
+          tool_bin="$(uv tool dir --bin)"
+          test "$("$tool_bin/agent-tools" --version)" = "agent-tools $version"
+          uv tool install --python 3.13 --reinstall "$url"
           uv tool uninstall smartnuf-agent-tools
-          test ! -e "$UV_TOOL_BIN_DIR/agent-tools"
+          test ! -e "$tool_bin/agent-tools"

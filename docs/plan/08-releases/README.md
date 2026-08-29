@@ -25,14 +25,16 @@ Outcome: a user can install and run a versioned prerelease artifact without clon
 | Package name, metadata, and supported versions are final | complete | [Packaging contract](../../packaging.md) and built-wheel metadata check |
 | Runtime and optional dependencies are correctly declared | complete | [Packaging contract](../../packaging.md) and complete clean-environment `doctor` run |
 | Packaged CLI works outside a checkout | complete | No-dependency installed-wheel smoke test from an unrelated directory |
-| `agent-tools --version` matches package and tag | in-progress | Tag contract is tested; execution from an actual tag remains in issue #9 |
-| Wheel and sdist build successfully from a clean tag | not-started | Tag-triggered workflow artifact |
+| `agent-tools --version` matches package and tag | complete | v0.1.1 tag contract and published-wheel smoke run |
+| Wheel and sdist build successfully from a clean tag | complete | [v0.1.1 tag workflow](https://github.com/smartnuf/agent-tools/actions/runs/33231066203) |
 | Artifact tests pass on Windows, Linux, and macOS | complete | `release-dist` CI artifact installed and checked by every platform job |
 | Release workflow uses explicit least-privilege permissions | complete | Tag-only `release.yml`: read by default and job-scoped `contents: write` |
-| GitHub prerelease includes artifacts, checksums, and notes | not-started | GitHub Release link |
-| Install, pin, and uninstall documentation is verified | in-progress | Reviewed commands and tag smoke workflow prepared; published-release run remains in issue #9 |
+| GitHub prerelease includes artifacts, checksums, and notes | complete | [v0.1.1 GitHub prerelease](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.1) |
+| Install, pin, and uninstall documentation is verified | complete | README commands, tool-bin lookup in three-platform CI, and published-release lifecycle smoke jobs |
 
 Estimate: **4–7 person-days**.
+
+Complete on 2026-08-29. Actual engineering effort was not recorded. The immutable `v0.1.0` tag failed workflow validation before creating a release; the incident and recovery are preserved in `docs/releases/v0.1.0.md`. Version `v0.1.1` supplied all required evidence. The documented install pins Python 3.13 and locates the executable through `uv tool dir --bin`; the same contract is exercised in three-platform CI and published-release lifecycle jobs.
 
 Suggested task order:
 

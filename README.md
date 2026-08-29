@@ -29,19 +29,34 @@ requirements.in         reviewed direct Python dependencies
 requirements.txt        generated, fully pinned Python environment lock
 ```
 
-## Packaged prerelease (pending)
+## Install the packaged prerelease
 
-The command below becomes supported only after the [v0.1.1 GitHub prerelease](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.1) exists and its release checks pass. Until then, use the clone or source-archive instructions below. Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) through a trusted package manager, then run:
+The current [v0.1.1 GitHub prerelease](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.1) is pinned to its reviewed release asset. Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) through a trusted package manager, then run:
 
 ```sh
-uv tool install "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl"
-agent-tools --version
+uv tool install --python 3.13 "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl"
 ```
+
+Verify it without assuming uv's executable directory is already on `PATH`.
+
+PowerShell:
+
+```powershell
+& "$(uv tool dir --bin)\agent-tools.exe" --version
+```
+
+Linux or macOS:
+
+```sh
+"$(uv tool dir --bin)/agent-tools" --version
+```
+
+To make `agent-tools` directly discoverable in future shells, `uv tool update-shell` can update the user shell configuration. That is an explicit profile change; review uv's reported change and open a new shell afterward.
 
 The versioned URL is the pin. To restore that exact release if its isolated environment is damaged:
 
 ```sh
-uv tool install --reinstall "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl"
+uv tool install --python 3.13 --reinstall "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl"
 ```
 
 To remove it:
@@ -118,4 +133,4 @@ For routine operation:
 
 The maintained roadmap is [`docs/plan/00-index.md`](docs/plan/00-index.md). It records the current milestone, acceptance gates, estimates, evidence, remaining effort, and recommended next work. [`docs/plan/README.md`](docs/plan/README.md) defines how humans and agents plan tasks and report progress consistently.
 
-The immediate objective is to exercise the first GitHub prerelease, followed by a normal PyPI/`uv tool` installation path. The clone-based shared environment remains supported while that work proceeds.
+The next objective is a normal PyPI/`uv tool install smartnuf-agent-tools` installation path. The versioned GitHub prerelease and clone-based shared environment remain supported while that work proceeds.
