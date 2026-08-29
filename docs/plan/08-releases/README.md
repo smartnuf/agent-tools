@@ -25,9 +25,9 @@ Outcome: a user can install and run a versioned prerelease artifact without clon
 | Package name, metadata, and supported versions are final | complete | [Packaging contract](../../packaging.md) and built-wheel metadata check |
 | Runtime and optional dependencies are correctly declared | complete | [Packaging contract](../../packaging.md) and complete clean-environment `doctor` run |
 | Packaged CLI works outside a checkout | complete | No-dependency installed-wheel smoke test from an unrelated directory |
-| `agent-tools --version` matches package and tag | in-progress | Installed metadata assertion complete; tag assertion remains in issue #7 |
+| `agent-tools --version` matches package and tag | in-progress | Tag contract is tested; execution from an actual tag remains in issue #9 |
 | Wheel and sdist build successfully from a clean tag | not-started | Tag-triggered workflow artifact |
-| Artifact tests pass on Windows, Linux, and macOS | not-started | Required CI matrix |
+| Artifact tests pass on Windows, Linux, and macOS | complete | `release-dist` CI artifact installed and checked by every platform job |
 | Release workflow uses explicit least-privilege permissions | complete | Tag-only `release.yml`: read by default and job-scoped `contents: write` |
 | GitHub prerelease includes artifacts, checksums, and notes | not-started | GitHub Release link |
 | Install, pin, and uninstall documentation is verified | not-started | CI or recorded clean-host smoke test |
