@@ -151,7 +151,8 @@ repository baseline is:
 repository-managed Python: python -m unittest discover -s tests
 git diff --check <base>...HEAD
 PowerShell parser/syntax checks for repository PowerShell files
-bash -n checks for repository POSIX shell files
+sh -n checks for portable POSIX shell files
+bash -n checks only for genuinely Bash-specific files
 repository launcher: agent-tools doctor, when relevant
 build/distribution checks, when packaging or installed behaviour may change
 ```
