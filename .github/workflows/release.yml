@@ -1,0 +1,49 @@
+name: GitHub prerelease
+
+on:
+  push:
+    tags:
+      - "v[0-9]*"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.7"
+      - name: Verify reviewed tag and package version
+        shell: bash
+        run: |
+          python scripts/release.py verify-tag "$RELEASE_TAG"
+          git fetch --no-tags origin "$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          tag_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
+          git merge-base --is-ancestor "$tag_commit" "origin/$DEFAULT_BRANCH"
+      - name: Build and validate artifacts
+        shell: bash
+        run: |
+          uv build --out-dir dist
+          python tests/check_distribution.py dist
+          python scripts/release.py checksums dist/SHA256SUMS dist/*.whl dist/*.tar.gz
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$RELEASE_TAG" \
+            dist/*.whl dist/*.tar.gz dist/SHA256SUMS \
+            --verify-tag \
+            --prerelease \
+            --generate-notes \
+            --title "agent-tools $RELEASE_TAG"
