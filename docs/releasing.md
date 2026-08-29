@@ -25,6 +25,8 @@ The trusted-publisher identity must match these values exactly:
 - Workflow: `publish-pypi.yml`
 - GitHub environment: `pypi`
 
+This pending publisher and the protected `pypi` environment were configured and verified on 2026-08-30. The environment requires approval from `smartnuf`, permits that sole maintainer to approve their own deployment, accepts only protected branches, and contains no secrets. The publisher remains pending until its first successful upload creates the PyPI project.
+
 Configure the GitHub `pypi` environment with required reviewer protection so publication requires a maintainer's explicit approval. Do not add a PyPI API token, username, password, repository secret, or environment secret.
 
 After the tag workflow and its cross-platform smoke jobs pass, promote the reviewed GitHub prerelease to a stable release without replacing its assets. Publishing that stable release triggers `publish-pypi.yml`. Pull requests, branch pushes, and tag pushes cannot trigger PyPI publication. The publish job rejects drafts and prereleases, verifies that the immutable tag matches the package version and belongs to the default branch, downloads the existing wheel, source distribution, and checksum manifest, verifies the release assets, and exposes `id-token: write` only to the environment-protected publish job. The pinned PyPA action exchanges GitHub's OIDC identity for a short-lived PyPI publishing credential.

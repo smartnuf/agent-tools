@@ -55,7 +55,7 @@ mutation and must not expand into the M3 lifecycle work.
 
 | Acceptance criterion | State | Required evidence |
 |---|---|---|
-| PyPI project and trusted publisher are configured | in-progress | `publish-pypi.yml` and the exact external configuration in the [release runbook](../../releasing.md); authenticated registry and environment configuration remain |
+| PyPI project and trusted publisher are configured | complete | `publish-pypi.yml`, protected GitHub `pypi` environment with required reviewer, and PyPI pending publisher for the exact identity in the [release runbook](../../releasing.md) |
 | Reviewed tag publishes without a long-lived upload token | not-started | Successful publish workflow |
 | Package installs from PyPI on all supported platforms | not-started | Post-publication matrix |
 | README promotes tested install/update/remove commands | not-started | Documentation validation |
