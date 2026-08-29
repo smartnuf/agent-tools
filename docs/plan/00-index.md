@@ -13,7 +13,7 @@
 |---|---|---|---:|---:|---:|
 | M0 | Distribution decision and executable roadmap | complete | 5/5 | 0.5–1 day | none |
 | M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
-| M1.5 | Packaged capability discovery | in-progress | 1/5 | 2–3.25 days | 2–3.25 days |
+| M1.5 | Reviewed capability-ready package build | in-progress | 1/5 | 2–3.25 days | 2–3.25 days |
 | M2 | Public PyPI release | not-started | 0/5 | 1–2 days | 1–2 days |
 | M3 | Tested update and capability lifecycle | not-started | 0/8 | 3–6 days | 3–6 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
@@ -35,7 +35,9 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
 - [Release run 33231066203](https://github.com/smartnuf/agent-tools/actions/runs/33231066203) installed, pinned, version-checked, and uninstalled the public wheel on Windows, Ubuntu, and macOS.
 - [Revised smoke run 33232110219](https://github.com/smartnuf/agent-tools/actions/runs/33232110219) repeated the published-wheel lifecycle on all three platforms using Python 3.13 and `uv tool dir --bin`.
 
-M1 is complete. Its factual record is frozen except for corrections; subsequent release work belongs to M2.
+M1 is complete. Its factual record is frozen except for corrections. Capability
+build-readiness work proceeds through M1.5; public release work resumes in M2
+after M1.5 is complete.
 
 ## Recommended next work
 
