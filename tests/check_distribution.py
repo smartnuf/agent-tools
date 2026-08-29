@@ -97,6 +97,7 @@ def check_sdist(sdist: Path) -> str:
             f"{expected_root}/pyproject.toml",
             f"{expected_root}/src/agent_tools/__init__.py",
             f"{expected_root}/src/agent_tools/__main__.py",
+            f"{expected_root}/src/agent_tools/capabilities.py",
             f"{expected_root}/src/agent_tools/cli.py",
             f"{expected_root}/PKG-INFO",
         }

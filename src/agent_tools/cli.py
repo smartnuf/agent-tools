@@ -3,23 +3,15 @@ from __future__ import annotations
 import argparse
 import importlib
 import importlib.metadata
-import os
 import platform
-import re
-import shutil
 import sys
 from pathlib import Path
 
 from . import __version__
+from .capabilities import Availability, ProbePolicy, detect_capabilities
 
 DISTRIBUTION_NAME = "smartnuf-agent-tools"
 PACKAGE_PROBES = ("pypdf", "pdfplumber", "pymupdf", "PIL", "reportlab", "docx", "openpyxl")
-REQUIRED_EXECUTABLE_GROUPS = {
-    "Poppler": ("pdfinfo", "pdftotext", "pdftoppm"),
-}
-ALTERNATIVE_EXECUTABLE_GROUPS = {
-    "Ghostscript": ("gs", "gswin64c", "gswin32c"),
-}
 
 
 def _application_version() -> str:
@@ -54,24 +46,6 @@ def _checkout_root(module_path: Path | None = None) -> Path | None:
     return candidate if all(marker.exists() for marker in markers) else None
 
 
-def _find_executable(probe: str) -> str | None:
-    found = shutil.which(probe)
-    if found or platform.system() != "Windows" or probe not in {"gswin64c", "gswin32c"}:
-        return found
-    roots = filter(None, (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")))
-    candidates = (
-        candidate
-        for root in roots
-        for candidate in Path(root, "gs").glob(f"*/bin/{probe}.exe")
-        if candidate.is_file()
-    )
-    def version_key(candidate: Path) -> tuple[int, ...]:
-        match = re.search(r"\d+(?:\.\d+)*", candidate.parent.parent.name)
-        return tuple(map(int, match.group().split("."))) if match else (0,)
-
-    return str(max(candidates, key=version_key, default="")) or None
-
-
 def doctor() -> int:
     checkout = _checkout_root()
     if checkout is None:
@@ -98,25 +72,35 @@ def doctor() -> int:
             problems += version == "not installed"
 
     print("\nNative tools:")
-    for label, probes in REQUIRED_EXECUTABLE_GROUPS.items():
-        found = [(probe, _find_executable(probe)) for probe in probes]
-        missing = [probe for probe, path in found if not path]
-        if missing:
-            print(f"  {label:<12} missing required executable(s): {', '.join(missing)}")
+    for state in detect_capabilities():
+        label = state.capability.label
+        if state.availability is Availability.UNSUPPORTED:
+            machine = state.machine
+            print(
+                f"  {label:<12} unsupported on "
+                f"{machine.platform}/{machine.architecture} ({machine.execution_environment})"
+            )
             problems += 1
-        else:
-            locations = ", ".join(f"{probe}: {path}" for probe, path in found)
-            print(f"  {label:<12} {locations}")
+            continue
 
-    for label, alternatives in ALTERNATIVE_EXECUTABLE_GROUPS.items():
-        available = [(probe, _find_executable(probe)) for probe in alternatives]
-        available = [(probe, path) for probe, path in available if path]
-        if available:
-            probe, path = available[0]
-            print(f"  {label:<12} {probe}: {path}")
-        else:
-            print(f"  {label:<12} not found ({', '.join(alternatives)})")
+        provider = state.selected_provider or next(
+            item for item in state.providers if item.availability is not Availability.UNSUPPORTED
+        )
+        if state.availability is Availability.ABSENT:
+            probes = tuple(probe.name for probe in provider.provider.probes)
+            if provider.provider.probe_policy is ProbePolicy.ALL:
+                unavailable = provider.unavailable_probes
+                print(f"  {label:<12} missing required executable(s): {', '.join(unavailable)}")
+            else:
+                print(f"  {label:<12} not found ({', '.join(probes)})")
             problems += 1
+            continue
+
+        available = tuple(item for item in provider.executables if item.verified)
+        if provider.provider.probe_policy is ProbePolicy.ANY:
+            available = available[:1]
+        locations = ", ".join(f"{item.probe.name}: {item.path}" for item in available)
+        print(f"  {label:<12} {locations}")
 
     if problems:
         print(f"\n{problems} check(s) need attention.")

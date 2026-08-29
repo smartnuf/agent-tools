@@ -5,7 +5,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 from unittest.mock import patch
 
-from agent_tools import cli
+from agent_tools import capabilities, cli
 
 
 class CliTests(unittest.TestCase):
@@ -48,7 +48,8 @@ class CliTests(unittest.TestCase):
             patch.object(cli, "_application_version", return_value="2.3.4"),
             patch.object(cli, "_distribution_version", return_value="1.2.3"),
             patch.object(cli.importlib, "import_module"),
-            patch.object(cli.shutil, "which", side_effect=lambda name: f"/tools/{name}"),
+            patch.object(capabilities.shutil, "which", side_effect=lambda name: f"/tools/{name}"),
+            patch.object(capabilities, "read_executable_version", return_value="1.2.3"),
             redirect_stdout(StringIO()) as output,
         ):
             self.assertEqual(cli.doctor(), 0)
@@ -63,7 +64,8 @@ class CliTests(unittest.TestCase):
             patch.object(cli, "_checkout_root", return_value=None),
             patch.object(cli, "_distribution_version", return_value="1.2.3"),
             patch.object(cli.importlib, "import_module"),
-            patch.object(cli.shutil, "which", side_effect=lambda name: f"/tools/{name}"),
+            patch.object(capabilities.shutil, "which", side_effect=lambda name: f"/tools/{name}"),
+            patch.object(capabilities, "read_executable_version", return_value="1.2.3"),
             redirect_stdout(StringIO()) as output,
         ):
             self.assertEqual(cli.doctor(), 0)
@@ -88,7 +90,7 @@ class CliTests(unittest.TestCase):
         with (
             patch.object(cli, "_distribution_version", return_value="not installed"),
             patch.object(cli.importlib, "import_module", side_effect=ModuleNotFoundError("unavailable")),
-            patch.object(cli, "_find_executable", return_value=None),
+            patch.object(capabilities, "locate_executable", return_value=None),
             redirect_stdout(StringIO()) as output,
         ):
             self.assertEqual(cli.doctor(), 1)
@@ -105,7 +107,8 @@ class CliTests(unittest.TestCase):
         with (
             patch.object(cli, "_distribution_version", return_value="1.2.3"),
             patch.object(cli.importlib, "import_module"),
-            patch.object(cli.shutil, "which", side_effect=find_executable),
+            patch.object(capabilities.shutil, "which", side_effect=find_executable),
+            patch.object(capabilities, "read_executable_version", return_value="1.2.3"),
             redirect_stdout(StringIO()) as output,
         ):
             self.assertEqual(cli.doctor(), 1)
@@ -115,27 +118,13 @@ class CliTests(unittest.TestCase):
         with (
             patch.object(cli, "_distribution_version", return_value="1.2.3"),
             patch.object(cli.importlib, "import_module", side_effect=OSError("incompatible ABI")),
-            patch.object(cli.shutil, "which", side_effect=lambda name: f"/tools/{name}"),
+            patch.object(capabilities.shutil, "which", side_effect=lambda name: f"/tools/{name}"),
+            patch.object(capabilities, "read_executable_version", return_value="1.2.3"),
             redirect_stdout(StringIO()) as output,
         ):
             self.assertEqual(cli.doctor(), 1)
         self.assertIn("import failed: OSError: incompatible ABI", output.getvalue())
         self.assertIn("7 check(s) need attention.", output.getvalue())
-
-    def test_windows_ghostscript_is_discovered_outside_path(self) -> None:
-        with TemporaryDirectory() as program_files:
-            executable = Path(program_files, "gs", "10.06.0", "bin", "gswin64c.exe")
-            executable.parent.mkdir(parents=True)
-            executable.touch()
-            old_executable = Path(program_files, "gs", "9.56.1", "bin", "gswin64c.exe")
-            old_executable.parent.mkdir(parents=True)
-            old_executable.touch()
-            with (
-                patch.object(cli.shutil, "which", return_value=None),
-                patch.object(cli.platform, "system", return_value="Windows"),
-                patch.dict(cli.os.environ, {"ProgramFiles": program_files}, clear=True),
-            ):
-                self.assertEqual(cli._find_executable("gswin64c"), str(executable))
 
     def test_distribution_version_tries_all_owning_distributions(self) -> None:
         with (
