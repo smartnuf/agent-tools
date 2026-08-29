@@ -114,6 +114,26 @@ class CliTests(unittest.TestCase):
             self.assertEqual(cli.doctor(), 1)
         self.assertIn("missing required executable(s): pdftotext, pdftoppm", output.getvalue())
 
+    def test_doctor_distinguishes_failed_verification_from_missing(self) -> None:
+        def version(probe: capabilities.ExecutableProbe, path: str) -> str | None:
+            return None if probe.name == "pdftotext" else "1.2.3"
+
+        with (
+            patch.object(cli, "_distribution_version", return_value="1.2.3"),
+            patch.object(cli.importlib, "import_module"),
+            patch.object(
+                capabilities.shutil, "which", side_effect=lambda name: f"/tools/{name}"
+            ),
+            patch.object(capabilities, "read_executable_version", side_effect=version),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(cli.doctor(), 1)
+        text = output.getvalue()
+        self.assertIn(
+            "version verification failed: pdftotext: /tools/pdftotext", text
+        )
+        self.assertNotIn("missing required executable(s): pdftotext", text)
+
     def test_doctor_reports_package_import_failures(self) -> None:
         with (
             patch.object(cli, "_distribution_version", return_value="1.2.3"),

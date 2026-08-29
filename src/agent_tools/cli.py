@@ -88,11 +88,23 @@ def doctor() -> int:
         )
         if state.availability is Availability.ABSENT:
             probes = tuple(probe.name for probe in provider.provider.probes)
+            missing = provider.missing_probes
+            unverified = provider.unverified_executables
+            details = []
             if provider.provider.probe_policy is ProbePolicy.ALL:
-                unavailable = provider.unavailable_probes
-                print(f"  {label:<12} missing required executable(s): {', '.join(unavailable)}")
+                if missing:
+                    details.append(f"missing required executable(s): {', '.join(missing)}")
             else:
-                print(f"  {label:<12} not found ({', '.join(probes)})")
+                if missing and not unverified:
+                    details.append(f"not found ({', '.join(probes)})")
+                elif missing:
+                    details.append(f"not found: {', '.join(missing)}")
+            if unverified:
+                failures = ", ".join(
+                    f"{item.probe.name}: {item.path}" for item in unverified
+                )
+                details.append(f"version verification failed: {failures}")
+            print(f"  {label:<12} {'; '.join(details)}")
             problems += 1
             continue
 
