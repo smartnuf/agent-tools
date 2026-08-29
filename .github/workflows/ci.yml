@@ -25,6 +25,11 @@ jobs:
         run: uv build --out-dir "${{ runner.temp }}/dist"
       - name: Validate artifact metadata and contents
         run: python tests/check_distribution.py "${{ runner.temp }}/dist"
+      - name: Validate release version and checksums
+        shell: bash
+        run: |
+          python scripts/release.py verify-tag v0.1.0
+          python scripts/release.py checksums "${{ runner.temp }}/dist/SHA256SUMS" "${{ runner.temp }}"/dist/*.whl "${{ runner.temp }}"/dist/*.tar.gz
       - name: Install native runtime prerequisites
         run: sudo apt-get update && sudo apt-get install -y poppler-utils ghostscript
       - name: Install wheel and declared dependencies
