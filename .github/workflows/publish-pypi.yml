@@ -1,0 +1,54 @@
+name: Publish stable release to PyPI
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.event.release.prerelease == false && github.event.release.draft == false
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/smartnuf-agent-tools
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.release.tag_name }}
+      - name: Verify reviewed release tag
+        shell: bash
+        run: |
+          python scripts/release.py verify-tag "$RELEASE_TAG"
+          test -f "docs/releases/$RELEASE_TAG.md"
+          git fetch --no-tags origin "$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          tag_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
+          git merge-base --is-ancestor "$tag_commit" "origin/$DEFAULT_BRANCH"
+      - name: Download and verify GitHub release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir dist publish
+          gh release download "$RELEASE_TAG" \
+            --pattern '*.whl' \
+            --pattern '*.tar.gz' \
+            --pattern SHA256SUMS \
+            --dir dist
+          python scripts/release.py verify-checksums dist/SHA256SUMS
+          cp dist/*.whl dist/*.tar.gz publish/
+          test "$(find publish -maxdepth 1 -type f -name '*.whl' | wc -l)" -eq 1
+          test "$(find publish -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 1
+      - name: Publish distributions with GitHub OIDC
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
+        with:
+          packages-dir: publish

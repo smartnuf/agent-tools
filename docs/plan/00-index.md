@@ -2,7 +2,7 @@
 
 - Last reconciled: 2026-08-29
 - Current milestone: M2 — public PyPI release
-- Current state: not-started (M1.5 build-readiness evidence complete; trusted publishing next)
+- Current state: in-progress (M1.5 build-readiness evidence complete; trusted-publisher workflow and external configuration underway)
 - Current user installation: versioned GitHub prerelease asset, repository clone, or source archive
 - Target user installation: `uv tool install smartnuf-agent-tools`
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
@@ -14,7 +14,7 @@
 | M0 | Distribution decision and executable roadmap | complete | 5/5 | 0.5–1 day | none |
 | M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
-| M2 | Public PyPI release | not-started | 0/5 | 1–2 days | 1–2 days |
+| M2 | Public PyPI release | in-progress | 0/5 | 1–2 days | 1–2 days |
 | M3 | Tested update and capability lifecycle | not-started | 0/8 | 3–6 days | 3–6 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |

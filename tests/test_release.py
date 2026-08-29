@@ -14,6 +14,27 @@ import release  # noqa: E402
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_pypi_workflow_is_stable_release_only_and_keyless(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "publish-pypi.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("release:\n    types: [published]", workflow)
+        self.assertNotIn("pull_request:", workflow)
+        self.assertNotIn("push:", workflow)
+        self.assertIn("github.event.release.prerelease == false", workflow)
+        self.assertIn("name: pypi", workflow)
+        self.assertIn("id-token: write", workflow)
+        self.assertIn("contents: read", workflow)
+        self.assertIn(
+            "pypa/gh-action-pypi-publish@"
+            "dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
+            workflow,
+        )
+        self.assertNotIn("password:", workflow)
+        self.assertNotIn("username:", workflow)
+        self.assertNotIn("PYPI_API_TOKEN", workflow)
+
     def test_current_tag_matches_package_version(self) -> None:
         self.assertEqual(release.verify_tag("v0.1.1"), "v0.1.1")
         self.assertTrue((ROOT / "docs" / "releases" / "v0.1.1.md").is_file())
