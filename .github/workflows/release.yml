@@ -69,9 +69,13 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
     steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: "0.12.7"
+      - name: Qualify fresh native installation through external providers
+        timeout-minutes: 10
+        uses: ./.github/actions/install-native
       - name: Install, pin, and uninstall published wheel (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -89,6 +93,8 @@ jobs:
           $reportedVersion = & $executable --version
           if ($LASTEXITCODE -ne 0) { throw "version command failed with exit code $LASTEXITCODE" }
           if ($reportedVersion -ne "agent-tools $version") { throw "unexpected version output: $reportedVersion" }
+          & $executable doctor
+          if ($LASTEXITCODE -ne 0) { throw "complete native doctor failed with exit code $LASTEXITCODE" }
           uv tool install --python 3.13 --reinstall $url
           if ($LASTEXITCODE -ne 0) { throw "pinned tool reinstall failed with exit code $LASTEXITCODE" }
           uv tool uninstall smartnuf-agent-tools
@@ -107,6 +113,7 @@ jobs:
           uv tool install --python 3.13 "$url"
           tool_bin="$(uv tool dir --bin)"
           test "$("$tool_bin/agent-tools" --version)" = "agent-tools $version"
+          "$tool_bin/agent-tools" doctor
           uv tool install --python 3.13 --reinstall "$url"
           uv tool uninstall smartnuf-agent-tools
           test ! -e "$tool_bin/agent-tools"

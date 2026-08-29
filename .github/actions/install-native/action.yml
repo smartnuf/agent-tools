@@ -1,0 +1,59 @@
+name: Install native runtime prerequisites
+description: Install and verify Poppler and Ghostscript on supported GitHub runners
+
+runs:
+  using: composite
+  steps:
+    - name: Install native tools (Ubuntu)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        echo "[$(date --iso-8601=seconds)] Installing Poppler and Ghostscript with apt."
+        sudo apt-get update
+        sudo apt-get install -y poppler-utils ghostscript
+
+    - name: Install native tools (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Installing Poppler and Ghostscript with Homebrew."
+        brew install poppler ghostscript
+
+    - name: Install native tools (Windows provider path)
+      id: windows_native_tools
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        Write-Host "[$(Get-Date -Format o)] Installing Poppler with WinGet."
+        winget install --id oschwartz10612.Poppler -e --accept-package-agreements --accept-source-agreements
+        if ($LASTEXITCODE -ne 0) { throw "WinGet Poppler installation failed with exit code $LASTEXITCODE." }
+        Write-Host "[$(Get-Date -Format o)] Installing Ghostscript with Chocolatey."
+        choco install ghostscript -y --no-progress
+        if ($LASTEXITCODE -ne 0) { throw "Chocolatey Ghostscript installation failed with exit code $LASTEXITCODE." }
+        $searchRoots = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages", 'C:\Program Files\gs'
+        $required = 'pdfinfo.exe', 'pdftotext.exe', 'pdftoppm.exe', 'gswin64c.exe'
+        $toolDirectories = foreach ($name in $required) {
+          $tool = Get-ChildItem $searchRoots -Filter $name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $tool) { throw "The provider path completed but $name was not found." }
+          $tool.DirectoryName
+        }
+        $machineDirectories = [Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';' | Where-Object { $_ }
+        foreach ($directory in @($toolDirectories) + @($machineDirectories) | Select-Object -Unique) {
+          $directory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        }
+
+    - name: Report Windows external-provider failure
+      if: failure() && runner.os == 'Windows' && steps.windows_native_tools.outcome == 'failure'
+      shell: pwsh
+      run: |
+        Write-Host "[$(Get-Date -Format o)] External Windows native provider path did not complete."
+        Get-Process -ErrorAction SilentlyContinue |
+          Where-Object { $_.ProcessName -match '^(AppInstallerCLI|choco|gs|msiexec|winget)' } |
+          Select-Object ProcessName, Id, StartTime
+        $chocolateyLog = 'C:\ProgramData\chocolatey\logs\chocolatey.log'
+        if (Test-Path -LiteralPath $chocolateyLog) {
+          Write-Host 'Last 200 lines of the Chocolatey log:'
+          Get-Content -LiteralPath $chocolateyLog -Tail 200
+        } else {
+          Write-Warning "Chocolatey log not found at $chocolateyLog."
+        }

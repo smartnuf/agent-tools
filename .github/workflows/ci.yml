@@ -41,14 +41,12 @@ jobs:
         run: |
           python scripts/release.py verify-tag v0.1.1
           python scripts/release.py checksums "${{ runner.temp }}/dist/SHA256SUMS" "${{ runner.temp }}"/dist/*.whl "${{ runner.temp }}"/dist/*.tar.gz
-      - name: Install native runtime prerequisites
-        run: sudo apt-get update && sudo apt-get install -y poppler-utils ghostscript
       - name: Install wheel and declared dependencies
         run: |
           uv venv "${{ runner.temp }}/installed" --python 3.11
           uv pip install --python "${{ runner.temp }}/installed/bin/python" "${{ runner.temp }}"/dist/*.whl
-      - name: Test complete installed CLI from an unrelated directory
-        run: python tests/check_installed_cli.py "${{ runner.temp }}/installed/bin/agent-tools" "${{ runner.temp }}/dist" --require-complete
+      - name: Test installed CLI and declared Python dependencies without native tools
+        run: python tests/check_installed_cli.py "${{ runner.temp }}/installed/bin/agent-tools" "${{ runner.temp }}/dist"
       - name: Verify build and tests leave the checkout unchanged
         run: |
           git diff --exit-code
@@ -79,55 +77,6 @@ jobs:
           name: release-dist
           path: ${{ runner.temp }}/release-dist
 
-      - name: Install native tools (Ubuntu)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y poppler-utils ghostscript
-
-      - name: Install native tools (macOS)
-        if: runner.os == 'macOS'
-        run: brew install poppler ghostscript
-
-      - name: Install native tools (Windows)
-        id: windows_native_tools
-        if: runner.os == 'Windows'
-        timeout-minutes: 10
-        shell: pwsh
-        run: |
-          Write-Host "[$(Get-Date -Format o)] Installing Poppler with WinGet."
-          winget install --id oschwartz10612.Poppler -e --accept-package-agreements --accept-source-agreements
-          if ($LASTEXITCODE -ne 0) { throw "WinGet Poppler installation failed with exit code $LASTEXITCODE." }
-          Write-Host "[$(Get-Date -Format o)] Installing Ghostscript with Chocolatey."
-          choco install ghostscript -y --no-progress
-          if ($LASTEXITCODE -ne 0) { throw "Chocolatey Ghostscript installation failed with exit code $LASTEXITCODE." }
-          $searchRoots = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages", 'C:\Program Files\gs'
-          $required = 'pdfinfo.exe', 'pdftotext.exe', 'pdftoppm.exe', 'gswin64c.exe'
-          $toolDirectories = foreach ($name in $required) {
-            $tool = Get-ChildItem $searchRoots -Filter $name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-            if (-not $tool) { throw "A native package was installed but $name was not found." }
-            $tool.DirectoryName
-          }
-          $machineDirectories = [Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';' | Where-Object { $_ }
-          $directories = @($toolDirectories) + @($machineDirectories) | Select-Object -Unique
-          foreach ($directory in $directories) {
-            $directory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          }
-
-      - name: Report Windows native-tool installation failure
-        if: failure() && runner.os == 'Windows' && steps.windows_native_tools.outcome == 'failure'
-        shell: pwsh
-        run: |
-          Write-Host "[$(Get-Date -Format o)] Windows native-tool installation did not complete."
-          Get-Process -ErrorAction SilentlyContinue |
-            Where-Object { $_.ProcessName -match '^(AppInstallerCLI|choco|gs|msiexec|winget)' } |
-            Select-Object ProcessName, Id, StartTime
-          $chocolateyLog = 'C:\ProgramData\chocolatey\logs\chocolatey.log'
-          if (Test-Path -LiteralPath $chocolateyLog) {
-            Write-Host 'Last 200 lines of the Chocolatey log:'
-            Get-Content -LiteralPath $chocolateyLog -Tail 200
-          } else {
-            Write-Warning "Chocolatey log not found at $chocolateyLog."
-          }
-
       - name: Install and test shared release wheel (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -138,7 +87,7 @@ jobs:
           python scripts/release.py verify-checksums "$env:RUNNER_TEMP\release-dist\SHA256SUMS"
           $wheel = Get-ChildItem "$env:RUNNER_TEMP\release-dist" -Filter '*.whl' | Select-Object -ExpandProperty FullName -First 1
           uv tool install --python 3.13 $wheel
-          python tests/check_installed_cli.py "$(uv tool dir --bin)\agent-tools.exe" "$env:RUNNER_TEMP\release-dist" --require-complete
+          python tests/check_installed_cli.py "$(uv tool dir --bin)\agent-tools.exe" "$env:RUNNER_TEMP\release-dist"
 
       - name: Install and test shared release wheel (Unix)
         if: runner.os != 'Windows'
@@ -149,7 +98,7 @@ jobs:
         run: |
           python scripts/release.py verify-checksums "$RUNNER_TEMP/release-dist/SHA256SUMS"
           uv tool install --python 3.13 "$RUNNER_TEMP"/release-dist/*.whl
-          python tests/check_installed_cli.py "$(uv tool dir --bin)/agent-tools" "$RUNNER_TEMP/release-dist" --require-complete
+          python tests/check_installed_cli.py "$(uv tool dir --bin)/agent-tools" "$RUNNER_TEMP/release-dist"
 
       - name: Bootstrap twice (Windows)
         if: runner.os == 'Windows'
@@ -197,12 +146,3 @@ jobs:
       - name: Test privileged native installation routing (Unix)
         if: runner.os != 'Windows'
         run: sh tests/test_install_native.sh
-
-      - name: Verify installed tools (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: bin\agent-tools.cmd doctor
-
-      - name: Verify installed tools (Unix)
-        if: runner.os != 'Windows'
-        run: sh bin/agent-tools doctor
