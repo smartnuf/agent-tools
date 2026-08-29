@@ -129,6 +129,7 @@ jobs:
           $output
           if ($exitCode -notin 0, 1) { throw "checkout doctor failed with exit code $exitCode" }
           if ($output -match 'Traceback') { throw 'checkout doctor emitted a traceback' }
+          exit 0
 
       - name: Exercise checkout doctor (Unix)
         if: runner.os != 'Windows'
