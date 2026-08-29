@@ -29,7 +29,7 @@ class CliTests(unittest.TestCase):
             "version",
             side_effect=cli.importlib.metadata.PackageNotFoundError,
         ):
-            self.assertEqual(cli._application_version(), "0.1.0")
+            self.assertEqual(cli._application_version(), "0.1.1")
 
     def test_version_option_reports_application_version(self) -> None:
         with (

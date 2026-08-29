@@ -31,17 +31,17 @@ requirements.txt        generated, fully pinned Python environment lock
 
 ## Packaged prerelease (pending)
 
-The command below becomes supported only after the [v0.1.0 GitHub prerelease](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.0) exists and its release checks pass. Until then, use the clone or source-archive instructions below. Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) through a trusted package manager, then run:
+The command below becomes supported only after the [v0.1.1 GitHub prerelease](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.1) exists and its release checks pass. Until then, use the clone or source-archive instructions below. Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) through a trusted package manager, then run:
 
 ```sh
-uv tool install "https://github.com/smartnuf/agent-tools/releases/download/v0.1.0/smartnuf_agent_tools-0.1.0-py3-none-any.whl"
+uv tool install "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl"
 agent-tools --version
 ```
 
 The versioned URL is the pin. To restore that exact release if its isolated environment is damaged:
 
 ```sh
-uv tool install --reinstall "https://github.com/smartnuf/agent-tools/releases/download/v0.1.0/smartnuf_agent_tools-0.1.0-py3-none-any.whl"
+uv tool install --reinstall "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl"
 ```
 
 To remove it:
@@ -50,7 +50,7 @@ To remove it:
 uv tool uninstall smartnuf-agent-tools
 ```
 
-Poppler and Ghostscript are not bundled. Install them through the operating-system package manager before expecting `agent-tools doctor` to pass completely. See the [v0.1.0 release notes](docs/releases/v0.1.0.md) for current limitations.
+Poppler and Ghostscript are not bundled. Install them through the operating-system package manager before expecting `agent-tools doctor` to pass completely. See the [v0.1.1 release notes](docs/releases/v0.1.1.md) for current limitations.
 
 ## Get the source
 
