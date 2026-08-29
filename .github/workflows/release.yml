@@ -60,8 +60,6 @@ jobs:
       contents: read
     env:
       RELEASE_TAG: ${{ github.ref_name }}
-      UV_TOOL_DIR: ${{ runner.temp }}/release-tools
-      UV_TOOL_BIN_DIR: ${{ runner.temp }}/release-bin
     steps:
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -69,6 +67,9 @@ jobs:
       - name: Install, pin, and uninstall published wheel (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          UV_TOOL_DIR: ${{ runner.temp }}\release-tools
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}\release-bin
         run: |
           $version = $env:RELEASE_TAG.TrimStart('v')
           $wheel = "smartnuf_agent_tools-$version-py3-none-any.whl"
@@ -86,6 +87,9 @@ jobs:
       - name: Install, pin, and uninstall published wheel (Unix)
         if: runner.os != 'Windows'
         shell: bash
+        env:
+          UV_TOOL_DIR: ${{ runner.temp }}/release-tools
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}/release-bin
         run: |
           version="${RELEASE_TAG#v}"
           wheel="smartnuf_agent_tools-$version-py3-none-any.whl"

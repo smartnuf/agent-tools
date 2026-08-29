@@ -34,7 +34,7 @@ These are foundations, not evidence that the current wheel is ready for public i
 
 ## Recommended next work
 
-Complete [issue #9](https://github.com/smartnuf/agent-tools/issues/9) by merging the reviewed notes and lifecycle smoke workflow, publishing `v0.1.0`, inspecting its assets and checks, and reconciling the M1 evidence (M, **0.5–1 day**). The documentation and automation are prepared; the tag and release do not yet exist.
+Complete [issue #9](https://github.com/smartnuf/agent-tools/issues/9) by merging the workflow-lint recovery, publishing `v0.1.1`, inspecting its assets and checks, and reconciling the M1 evidence (M, **0.5–1 day**). The immutable `v0.1.0` attempt failed workflow validation before creating a release; incident evidence is preserved in its tag record and issue #9.
 
 Do not publish an untagged development wheel merely because it builds.
 
