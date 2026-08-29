@@ -41,6 +41,8 @@ jobs:
           git fetch --no-tags origin "$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
           tag_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
           git merge-base --is-ancestor "$tag_commit" "origin/$DEFAULT_BRANCH"
+          tag_version="$(git show "$RELEASE_TAG:src/agent_tools/__init__.py" | sed -n 's/^__version__ = "\([^"]*\)"$/\1/p')"
+          test "$tag_version" = "${RELEASE_TAG#v}"
       - name: Download and verify GitHub release artifacts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -52,10 +54,15 @@ jobs:
             --pattern '*.tar.gz' \
             --pattern SHA256SUMS \
             --dir dist
-          (cd dist && sha256sum --check SHA256SUMS)
           version="${RELEASE_TAG#v}"
-          test -f "dist/smartnuf_agent_tools-$version-py3-none-any.whl"
-          test -f "dist/smartnuf_agent_tools-$version.tar.gz"
+          wheel="smartnuf_agent_tools-$version-py3-none-any.whl"
+          sdist="smartnuf_agent_tools-$version.tar.gz"
+          test -f "dist/$wheel"
+          test -f "dist/$sdist"
+          printf '%s\n' "$wheel" "$sdist" | sort > expected-files
+          awk 'NF {print $2}' dist/SHA256SUMS | sort > manifest-files
+          diff -u expected-files manifest-files
+          (cd dist && sha256sum --check SHA256SUMS)
           cp dist/*.whl dist/*.tar.gz publish/
           test "$(find publish -maxdepth 1 -type f -name '*.whl' | wc -l)" -eq 1
           test "$(find publish -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 1
