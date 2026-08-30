@@ -2,7 +2,7 @@
 
 - Last reconciled: 2026-08-30
 - Current milestone: M3 — tested update and capability lifecycle
-- Current state: M2 complete; M3 implementation in progress with the Python selector slice under review
+- Current state: M2 complete; M3 implementation is in progress and the Python selector slice has merged
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
 - Target lifecycle: tested upgrade, pin, rollback, safe provider mutation, and removal
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
@@ -42,7 +42,7 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
 - [Publication run 33312422488](https://github.com/smartnuf/agent-tools/actions/runs/33312422488) published v0.1.2 through the protected PyPI environment and GitHub OIDC without a long-lived upload token.
 - PyPI v0.1.2 metadata reports the expected project/version/Python range; its wheel and source-distribution sizes and SHA-256 digests match the GitHub release exactly.
 - [PyPI lifecycle run 33313165322](https://github.com/smartnuf/agent-tools/actions/runs/33313165322) resolved the unpinned public package, version-checked, diagnosed, upgraded, exactly reinstalled, and removed it on Windows, Ubuntu, and macOS.
-- Issue #14 implements read-only installed-Python discovery, independent host/process evidence, deterministic native/system-first ranking, explicit-path clone bootstrap, and final-environment verification; its pure fixtures do not substitute for #49 platform evidence.
+- [PR #72](https://github.com/smartnuf/agent-tools/pull/72) implements read-only installed-Python discovery, independent host/process evidence, deterministic native/system-first ranking, explicit-path clone bootstrap, and final-environment verification; its pure fixtures do not substitute for #49 platform evidence.
 
 M1 is complete and its factual record is frozen except for corrections. M1.5
 completed on 2026-08-29; M2 completed on 2026-08-30 with the first stable PyPI
@@ -52,7 +52,7 @@ excluded.
 
 ## Recommended next work
 
-After issue #14 merges, prove pre-seeded selection in [issue #49](https://github.com/smartnuf/agent-tools/issues/49) on realistic fixtures and the platform/disposable-host evidence that is actually available (M, **0.5–1 day**) before beginning provider planning or mutation. [Issue #26](https://github.com/smartnuf/agent-tools/issues/26) records the complete ordered M3 dependency chain.
+Prove pre-seeded selection in [issue #49](https://github.com/smartnuf/agent-tools/issues/49) on realistic fixtures and the platform/disposable-host evidence that is actually available (M, **0.5–1 day**) before beginning provider planning or mutation. [Issue #26](https://github.com/smartnuf/agent-tools/issues/26) records the complete ordered M3 dependency chain.
 
 ## Known risks and assumptions
 

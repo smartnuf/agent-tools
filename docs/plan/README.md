@@ -13,9 +13,12 @@ Before changing code or automation:
 
 1. Read the repository `AGENTS.md`, the status index, the relevant milestone, and applicable decision records.
 2. Reconcile claimed status with the repository, tests, workflows, and published artifacts. Correct stale status before relying on it.
-3. Select one incomplete acceptance criterion. Prefer blockers and the documented “next recommended work.”
-4. Write a task plan containing scope, non-goals, affected platforms, validation, risks, dependencies, and an effort estimate.
-5. Split work estimated above two person-days into reviewable tasks. A task may use several focused commits, but each commit should leave the branch understandable.
+3. Verify that the current roadmap milestone has an open GitHub milestone, and
+   that its planned issues (including the selected task) are assigned to it.
+   Reconcile missing or stale assignments before implementation.
+4. Select one incomplete acceptance criterion. Prefer blockers and the documented “next recommended work.”
+5. Write a task plan containing scope, non-goals, affected platforms, validation, risks, dependencies, and an effort estimate.
+6. Split work estimated above two person-days into reviewable tasks. A task may use several focused commits, but each commit should leave the branch understandable.
 
 Use these effort classes for initial task planning:
 
@@ -41,6 +44,14 @@ Update the plan in the same pull request when work changes readiness:
 
 Use these states consistently: `not-started`, `in-progress`, `blocked`, `complete`, and `deferred`. A milestone is `complete` only when every required acceptance criterion is complete.
 
+When the final required criterion gains durable evidence, reconcile GitHub in
+the same completion loop: close completed issues, move valid follow-up work to
+the milestone that owns it, confirm no required issue remains open, and
+explicitly close the GitHub milestone. Verify the resulting milestone state;
+zero open issues does not close a GitHub milestone automatically. The next
+milestone starts only when its GitHub milestone is open and its initial planned
+issues are assigned.
+
 ## Progress report format
 
 Humans or agents asked for status should report:
@@ -60,10 +71,12 @@ Do not calculate progress from issue count alone. Report both completed gates an
 
 ## Development expectations
 
-- Prefer a focused issue or task for each acceptance criterion and associate it with the matching GitHub milestone when issue tracking is available.
+- Prefer a focused issue or task for each acceptance criterion and associate it with the matching GitHub milestone before implementation.
 - Use small commits that state the behaviour or evidence added.
 - Test built artifacts rather than relying only on source-tree tests.
 - Keep platform-independent behaviour common; isolate native installation and discovery behind explicit platform code.
 - Treat README commands as testable interfaces.
 - Preserve least-privilege release permissions and publish only from reviewed, versioned sources.
-- At milestone completion, freeze its factual record except for corrections and put subsequent work in the next milestone.
+- At milestone completion, freeze its factual record except for corrections,
+  put subsequent work in the next milestone, and verify that the completed
+  GitHub milestone is closed.
