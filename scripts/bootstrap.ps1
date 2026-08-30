@@ -71,6 +71,14 @@ $SelectedPython = & $BootstrapPython @SelectorArgs
 Assert-NativeSuccess 'final Python selection'
 $SelectedPython = $SelectedPython | Select-Object -Last 1
 
+$Python = Join-Path $Root '.venv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $Python)) {
+    & uv venv (Join-Path $Root '.venv') --python $SelectedPython --no-python-downloads
+    Assert-NativeSuccess 'virtual environment creation'
+}
+& $BootstrapPython @SelectorArgs --verify-final $Python | Out-Null
+Assert-NativeSuccess 'final Python verification'
+
 if ($InstallNativeTools) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         throw 'WinGet is required for automatic native-tool installation.'
@@ -101,14 +109,6 @@ if ($InstallNativeTools) {
         throw 'Ghostscript installation completed but no supported console executable is on PATH.'
     }
 }
-
-$Python = Join-Path $Root '.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $Python)) {
-    & uv venv (Join-Path $Root '.venv') --python $SelectedPython --no-python-downloads
-    Assert-NativeSuccess 'virtual environment creation'
-}
-& $BootstrapPython @SelectorArgs --verify-final $Python | Out-Null
-Assert-NativeSuccess 'final Python verification'
 & uv pip install --exact --python $Python -r (Join-Path $Root 'requirements.txt') -e $Root
 Assert-NativeSuccess 'Python package installation'
 
