@@ -53,7 +53,14 @@ def adapter_commands(
         "--accept-package-agreements", "--accept-source-agreements",
     )
     if target_architecture is not None:
-        winget += ("--architecture", target_architecture)
+        winget_architectures = {"x86_64": "x64", "x86": "x86", "arm64": "arm64", "arm": "arm"}
+        try:
+            winget_architecture = winget_architectures[target_architecture]
+        except KeyError as error:
+            raise PlanningError(
+                f"unsupported WinGet target architecture: {target_architecture}"
+            ) from error
+        winget += ("--architecture", winget_architecture)
     adapters = {
         "winget": (winget,),
         "apt": (("apt-get", "update"), ("apt-get", "install", "-y", unit)),
@@ -97,7 +104,12 @@ def generate_provider_plan(
 ) -> ProviderPlan:
     """Plan missing requested providers from verified state without mutation."""
 
-    by_id = {state.capability.capability_id: state for state in states}
+    by_id: dict[str, CapabilityState] = {}
+    for state in states:
+        capability_id = state.capability.capability_id
+        if capability_id in by_id:
+            raise PlanningError(f"duplicate detected capability state: {capability_id}")
+        by_id[capability_id] = state
     requested = tuple(dict.fromkeys(requested_capabilities))
     managers = frozenset(available_managers)
     native_overrides = frozenset(native_provisioning)
@@ -129,6 +141,11 @@ def generate_provider_plan(
         if state.availability is Availability.AVAILABLE and capability_id not in native_overrides:
             continue
         if capability_id in native_overrides:
+            host_architecture = normalize_architecture(state.machine.architecture)
+            if host_architecture == "unknown":
+                raise PlanningError(
+                    f"native-provisioning override requires known host architecture: {capability_id}"
+                )
             selected_provider = state.selected_provider
             if selected_provider is None:
                 raise PlanningError(
@@ -140,7 +157,7 @@ def generate_provider_plan(
             if not verified or any(
                 item.architecture is None
                 or normalize_architecture(item.architecture)
-                == normalize_architecture(state.machine.architecture)
+                == host_architecture
                 for item in verified
             ):
                 raise PlanningError(
@@ -182,7 +199,7 @@ def generate_provider_plan(
                     package.manager,
                     package.installation_unit,
                     target_architecture=(
-                        normalize_architecture(state.machine.architecture)
+                        host_architecture
                         if displaced
                         else None
                     ),
@@ -190,7 +207,7 @@ def generate_provider_plan(
                 shared_package=provider.shared_package,
                 displaces_verified_paths=displaced,
                 target_architecture=(
-                    normalize_architecture(state.machine.architecture)
+                    host_architecture
                     if displaced
                     else None
                 ),

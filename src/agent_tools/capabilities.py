@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from .python_selection import current_host
+
 
 class Availability(str, Enum):
     """Observed availability of a capability or provider."""
@@ -281,7 +283,8 @@ ArchitectureReader = Callable[[ExecutableProbe, str], str | None]
 
 
 def current_machine() -> MachineState:
-    return MachineState(platform.system(), platform.machine(), "host")
+    host = current_host()
+    return MachineState(host.platform, host.architecture, host.execution_environment)
 
 
 def get_capability(capability_id: str) -> CapabilitySpec:

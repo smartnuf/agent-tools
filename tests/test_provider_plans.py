@@ -100,6 +100,33 @@ class ProviderPlanTests(unittest.TestCase):
                 (native,), ("bash",), available_managers=("winget",), native_provisioning=("poppler",)
             )
 
+    def test_native_override_rejects_unknown_host_architecture(self):
+        machine = capabilities.MachineState("Windows", "unknown")
+        state = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, machine: "C:/Git/bin/bash.exe" if probe.locator_strategy == "git-bash" else None,
+            version_reader=lambda probe, path: "GNU bash 5.2",
+            architecture_reader=lambda probe, path: "x86_64",
+        )
+        with self.assertRaisesRegex(provider_plans.PlanningError, "known host architecture"):
+            provider_plans.generate_provider_plan(
+                (state,), ("bash",), available_managers=("winget",), native_provisioning=("bash",)
+            )
+
+    def test_duplicate_detected_states_are_ambiguous(self):
+        state = self.state(capabilities.POPPLER)
+        with self.assertRaisesRegex(provider_plans.PlanningError, "duplicate detected"):
+            provider_plans.generate_provider_plan(
+                (state, state), ("poppler",), available_managers=("apt",)
+            )
+
+    def test_winget_uses_manager_specific_x64_token(self):
+        command = provider_plans.adapter_commands(
+            "winget", "Git.Git", target_architecture="x86_64"
+        )[0]
+        self.assertEqual(command[-2:], ("--architecture", "x64"))
+
     def test_caller_owned_catalogue_metadata_is_rejected(self):
         custom = capabilities.CapabilitySpec(
             "custom",

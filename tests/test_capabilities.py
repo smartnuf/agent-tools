@@ -24,6 +24,16 @@ class CapabilityTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             capabilities.get_capability("unknown")
 
+    def test_current_machine_uses_native_host_identity(self) -> None:
+        host = Mock(
+            platform="Windows",
+            architecture="arm64",
+            execution_environment="host",
+        )
+        with patch.object(capabilities, "current_host", return_value=host):
+            machine = capabilities.current_machine()
+        self.assertEqual(machine, capabilities.MachineState("Windows", "arm64", "host"))
+
     def test_bash_catalogue_separates_host_and_wsl_providers(self) -> None:
         self.assertFalse(capabilities.BASH.required_by_default)
         self.assertEqual(
