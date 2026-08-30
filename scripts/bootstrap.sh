@@ -2,14 +2,23 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 INSTALL_UV=0
+ALLOW_EMULATED_PYTHON=0
+PYTHON_PATH=
 INSTALL_NATIVE=0
 ADD_PATH=0
-for arg in "$@"; do
-  case "$arg" in
-    --install-uv) INSTALL_UV=1 ;;
-    --install-native-tools) INSTALL_NATIVE=1 ;;
-    --add-to-path) ADD_PATH=1 ;;
-    *) echo "Unknown argument: $arg" >&2; exit 2 ;;
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --install-uv) INSTALL_UV=1; shift ;;
+    --allow-emulated-python) ALLOW_EMULATED_PYTHON=1; shift ;;
+    --python)
+      shift
+      [ "$#" -gt 0 ] || { echo "--python requires a path" >&2; exit 2; }
+      PYTHON_PATH=$1
+      shift
+      ;;
+    --install-native-tools) INSTALL_NATIVE=1; shift ;;
+    --add-to-path) ADD_PATH=1; shift ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
@@ -26,13 +35,32 @@ if ! command -v uv >/dev/null 2>&1; then
   fi
 fi
 
+SELECTOR_ARGS=
+if [ "$ALLOW_EMULATED_PYTHON" -eq 1 ]; then
+  SELECTOR_ARGS=--allow-translated
+fi
+if [ -n "$PYTHON_PATH" ]; then
+  BOOTSTRAP_PYTHON=$PYTHON_PATH
+else
+  if ! BOOTSTRAP_PYTHON=$(uv python find 3.11 --no-project --no-python-downloads --no-config); then
+    echo "No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap." >&2
+    exit 1
+  fi
+fi
+if [ -n "$PYTHON_PATH" ]; then
+  SELECTED_PYTHON=$("$BOOTSTRAP_PYTHON" "$ROOT/scripts/select-python.py" $SELECTOR_ARGS --prefer "$PYTHON_PATH")
+else
+  SELECTED_PYTHON=$("$BOOTSTRAP_PYTHON" "$ROOT/scripts/select-python.py" $SELECTOR_ARGS)
+fi
+
 if [ "$INSTALL_NATIVE" -eq 1 ]; then
   sh "$ROOT/scripts/install-native.sh"
 fi
 
 if [ ! -x "$ROOT/.venv/bin/python" ]; then
-  uv venv "$ROOT/.venv" --python 3.11
+  uv venv "$ROOT/.venv" --python "$SELECTED_PYTHON" --no-python-downloads
 fi
+"$BOOTSTRAP_PYTHON" "$ROOT/scripts/select-python.py" $SELECTOR_ARGS --verify-final "$ROOT/.venv/bin/python" >/dev/null
 uv pip install --exact --python "$ROOT/.venv/bin/python" -r "$ROOT/requirements.txt" -e "$ROOT"
 if [ "$ADD_PATH" -eq 1 ]; then
   "$ROOT/scripts/path.sh" --apply

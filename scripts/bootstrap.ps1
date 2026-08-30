@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
     [switch]$InstallUv,
+    [switch]$AllowEmulatedPython,
+    [string]$PythonPath,
     [switch]$InstallNativeTools,
     [switch]$AddToPath
 )
@@ -60,11 +62,29 @@ if ($InstallNativeTools) {
     }
 }
 
+$Selector = Join-Path $PSScriptRoot 'select-python.py'
+$SelectorArgs = @($Selector)
+if ($AllowEmulatedPython) { $SelectorArgs += '--allow-translated' }
+if ($PythonPath) {
+    $BootstrapPython = $PythonPath
+    $SelectorArgs += @('--prefer', $PythonPath)
+} else {
+    $BootstrapPython = & uv python find 3.11 --no-project --no-python-downloads --no-config
+    if ($LASTEXITCODE -ne 0) {
+        throw 'No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap.'
+    }
+}
+$SelectedPython = & $BootstrapPython @SelectorArgs
+Assert-NativeSuccess 'final Python selection'
+$SelectedPython = $SelectedPython | Select-Object -Last 1
+
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $Python)) {
-    & uv venv (Join-Path $Root '.venv') --python 3.11
+    & uv venv (Join-Path $Root '.venv') --python $SelectedPython --no-python-downloads
     Assert-NativeSuccess 'virtual environment creation'
 }
+& $BootstrapPython @SelectorArgs --verify-final $Python | Out-Null
+Assert-NativeSuccess 'final Python verification'
 & uv pip install --exact --python $Python -r (Join-Path $Root 'requirements.txt') -e $Root
 Assert-NativeSuccess 'Python package installation'
 
