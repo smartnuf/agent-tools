@@ -153,4 +153,4 @@ For routine operation:
 
 The maintained roadmap is [`docs/plan/00-index.md`](docs/plan/00-index.md). It records the current milestone, acceptance gates, estimates, evidence, remaining effort, and recommended next work. [`docs/plan/README.md`](docs/plan/README.md) defines how humans and agents plan tasks and report progress consistently.
 
-The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md) is complete. The next objective is [issue #19](https://github.com/smartnuf/agent-tools/issues/19), the first M2 trusted-publishing slice. The versioned GitHub prerelease and clone-based shared environment remain supported until a reviewed M2 release makes the M1.5 commands public.
+The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md) is complete. [Issue #45](https://github.com/smartnuf/agent-tools/issues/45) owns the first stable PyPI publication and verification slice. The versioned GitHub prerelease and clone-based shared environment remain supported until that reviewed M2 release makes the M1.5 commands public.

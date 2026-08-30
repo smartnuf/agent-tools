@@ -62,12 +62,12 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("dist/*.tar.gz", workflow)
 
     def test_current_tag_matches_package_version(self) -> None:
-        self.assertEqual(release.verify_tag("v0.1.1"), "v0.1.1")
-        self.assertTrue((ROOT / "docs" / "releases" / "v0.1.1.md").is_file())
+        self.assertEqual(release.verify_tag("v0.1.2"), "v0.1.2")
+        self.assertTrue((ROOT / "docs" / "releases" / "v0.1.2.md").is_file())
 
     def test_mismatched_tag_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "does not match"):
-            release.verify_tag("v0.1.2")
+            release.verify_tag("v0.1.3")
 
     def test_checksums_are_sorted_and_reproducible(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
