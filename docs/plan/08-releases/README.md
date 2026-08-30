@@ -57,7 +57,7 @@ mutation and must not expand into the M3 lifecycle work.
 |---|---|---|
 | PyPI project and trusted publisher are configured | complete | The v0.1.2 upload created the project through the protected GitHub `pypi` environment and exact identity in the [release runbook](../../releasing.md) |
 | Reviewed tag publishes without a long-lived upload token | complete | [OIDC publication run 33312422488](https://github.com/smartnuf/agent-tools/actions/runs/33312422488) |
-| Package installs from PyPI on all supported platforms | complete | [PyPI lifecycle run 33312851852](https://github.com/smartnuf/agent-tools/actions/runs/33312851852) passed install, upgrade, reinstall, and removal on Windows, Ubuntu, and macOS |
+| Package installs from PyPI on all supported platforms | complete | [PyPI lifecycle run 33313165322](https://github.com/smartnuf/agent-tools/actions/runs/33313165322) passed unpinned resolution, upgrade, exact reinstall, and removal on Windows, Ubuntu, and macOS |
 | README promotes tested install/update/remove commands | complete | PyPI install, upgrade, exact reinstall pin, and removal commands in the root README are covered by the lifecycle workflow |
 | Stable GitHub Release and PyPI metadata agree | complete | v0.1.2 filename, size, version, Python constraint, and SHA-256 comparison |
 
