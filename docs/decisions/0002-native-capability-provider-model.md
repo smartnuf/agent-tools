@@ -142,8 +142,8 @@ The normal installed-candidate ranking is:
 1. compatible existing native host/system provider;
 2. compatible existing external/system host provider where native status is
    unavailable or irrelevant;
-3. compatible existing translated/emulated external/system provider;
-4. compatible existing managed native provider;
+3. compatible existing managed native provider;
+4. compatible existing translated/emulated external/system provider;
 5. compatible existing managed provider where native status is unavailable or
    irrelevant; and
 6. compatible existing translated/emulated managed provider only as a
@@ -154,7 +154,10 @@ Installable options use native-before-translated and external/system-before-
 managed principles where the platform can actually supply those alternatives.
 Provisioning is considered only when no acceptable installed candidate
 exists; it never displaces a compatible existing external translated provider
-under the default policy.
+under the default policy. A validated explicit preference for native
+provisioning may request that replacement, but the resulting package-manager
+or managed-runtime action remains a separately reported mutation requiring
+explicit authorization.
 
 A validated explicit user provider preference narrows the compatible options
 before default ranking. Selecting a lower-ranked compatible option requires
@@ -163,6 +166,18 @@ departure from the default. An unavailable, unsuitable, or contradictory
 preference fails with its evidence; selection never silently ignores it or
 falls back to another provider. Without such a preference, the default order
 above is authoritative.
+
+Candidates in the same ranking class use stable tie-breakers rather than
+discovery order. First deduplicate paths that resolve to the same executable.
+Then compare built-in provider priority, a capability-declared version score,
+and the normalized resolved absolute path in that order. A version score must
+state its rule: Python bootstrap prefers the requested compatible minor and
+then the greatest verified stable patch; a capability without a declared
+version preference assigns equal version scores. Path comparison is ordinal
+after platform normalization (including case folding on Windows). If distinct
+candidates still have identical keys but contradictory evidence, selection
+fails visibly as ambiguous instead of choosing whichever discovery returned
+first.
 
 A documented compatibility constraint may reject a higher-ranked candidate,
 but its evidence and reason must be visible. In particular, an ARM64 host with
