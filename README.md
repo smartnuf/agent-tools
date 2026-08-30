@@ -76,8 +76,10 @@ Poppler and Ghostscript are not bundled. Install them through the operating-syst
 
 ## Check health and discovered capabilities
 
-Run the health check, then inspect the immutable native-capability catalogue
-with these read-only commands:
+After the optional `uv tool update-shell` step above, run the health check and
+inspect the immutable native-capability catalogue with these read-only
+commands. Without that PATH change, use the same platform-specific executable
+path shown in the verification step.
 
 ```sh
 agent-tools doctor
@@ -160,4 +162,4 @@ For routine operation:
 
 The maintained roadmap is [`docs/plan/00-index.md`](docs/plan/00-index.md). It records the current milestone, acceptance gates, estimates, evidence, remaining effort, and recommended next work. [`docs/plan/README.md`](docs/plan/README.md) defines how humans and agents plan tasks and report progress consistently.
 
-The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md) and the first stable PyPI publication in M2 are complete. M3 now adds tested native/system-first selection and an explicitly authorized capability lifecycle; see the maintained roadmap for the ordered work. The packaged release and clone-based shared development environment remain supported entry points.
+The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md) and the first stable PyPI publication in M2 are complete. M3 will add tested native/system-first selection and an explicitly authorized capability lifecycle; see the maintained roadmap for the ordered work. The packaged release and clone-based shared development environment remain supported entry points.

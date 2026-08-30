@@ -118,27 +118,51 @@ execution environments rather than facts to guess through. Unknown evidence
 stays unknown and is reported; architecture aliases are normalized before
 comparison.
 
-The deterministic pipeline is:
+Selection first evaluates installed candidates:
 
 1. **Discover candidates** through provider-specific, read-only channels,
    including candidates outside `PATH`.
 2. **Verify candidates** by executing bounded identity/version probes and
    collecting path, architecture, environment, and provenance evidence.
-3. **Rank compatible candidates** for the intended final environment.
+3. **Rank compatible installed candidates** for the intended final
+   environment.
 4. **Select explicitly**, passing a verified executable path to downstream
    tooling instead of relying on that tool's implicit preference order.
 5. **Verify the final result** again and fail rather than report success when
    the selected provider and resulting environment disagree.
 
-The normal ranking is:
+If no acceptable installed candidate exists, planning separately ranks
+installable catalogue options. An authorized executor may provision the chosen
+option; selection then starts again with discovery and verification. An absent
+option never becomes the selected provider merely because it is installable,
+and post-mutation rediscovery/final verification is mandatory.
+
+The normal installed-candidate ranking is:
 
 1. compatible existing native host/system provider;
-2. compatible existing host provider where native status is unavailable or
-   irrelevant;
-3. compatible managed native provider when no suitable existing provider
-   exists; and
-4. translated/emulated managed provider only as a deliberate, visibly
-   reported fallback, explicitly authorized where practical.
+2. compatible existing external/system host provider where native status is
+   unavailable or irrelevant;
+3. compatible existing managed native provider;
+4. compatible existing translated/emulated external/system provider;
+5. compatible existing managed provider where native status is unavailable or
+   irrelevant; and
+6. compatible existing translated/emulated managed provider only as a
+   deliberate, visibly reported fallback, explicitly authorized where
+   practical.
+
+Installable options use the same native-before-translated and
+external/system-before-managed principles where the platform can actually
+supply those alternatives. Provisioning a native managed provider may
+therefore outrank reusing an existing translated external provider; that
+departure from reuse is deliberate and must appear in the plan.
+
+A validated explicit user provider preference narrows the compatible options
+before default ranking. Selecting a lower-ranked compatible option requires
+the same visible explicit authorization as the preference and reports the
+departure from the default. An unavailable, unsuitable, or contradictory
+preference fails with its evidence; selection never silently ignores it or
+falls back to another provider. Without such a preference, the default order
+above is authoritative.
 
 A documented compatibility constraint may reject a higher-ranked candidate,
 but its evidence and reason must be visible. In particular, an ARM64 host with
