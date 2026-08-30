@@ -144,6 +144,8 @@ class PythonSelectionTests(unittest.TestCase):
             "release_level": "final",
             "architecture": "ARM64",
             "implementation": "CPython",
+            "platform_tag": "win-arm64",
+            "pointer_bits": 64,
             "base_path": str(Path("C:/Python311/python.exe")),
         }
         completed = subprocess.CompletedProcess([], 0, json.dumps(facts), "")
@@ -155,6 +157,24 @@ class PythonSelectionTests(unittest.TestCase):
         self.assertEqual(verified.architecture, "arm64")
         self.assertEqual(verified.mechanism, selection.ProviderMechanism.SYSTEM)
         self.assertEqual(verified.release_level, "final")
+
+    def test_process_architecture_prefers_interpreter_abi_over_kernel_machine(self) -> None:
+        self.assertEqual(
+            selection._process_architecture(
+                {
+                    "architecture": "aarch64",
+                    "platform_tag": "linux-x86_64",
+                    "pointer_bits": 64,
+                }
+            ),
+            "x86_64",
+        )
+        self.assertEqual(
+            selection._process_architecture(
+                {"architecture": "x86_64", "platform_tag": "", "pointer_bits": 32}
+            ),
+            "x86",
+        )
 
     def test_aliases_deduplicate_and_conflicting_evidence_fails(self) -> None:
         first = candidate("C:/Python311/python.exe", "arm64", selection.ProviderMechanism.SYSTEM)
@@ -195,6 +215,22 @@ class PythonSelectionTests(unittest.TestCase):
         with patch.object(selection, "verify_candidate", return_value=prerelease):
             with self.assertRaisesRegex(selection.SelectionError, "does not match"):
                 selection.verify_final_environment("C:/venv/python.exe", selected)
+        selected_environment = selection.PythonCandidate(
+            "C:/preferred-venv/python.exe",
+            (3, 11, 9),
+            "arm64",
+            selection.ProviderMechanism.SYSTEM,
+            base_path="C:/Python311/python.exe",
+        )
+        matching_environment = selection.PythonCandidate(
+            "C:/venv/python.exe",
+            (3, 11, 9),
+            "arm64",
+            selection.ProviderMechanism.SYSTEM,
+            base_path=selected_environment.base_path,
+        )
+        with patch.object(selection, "verify_candidate", return_value=matching_environment):
+            selection.verify_final_environment("C:/venv/python.exe", selected_environment)
 
     def test_direct_preference_is_verified_even_when_uv_omits_it(self) -> None:
         direct = candidate(

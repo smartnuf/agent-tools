@@ -145,7 +145,12 @@ Assert-NativeSuccess 'final Python selection'
 $SelectedPython = $SelectedPython | Select-Object -Last 1
 
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $Python)) {
+$EnvironmentPath = Join-Path $Root '.venv'
+if ((Test-Path -LiteralPath $EnvironmentPath -PathType Container) -and
+    -not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+    throw 'Existing .venv is damaged or incomplete; remove it deliberately before bootstrap can recreate it.'
+}
+if (-not (Test-Path -LiteralPath $EnvironmentPath -PathType Container)) {
     & uv venv (Join-Path $Root '.venv') --python $SelectedPython --no-python-downloads
     Assert-NativeSuccess 'virtual environment creation'
 }

@@ -10,7 +10,7 @@ ADD_PATH=0
 probe_bootstrap_python() {
   "$1" -I -c 'import sys; raise SystemExit(sys.version_info[:2] != (3, 11))' >/dev/null 2>&1 &
   PROBE_PID=$!
-  (sleep 10; kill "$PROBE_PID" 2>/dev/null || :) &
+  (sleep 10; kill "$PROBE_PID" 2>/dev/null || :; sleep 2; kill -KILL "$PROBE_PID" 2>/dev/null || :) &
   WATCHDOG_PID=$!
   if wait "$PROBE_PID"; then
     PROBE_RESULT=0
@@ -127,7 +127,11 @@ else
   SELECTED_PYTHON=$("$BOOTSTRAP_PYTHON" -I "$ROOT/scripts/select-python.py" $SELECTOR_ARGS)
 fi
 
-if [ ! -x "$ROOT/.venv/bin/python" ]; then
+if [ -d "$ROOT/.venv" ] && [ ! -x "$ROOT/.venv/bin/python" ]; then
+  echo "Existing .venv is damaged or incomplete; remove it deliberately before bootstrap can recreate it." >&2
+  exit 1
+fi
+if [ ! -d "$ROOT/.venv" ]; then
   uv venv "$ROOT/.venv" --python "$SELECTED_PYTHON" --no-python-downloads
 fi
 if [ -n "$PYTHON_PATH" ]; then

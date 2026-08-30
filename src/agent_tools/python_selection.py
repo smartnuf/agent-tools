@@ -264,6 +264,8 @@ def verify_candidate(record: dict[str, Any]) -> PythonCandidate | None:
         "print(json.dumps({'path':sys.executable,'version':list(sys.version_info[:3]),"
         "'release_level':sys.version_info.releaselevel,'architecture':platform.machine(),"
         "'implementation':platform.python_implementation(),"
+        "'platform_tag':__import__('sysconfig').get_platform(),"
+        "'pointer_bits':__import__('struct').calcsize('P') * 8,"
         "'system':platform.system(),'release':platform.release(),"
         "'wsl':bool(__import__('os').environ.get('WSL_INTEROP') or "
         "__import__('os').environ.get('WSL_DISTRO_NAME') or "
@@ -294,13 +296,35 @@ def verify_candidate(record: dict[str, Any]) -> PythonCandidate | None:
     return PythonCandidate(
         resolved_path,
         version,
-        normalize_architecture(facts.get("architecture")),
+        _process_architecture(facts),
         _provider_mechanism(record, resolved_path),
         execution_environment=_candidate_execution_environment(facts),
         implementation=str(facts.get("implementation", "")).casefold(),
         release_level=str(facts.get("release_level", "")),
         base_path=base_path,
     )
+
+
+def _process_architecture(facts: dict[str, Any]) -> str:
+    machine = normalize_architecture(facts.get("architecture"))
+    tag = str(facts.get("platform_tag", "")).casefold().replace("-", "_")
+    for aliases, architecture in (
+        (("x86_64", "amd64"), "x86_64"),
+        (("aarch64", "arm64"), "arm64"),
+        (("i386", "i686", "win32"), "x86"),
+        (("armv7", "armv6"), "arm"),
+    ):
+        if any(alias in tag for alias in aliases):
+            return architecture
+    try:
+        pointer_bits = int(facts.get("pointer_bits", 0))
+    except (TypeError, ValueError):
+        pointer_bits = 0
+    if pointer_bits == 32 and machine == "x86_64":
+        return "x86"
+    if pointer_bits == 32 and machine == "arm64":
+        return "arm"
+    return machine
 
 
 def _candidate_execution_environment(facts: dict[str, Any]) -> str:
@@ -569,7 +593,7 @@ def verify_final_environment(python: str, selected: PythonCandidate) -> None:
         or actual.architecture != selected.architecture
         or actual.implementation != selected.implementation
         or os.path.normcase(os.path.normpath(actual.base_path or ""))
-        != os.path.normcase(os.path.normpath(selected.path))
+        != os.path.normcase(os.path.normpath(selected.base_path or selected.path))
     ):
         raise SelectionError(
             "final Python does not match the selected interpreter: "

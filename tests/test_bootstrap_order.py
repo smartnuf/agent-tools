@@ -49,6 +49,13 @@ class BootstrapOrderTests(unittest.TestCase):
         self.assertGreaterEqual(powershell.count("$BootstrapPython -I"), 2)
         self.assertGreaterEqual(posix.count('"$BOOTSTRAP_PYTHON" -I'), 4)
 
+    def test_existing_damaged_environment_fails_closed_and_posix_timeout_escalates(self) -> None:
+        powershell = (ROOT / "scripts" / "bootstrap.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "scripts" / "bootstrap.sh").read_text(encoding="utf-8")
+        self.assertIn("Existing .venv is damaged or incomplete", powershell)
+        self.assertIn("Existing .venv is damaged or incomplete", posix)
+        self.assertIn('kill -KILL "$PROBE_PID"', posix)
+
 
 if __name__ == "__main__":
     unittest.main()
