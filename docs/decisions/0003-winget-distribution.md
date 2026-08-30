@@ -15,7 +15,9 @@ Decision 0001 does not authorize a Windows installer or standalone binary.
 Therefore M4a may research, prototype locally, and define validation, but it
 must not implement or publish a new artifact until a later decision accepts the
 artifact class, architecture coverage, signing/provenance, and maintenance cost.
-Do not bundle or claim ownership of uv, Python, Poppler, Ghostscript, or Bash.
+Do not install or claim ownership of uv, a shared Python installation, Poppler,
+Ghostscript, or Bash. A later-approved standalone artifact may embed an
+application-private Python runtime when the artifact owns and removes it fully.
 
 ## Consequences
 

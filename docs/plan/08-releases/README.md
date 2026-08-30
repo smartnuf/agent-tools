@@ -103,9 +103,11 @@ and separately authorized submission slices.
 | Release-version update proposals are automated and review-gated | deferred | Exact-version automation test and maintainer runbook |
 | Community-repository submission is accepted | deferred | Accepted external submission link |
 
-Estimate: **4–7 person-days**, excluding external review time and the separately
-estimated artifact implementation. Stop if no artifact is approved, demand is
-insufficient, or lifecycle/architecture evidence cannot be produced.
+Estimate: **4–7 person-days** for the channel work, excluding external review
+time and a required Windows artifact whose implementation estimate remains TBD
+until issue #59 selects and authorizes its class. The end-to-end M4a forecast is
+therefore incomplete. Stop if no artifact is approved, demand is insufficient,
+or lifecycle/architecture evidence cannot be produced.
 
 ### M4b — Homebrew
 

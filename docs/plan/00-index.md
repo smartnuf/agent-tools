@@ -16,14 +16,16 @@
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
 | M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
 | M3 | Tested update and capability lifecycle | not-started | 0/8 | 3–6 days | 3–6 days |
-| M4a | WinGet discovery | deferred | 0/6 | 4–7 days | 4–7 days |
+| M4a | WinGet discovery | deferred | 0/6 | 4–7 days + artifact TBD | 4–7 days + artifact TBD |
 | M4b | Homebrew discovery | deferred | 0/6 | 3–5 days | 3–5 days |
 
 Estimated implementation effort through M3: **3–6 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
 
-Post-M3 optional-channel implementation is now estimated at **7–12
-person-days**, excluding external moderation. Research completed the architecture
-decisions but did not complete an implementation acceptance gate.
+Post-M3 optional-channel work is now estimated at **7–12 person-days plus the
+unselected Windows artifact**, excluding external moderation. The aggregate is
+incomplete until issue #59 authorizes and decomposes an artifact class. Research
+completed the architecture decisions but did not complete an implementation
+acceptance gate.
 
 Gate counts are binary readiness measures. Estimates are ranges and must be revised when implementation reveals new facts.
 

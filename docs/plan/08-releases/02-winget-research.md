@@ -34,7 +34,7 @@ The following are documented requirements, not project inferences:
   mutable vanity URLs invalidate hashes. [Community repository policies](https://github.com/microsoft/winget-pkgs/blob/master/doc/Policies.md)
 - `InstallerUrl` and SHA-256 are required per installer. The declared
   architecture describes installed binaries, and portable archives may expose
-  command aliases and have WinGet manage their PATH integration. [Installer manifest schema](https://github.com/microsoft/winget-pkgs/blob/master/doc/manifest/schema/1.28.0/installer.md)
+  command aliases and have WinGet manage their PATH integration. [Installer manifest schema](https://github.com/microsoft/winget-pkgs/blob/master/doc/manifest/schema/1.12.0/installer.md)
 - Identifiers are unique; the manifest path, identifier, publisher,
   application, and version must agree. Publisher and package names should
   correlate with Add/Remove Programs so discovery and upgrades work.
@@ -65,10 +65,12 @@ WinGet maintainers would not repair the split ownership problem.
 | Standalone portable executable/ZIP | WinGet owns files, command alias/PATH, upgrade, and removal; no Python ownership exposed | Immutable archive/executable and hash cover the complete app | Preferred feasibility target; new artifact decision required |
 | No WinGet package | Users continue the tested PyPI/uv lifecycle | Existing attestations and hashes remain authoritative | Default if demand or artifact economics fail |
 
-An installer must not install uv, use uv-managed Python, resolve PyPI at runtime,
-mutate a shell profile, bundle Poppler/Ghostscript/Git Bash, or claim ownership
-of those shared native providers. Native capabilities remain separately managed
-under Decision 0002 and missing providers remain actionable diagnostics.
+An installer must not install uv, use uv-managed or shared Python, resolve PyPI
+at runtime, mutate a shell profile, bundle Poppler/Ghostscript/Git Bash, or claim
+ownership of those shared native providers. A separately approved standalone
+artifact may contain an application-private Python runtime covered by the same
+artifact hash and lifecycle. Native capabilities remain separately managed under
+Decision 0002 and missing providers remain actionable diagnostics.
 
 ## Proposed implementation and validation workflow
 
@@ -101,7 +103,9 @@ Issue #64 remains an external-publication boundary requiring explicit authority.
 ## Risks, unresolved questions, and rejection criteria
 
 - Artifact selection, signing, Python embedding, CVE rebuilds, and x64/ARM64
-  coverage require a later decision. An MSI is not presumed necessary.
+  coverage require a later decision. An MSI is not presumed necessary. Until
+  that decision decomposes and estimates the selected artifact, M4a's end-to-end
+  forecast is necessarily incomplete.
 - A portable executable may be impractical for current native Python
   dependencies or may trigger security scanning. Prototype evidence must decide.
 - WinGet pinning is client state; rollback availability depends on retained
