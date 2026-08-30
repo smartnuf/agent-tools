@@ -74,12 +74,15 @@ uv tool uninstall smartnuf-agent-tools
 
 Poppler and Ghostscript are not bundled. Install them through the operating-system package manager before expecting `agent-tools doctor` to pass completely. See the [v0.1.2 release notes](docs/releases/v0.1.2.md) for current limitations.
 
-## Capability discovery in reviewed source
+## Check health and discovered capabilities
 
-The reviewed M1.5 source build adds an immutable native-capability catalogue and
-these read-only commands:
+After the optional `uv tool update-shell` step above, run the health check and
+inspect the immutable native-capability catalogue with these read-only
+commands. Without that PATH change, use the same platform-specific executable
+path shown in the verification step.
 
 ```sh
+agent-tools doctor
 agent-tools tools list
 agent-tools tools status
 agent-tools tools status bash
@@ -159,4 +162,4 @@ For routine operation:
 
 The maintained roadmap is [`docs/plan/00-index.md`](docs/plan/00-index.md). It records the current milestone, acceptance gates, estimates, evidence, remaining effort, and recommended next work. [`docs/plan/README.md`](docs/plan/README.md) defines how humans and agents plan tasks and report progress consistently.
 
-The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md) is complete. [Issue #45](https://github.com/smartnuf/agent-tools/issues/45) owns the first stable PyPI publication and verification slice. The versioned GitHub prerelease and clone-based shared environment remain supported until that reviewed M2 release makes the M1.5 commands public.
+The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md) and the first stable PyPI publication in M2 are complete. M3 will add tested native/system-first selection and an explicitly authorized capability lifecycle; see the maintained roadmap for the ordered work. The packaged release and clone-based shared development environment remain supported entry points.

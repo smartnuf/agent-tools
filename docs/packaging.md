@@ -50,3 +50,26 @@ There are currently no optional dependency groups: omitting the document librari
 `tests/check_distribution.py` validates wheel and source-distribution metadata, required contents, archive safety, and exclusion of machine-local state without importing from the checkout. CI installs the wheel and all declared dependencies in a clean environment, then `tests/check_installed_cli.py` requires `--version`, `doctor`, `tools list`, and the platform-appropriate Bash provider status to pass from an unrelated directory. Build and smoke-test state is kept outside the checkout, which must remain unchanged.
 
 CI builds one release bundle on Ubuntu, verifies its checksum manifest, and passes the same wheel to Windows, Ubuntu, and macOS jobs for isolated `uv tool` installation. This proves operating-system portability of the pure-Python artifact, but it is not native ARM64 coverage. Windows ARM64 may use x64-emulated uv-managed Python; native interpreter selection and architecture reporting are tracked in issue #14.
+
+## PyPI presentation review
+
+The root `README.md` is the package long description and therefore serves both
+GitHub readers and the PyPI project page. The stable v0.1.2 metadata correctly
+publishes Markdown content, the SPDX `MIT` license expression, the packaged
+license file, the supported Python range, and the current product summary and
+keywords. Publication uses PyPI Trusted Publishing through the dedicated
+GitHub Actions release workflow and protected `pypi` environment; it does not
+use a long-lived upload token.
+
+Current PyPA guidance deprecates `License ::` classifiers when an SPDX license
+expression is present, and recommends well-known project URL labels such as
+Documentation and Changelog when genuine destinations exist. A bounded
+[casual-user README and metadata issue](https://github.com/smartnuf/agent-tools/issues/56)
+owns that presentation cleanup before the next release. It is kept out of the
+provider-selection design change so the larger PyPI front-door rewrite can be
+reviewed on its own rendered result.
+
+The required document libraries are also a real product-boundary question for
+casual users, not a mechanical metadata cleanup. [Issue #57](https://github.com/smartnuf/agent-tools/issues/57)
+will decide the core-versus-`documents` contract before any dependency moves;
+the present mandatory dependencies and `doctor` behavior remain unchanged.

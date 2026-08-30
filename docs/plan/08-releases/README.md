@@ -69,17 +69,25 @@ Outcome: installation is not a one-off; supported upgrading, pinning, rollback, 
 
 | Acceptance criterion | State | Required evidence |
 |---|---|---|
-| Fresh and repeated installation are tested | not-started | Automated lifecycle test |
+| Fresh and repeated installation are tested | complete | [PyPI lifecycle run 33313165322](https://github.com/smartnuf/agent-tools/actions/runs/33313165322) installs, upgrades/reconciles, exactly reinstalls, and removes v0.1.2 on Windows, Ubuntu, and macOS |
 | Upgrade from the previous supported release is tested | not-started | Automated upgrade test |
 | Version pinning and rollback are tested | not-started | Automated lifecycle test |
 | Removal leaves documented user-owned state untouched | not-started | Automated or disposable-host test |
 | Native dependency failures are actionable | not-started | `doctor` tests with absent/partial tools |
-| Release procedure requires no unpublished local step | not-started | Maintainer runbook and completed release |
-| Provider mutation consumes an inspectable plan, requires a flag, reports changes, records provenance, and is shared by clone wrappers | not-started | Unit/disposable-host tests prove plan generation and executor consumption, installation flag enforcement, complete change reports, and persisted record contents; if provider removal is added, its separate flag and refusal rules are tested; bootstrap wrappers delegate without duplicate package mappings |
+| Release procedure requires no unpublished local step | complete | [v0.1.2 publication run 33312422488](https://github.com/smartnuf/agent-tools/actions/runs/33312422488) verified the signed GitHub release artifacts against tag checksums/attestations and published them through GitHub OIDC/Trusted Publishing |
+| Native/system-first final-provider selection reuses suitable pre-seeded providers independently of bootstrap process architecture | not-started | #14 pure selection fixtures and #49 seeded-workstation/disposable-host evidence cover native, unknown, translated, external, managed, and separate-environment candidates; explicit preferences and native-provisioning overrides; consistent same-executable evidence merging and conflict rejection; provider/version/path tie-breakers; and ambiguity failure, without claiming unavailable hosted ARM64 coverage |
+| Provider mutation consumes an inspectable plan, requires a flag, reports changes, records provenance, and is shared by clone wrappers | not-started | Unit/disposable-host tests prove plan generation and executor consumption, installation flag enforcement, complete change reports, persisted record contents, and mandatory post-provision rediscovery plus final verification before selection; if provider removal is added, its separate flag and refusal rules are tested; bootstrap wrappers delegate without duplicate package mappings |
 | Desired-state and integration configuration changes are authorized, backed up, validated, reversible, preserve unrelated state, and never uninstall providers | not-started | Tests for existing configuration prove explicit authorization, recoverable backup, resulting-state validation, failure restoration, unrelated-state preservation, and no provider uninstall; integration cases cover shared/dedicated providers and Git for Windows |
 
-Estimate: **3–6 person-days**. Split provider execution, persistent state, and
-agent integrations into separate reviewed tasks before implementation.
+Estimate: **6–10 person-days**. [Issue #26](https://github.com/smartnuf/agent-tools/issues/26)
+records the reviewed dependency order. Native/system-first selection (#14) and
+pre-seeded workstation evidence (#49) precede read-only provider planning
+(#50), explicit mutation (#51), provenance (#52), clone delegation (#53),
+desired-state safety (#54), and agent integration (#27). Issue #55 supplies
+the earlier-release upgrade, rollback, and removal evidence not already proven
+by M2. GitHub-hosted CI covers Windows, Ubuntu, and macOS on its available
+runner architectures; pure fixtures cover translated/ARM64 combinations and
+must not be presented as hosted ARM64 evidence.
 
 ## M4 — Optional discovery channels
 

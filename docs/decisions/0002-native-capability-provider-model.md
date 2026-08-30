@@ -83,6 +83,143 @@ Stage the CLI:
   requested and observed host change, and refuse when provenance or safety is
   uncertain.
 
+## Final-provider selection contract
+
+Discovery and bootstrap are not provider-selection policy. For every
+capability that Agent Tools selects or arranges for later use, the finalized
+setup normally reuses a compatible existing native/system provider. A
+bootstrap process may run under translation or use a temporary managed tool,
+but that does not make a translated or managed provider preferable for the
+final environment.
+
+Selection keeps these facts separate:
+
+- host platform and host architecture;
+- discovery/bootstrap process architecture and translated/emulated state,
+  where observable;
+- execution environment, such as the Windows host, WSL, a container, or a
+  native Unix host;
+- provider executable architecture;
+- provider mechanism/origin, such as system/external versus a runtime managed
+  by uv or another tool;
+- Agent Tools mutation provenance, meaning pre-existing/unrecorded versus a
+  mutation Agent Tools requested, without implying package ownership; and
+- compatibility with the intended final execution environment.
+
+`platform.machine()` describes the running Python context and is not, by
+itself, sufficient evidence of host architecture when that Python may be
+translated. Platform adapters may therefore add host/process evidence. On
+Windows, [`IsWow64Process2`](https://learn.microsoft.com/windows/win32/api/wow64apiset/nf-wow64apiset-iswow64process2)
+can report the process machine and native host machine; older or unavailable
+APIs require an explicitly limited fallback.
+On macOS, translation evidence such as `sysctl.proc_translated` may supplement
+process and hardware architecture observations. On Linux and other Unix-like
+systems, kernel-reported architecture is useful host-environment evidence, but
+containers, virtual machines, and compatibility layers remain distinct
+execution environments rather than facts to guess through. Unknown evidence
+stays unknown and is reported; architecture aliases are normalized before
+comparison.
+
+Selection first evaluates installed candidates:
+
+1. **Discover candidates** through provider-specific, read-only channels,
+   including candidates outside `PATH`.
+2. **Verify candidates** by executing bounded identity/version probes and
+   collecting path, architecture, environment, and provenance evidence.
+3. **Rank compatible installed candidates** for the intended final
+   environment.
+4. **Select explicitly**, passing a verified executable path to downstream
+   tooling instead of relying on that tool's implicit preference order.
+5. **Verify the final result** again and fail rather than report success when
+   the selected provider and resulting environment disagree.
+
+If no acceptable installed candidate exists, planning separately ranks
+installable catalogue options. An authorized executor may provision the chosen
+option; selection then starts again with discovery and verification. An absent
+option never becomes the selected provider merely because it is installable,
+and post-mutation rediscovery/final verification is mandatory.
+
+The normal installed-candidate ranking is:
+
+1. compatible existing native system/external-mechanism provider;
+2. compatible existing system/external-mechanism provider where native status
+   is unavailable or irrelevant;
+3. compatible existing native tool-managed-mechanism provider;
+4. compatible existing translated/emulated system/external-mechanism provider;
+5. compatible existing tool-managed-mechanism provider where native status is
+   unavailable or irrelevant; and
+6. compatible existing translated/emulated tool-managed-mechanism provider
+   only as a deliberate, visibly reported fallback, explicitly authorized
+   where practical.
+
+Installable options use native-before-translated and system/external-mechanism-
+before-tool-managed-mechanism principles where the platform can actually
+supply those alternatives.
+Provisioning is considered only when no acceptable installed candidate
+exists; it never displaces a compatible existing external translated provider
+under the default policy. A validated explicit preference for native
+provisioning may request that replacement, but the resulting package-manager
+or managed-runtime action remains a separately reported mutation requiring
+explicit authorization.
+
+A validated explicit user provider preference narrows the compatible options
+before default ranking. Selecting a lower-ranked compatible option requires
+the same visible explicit authorization as the preference and reports the
+departure from the default. An unavailable, unsuitable, or contradictory
+preference fails with its evidence; selection never silently ignores it or
+falls back to another provider. Without such a preference, the default order
+above is authoritative.
+
+Candidates in the same ranking class use stable tie-breakers rather than
+discovery order. First group observations by normalized resolved executable
+identity. Complementary evidence for one executable may be merged only when
+all overlapping facts agree. Conflicting provider, version, architecture,
+environment, provenance, or suitability evidence for that identity fails
+visibly before deduplication; no discovery channel wins by arrival order.
+
+Provider mechanism and Agent Tools mutation provenance remain independent. For
+example, a uv-managed Python that predates Agent Tools is a tool-managed-
+mechanism provider with pre-existing/unrecorded Agent Tools provenance. A
+managed-state record changes reporting of the requested mutation, not the
+candidate's mechanism class or ownership.
+
+After each identity has one consistent candidate, compare built-in provider
+priority, a capability-declared version score, and the normalized resolved
+absolute path in that order. A version score must state its rule: Python
+bootstrap prefers the requested compatible minor and then the greatest
+verified stable patch; a capability without a declared version preference
+assigns equal version scores. Path comparison is ordinal after platform
+normalization (including case folding on Windows); the lowest ordinal
+normalized path wins. If distinct candidates still have identical keys but
+contradictory evidence, selection fails visibly as ambiguous instead of
+choosing whichever discovery returned first.
+
+A documented compatibility constraint may reject a higher-ranked candidate,
+but its evidence and reason must be visible. In particular, an ARM64 host with
+an x64/emulated bootstrap process and a compatible existing native ARM64
+Python selects the native ARM64 Python for the final environment.
+
+uv's current documented
+[`python-preference = "managed"`](https://docs.astral.sh/uv/concepts/python-versions/#adjusting-python-version-preferences)
+can prefer an already
+installed uv-managed Python over an installed system Python, although a
+compatible system Python is considered before uv downloads a new managed
+Python. `system`, `only-system`/`--no-managed-python`, automatic-download
+controls, and explicit interpreter paths are useful discovery/execution
+controls; they do not determine native suitability for Agent Tools. Python
+bootstrap must apply this contract first, then give uv the selected verified
+interpreter path.
+
+Under the default policy, provider plans must contain no installation action
+when a suitable candidate already verifies. The only exception is a validated
+explicit preference for native provisioning under the rule above; that plan
+must identify the compatible installed provider it would displace and remains
+subject to separate mutation authorization. Selection and planning require
+both empty/disposable-host and already-equipped workstation evidence. Pure
+fixtures cover otherwise unavailable combinations; platform CI claims only
+the runner architectures it actually exercises and does not imply hosted
+Windows ARM64 coverage.
+
 ## Bash capability
 
 Represent `bash` as an optional capability whose contract is a verified
