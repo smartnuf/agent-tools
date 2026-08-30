@@ -67,6 +67,66 @@ class ProviderPlanTests(unittest.TestCase):
         with self.assertRaisesRegex(provider_plans.PlanningError, "unsupported package manager"):
             provider_plans.adapter_commands("unknown", "unit")
 
+    def test_native_provisioning_override_names_displaced_translated_provider(self):
+        machine = capabilities.MachineState("Windows", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, machine: (
+                "C:/Git/bin/bash.exe" if probe.locator_strategy == "git-bash" else None
+            ),
+            version_reader=lambda probe, path: "GNU bash 5.2",
+            architecture_reader=lambda probe, path: "x86_64",
+        )
+        plan = provider_plans.generate_provider_plan(
+            (state,),
+            ("bash",),
+            available_managers=("winget",),
+            native_provisioning=("bash",),
+        )
+        self.assertEqual(plan.actions[0].displaces_verified_paths, ("C:/Git/bin/bash.exe",))
+        self.assertIn("explicit native-provisioning override", plan.actions[0].reason)
+
+    def test_native_override_rejects_native_or_unrequested_capability(self):
+        native = self.state(capabilities.BASH, "Windows", available=True)
+        with self.assertRaisesRegex(provider_plans.PlanningError, "not a verified translated"):
+            provider_plans.generate_provider_plan(
+                (native,), ("bash",), available_managers=("winget",), native_provisioning=("bash",)
+            )
+        with self.assertRaisesRegex(provider_plans.PlanningError, "was not requested"):
+            provider_plans.generate_provider_plan(
+                (native,), ("bash",), available_managers=("winget",), native_provisioning=("poppler",)
+            )
+
+    def test_caller_owned_catalogue_metadata_is_rejected(self):
+        custom = capabilities.CapabilitySpec(
+            "custom",
+            "custom",
+            False,
+            (
+                capabilities.ProviderSpec(
+                    "custom-provider",
+                    "custom provider",
+                    frozenset({"Linux"}),
+                    frozenset({"host"}),
+                    (capabilities.ExecutableProbe("custom", ("--version",)),),
+                    capabilities.ProbePolicy.ANY,
+                    packages=(
+                        capabilities.ProviderPackage("apt", "arbitrary", frozenset({"Linux"})),
+                    ),
+                ),
+            ),
+        )
+        state = capabilities.detect_capability(
+            custom,
+            capabilities.MachineState("Linux", "x86_64"),
+            locator=lambda probe, machine: None,
+        )
+        with self.assertRaisesRegex(provider_plans.PlanningError, "unknown built-in"):
+            provider_plans.generate_provider_plan(
+                (state,), ("custom",), available_managers=("apt",)
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

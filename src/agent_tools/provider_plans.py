@@ -5,7 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from .capabilities import Availability, CapabilityState, ProviderPackage, ProviderSpec
+from .capabilities import (
+    Availability,
+    CapabilityState,
+    ProviderPackage,
+    ProviderSpec,
+    get_capability,
+)
+from .python_selection import normalize_architecture
 
 
 class PlanningError(RuntimeError):
@@ -22,6 +29,7 @@ class ProviderAction:
     expected_probes: tuple[str, ...]
     commands: tuple[tuple[str, ...], ...]
     shared_package: bool
+    displaces_verified_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -68,20 +76,60 @@ def generate_provider_plan(
     requested_capabilities: Iterable[str],
     *,
     available_managers: Iterable[str],
+    native_provisioning: Iterable[str] = (),
 ) -> ProviderPlan:
     """Plan missing requested providers from verified state without mutation."""
 
     by_id = {state.capability.capability_id: state for state in states}
     requested = tuple(dict.fromkeys(requested_capabilities))
     managers = frozenset(available_managers)
+    native_overrides = frozenset(native_provisioning)
+    unknown_overrides = native_overrides.difference(requested)
+    if unknown_overrides:
+        raise PlanningError(
+            "native-provisioning override was not requested: "
+            + ", ".join(sorted(unknown_overrides))
+        )
     actions: list[ProviderAction] = []
     for capability_id in requested:
         try:
             state = by_id[capability_id]
         except KeyError as error:
             raise PlanningError(f"capability has no detected state: {capability_id}") from error
-        if state.availability is Availability.AVAILABLE:
+        try:
+            catalogue_capability = get_capability(capability_id)
+        except KeyError as error:
+            raise PlanningError(f"unknown built-in capability: {capability_id}") from error
+        if (
+            state.capability != catalogue_capability
+            or tuple(item.provider for item in state.providers)
+            != catalogue_capability.providers
+        ):
+            raise PlanningError(
+                f"detected state does not match built-in catalogue: {capability_id}"
+            )
+        displaced: tuple[str, ...] = ()
+        if state.availability is Availability.AVAILABLE and capability_id not in native_overrides:
             continue
+        if capability_id in native_overrides:
+            selected_provider = state.selected_provider
+            if selected_provider is None:
+                raise PlanningError(
+                    f"native-provisioning override has no installed provider to replace: {capability_id}"
+                )
+            verified = tuple(
+                item for item in selected_provider.executables if item.verified
+            )
+            if not verified or any(
+                item.architecture is None
+                or normalize_architecture(item.architecture)
+                == normalize_architecture(state.machine.architecture)
+                for item in verified
+            ):
+                raise PlanningError(
+                    f"native-provisioning override is not a verified translated provider: {capability_id}"
+                )
+            displaced = tuple(item.path for item in verified if item.path is not None)
         if state.availability is Availability.UNSUPPORTED:
             raise PlanningError(f"capability is unsupported: {capability_id}")
         selected: tuple[ProviderSpec, ProviderPackage] | None = None
@@ -105,10 +153,15 @@ def generate_provider_plan(
                 provider_id=provider.provider_id,
                 manager=package.manager,
                 installation_unit=package.installation_unit,
-                reason="no compatible provider verified",
+                reason=(
+                    "explicit native-provisioning override replaces translated provider"
+                    if displaced
+                    else "no compatible provider verified"
+                ),
                 expected_probes=tuple(probe.name for probe in provider.probes),
                 commands=adapter_commands(package.manager, package.installation_unit),
                 shared_package=provider.shared_package,
+                displaces_verified_paths=displaced,
             )
         )
     return ProviderPlan(requested, tuple(actions))
