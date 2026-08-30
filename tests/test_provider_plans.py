@@ -21,6 +21,7 @@ class ProviderPlanTests(unittest.TestCase):
         )
         self.assertEqual(plan.actions, ())
         self.assertFalse(plan.changes_host)
+        self.assertEqual(plan.context, states[0].machine)
 
     def test_linux_plan_is_deterministic_and_inspectable(self):
         states = (self.state(capabilities.POPPLER), self.state(capabilities.GHOSTSCRIPT))
@@ -31,6 +32,14 @@ class ProviderPlanTests(unittest.TestCase):
         self.assertEqual(tuple(action.installation_unit for action in plan.actions), ("ghostscript", "poppler-utils"))
         self.assertEqual(plan.actions[0].commands, (("apt-get", "update"), ("apt-get", "install", "-y", "ghostscript")))
         self.assertTrue(all(action.shared_package for action in plan.actions))
+        self.assertEqual(
+            plan.actions[0].verification,
+            provider_plans.VerificationRequirement(("gs", "gswin64c", "gswin32c"), capabilities.ProbePolicy.ANY),
+        )
+        self.assertEqual(
+            plan.actions[1].verification,
+            provider_plans.VerificationRequirement(("pdfinfo", "pdftotext", "pdftoppm"), capabilities.ProbePolicy.ALL),
+        )
 
     def test_platform_adapters_render_expected_argv(self):
         cases = {
@@ -120,6 +129,32 @@ class ProviderPlanTests(unittest.TestCase):
             provider_plans.generate_provider_plan(
                 (state, state), ("poppler",), available_managers=("apt",)
             )
+
+    def test_requested_states_must_share_one_complete_execution_context(self):
+        baseline = self.state(capabilities.POPPLER)
+        variants = (
+            capabilities.MachineState("Darwin", "x86_64", "host"),
+            capabilities.MachineState("Linux", "arm64", "host"),
+            capabilities.MachineState("Linux", "x86_64", "wsl"),
+        )
+        for machine in variants:
+            other = capabilities.detect_capability(
+                capabilities.GHOSTSCRIPT, machine, locator=lambda probe, machine: None
+            )
+            with self.subTest(machine=machine), self.assertRaisesRegex(
+                provider_plans.PlanningError, "multiple execution contexts"
+            ):
+                provider_plans.generate_provider_plan(
+                    (baseline, other), ("poppler", "ghostscript"), available_managers=("apt", "brew")
+                )
+
+    def test_irrelevant_observations_do_not_change_plan_context(self):
+        requested = self.state(capabilities.POPPLER)
+        irrelevant = self.state(capabilities.GHOSTSCRIPT, "Darwin")
+        plan = provider_plans.generate_provider_plan(
+            (requested, irrelevant, irrelevant), ("poppler",), available_managers=("apt",)
+        )
+        self.assertEqual(plan.context, requested.machine)
 
     def test_winget_uses_manager_specific_x64_token(self):
         command = provider_plans.adapter_commands(

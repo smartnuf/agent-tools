@@ -10,6 +10,8 @@ from .capabilities import (
     CapabilityState,
     ProviderPackage,
     ProviderSpec,
+    ProbePolicy,
+    MachineState,
     get_capability,
 )
 from .python_selection import normalize_architecture
@@ -20,13 +22,19 @@ class PlanningError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class VerificationRequirement:
+    probes: tuple[str, ...]
+    policy: ProbePolicy
+
+
+@dataclass(frozen=True)
 class ProviderAction:
     capability_id: str
     provider_id: str
     manager: str
     installation_unit: str
     reason: str
-    expected_probes: tuple[str, ...]
+    verification: VerificationRequirement
     commands: tuple[tuple[str, ...], ...]
     shared_package: bool
     displaces_verified_paths: tuple[str, ...] = ()
@@ -36,6 +44,7 @@ class ProviderAction:
 @dataclass(frozen=True)
 class ProviderPlan:
     requested_capabilities: tuple[str, ...]
+    context: MachineState | None
     actions: tuple[ProviderAction, ...]
 
     @property
@@ -104,13 +113,21 @@ def generate_provider_plan(
 ) -> ProviderPlan:
     """Plan missing requested providers from verified state without mutation."""
 
+    requested = tuple(dict.fromkeys(requested_capabilities))
+    requested_ids = frozenset(requested)
     by_id: dict[str, CapabilityState] = {}
     for state in states:
         capability_id = state.capability.capability_id
+        if capability_id not in requested_ids:
+            continue
         if capability_id in by_id:
             raise PlanningError(f"duplicate detected capability state: {capability_id}")
         by_id[capability_id] = state
-    requested = tuple(dict.fromkeys(requested_capabilities))
+    requested_states = tuple(by_id[item] for item in requested if item in by_id)
+    contexts = {state.machine for state in requested_states}
+    if len(contexts) > 1:
+        raise PlanningError("requested capability states span multiple execution contexts")
+    context = next(iter(contexts), None)
     managers = frozenset(available_managers)
     native_overrides = frozenset(native_provisioning)
     unknown_overrides = native_overrides.difference(requested)
@@ -194,7 +211,10 @@ def generate_provider_plan(
                     if displaced
                     else "no compatible provider verified"
                 ),
-                expected_probes=tuple(probe.name for probe in provider.probes),
+                verification=VerificationRequirement(
+                    tuple(probe.name for probe in provider.probes),
+                    provider.probe_policy,
+                ),
                 commands=adapter_commands(
                     package.manager,
                     package.installation_unit,
@@ -213,4 +233,4 @@ def generate_provider_plan(
                 ),
             )
         )
-    return ProviderPlan(requested, tuple(actions))
+    return ProviderPlan(requested, context, tuple(actions))

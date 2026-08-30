@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -83,8 +82,15 @@ class ProviderSpec:
     removal_policy: RemovalPolicy = RemovalPolicy.PROHIBITED
     provided_environment: str = "host"
     satisfies_capability: bool = True
+    supported_contexts: frozenset[tuple[str, str]] = frozenset()
 
     def supports(self, machine: MachineState) -> bool:
+        if self.supported_contexts:
+            return (
+                (machine.platform, machine.execution_environment)
+                in self.supported_contexts
+                and (not self.architectures or machine.architecture in self.architectures)
+            )
         return (
             machine.platform in self.platforms
             and machine.execution_environment in self.execution_environments
@@ -184,6 +190,9 @@ POPPLER = CapabilitySpec(
                 ProviderPackage("pacman", "poppler", frozenset({"Linux"})),
                 ProviderPackage("brew", "poppler", frozenset({"Darwin"})),
             ),
+            supported_contexts=frozenset(
+                {("Windows", "host"), ("Linux", "host"), ("Linux", "wsl"), ("Darwin", "host")}
+            ),
         ),
     ),
 )
@@ -210,6 +219,9 @@ GHOSTSCRIPT = CapabilitySpec(
                 ProviderPackage("dnf", "ghostscript", frozenset({"Linux"})),
                 ProviderPackage("pacman", "ghostscript", frozenset({"Linux"})),
                 ProviderPackage("brew", "ghostscript", frozenset({"Darwin"})),
+            ),
+            supported_contexts=frozenset(
+                {("Windows", "host"), ("Linux", "host"), ("Linux", "wsl"), ("Darwin", "host")}
             ),
         ),
     ),
@@ -239,6 +251,7 @@ BASH = CapabilitySpec(
                 ProviderPackage("winget", "Git.Git", frozenset({"Windows"})),
             ),
             provided_environment="windows-host",
+            supported_contexts=frozenset({("Windows", "host")}),
         ),
         ProviderSpec(
             provider_id="system-bash",
@@ -254,6 +267,9 @@ BASH = CapabilitySpec(
                 ),
             ),
             probe_policy=ProbePolicy.ANY,
+            supported_contexts=frozenset(
+                {("Linux", "host"), ("Linux", "wsl"), ("Darwin", "host")}
+            ),
         ),
         ProviderSpec(
             provider_id="wsl-bash",
@@ -271,6 +287,7 @@ BASH = CapabilitySpec(
             probe_policy=ProbePolicy.ANY,
             provided_environment="wsl",
             satisfies_capability=False,
+            supported_contexts=frozenset({("Windows", "host")}),
         ),
     ),
 )

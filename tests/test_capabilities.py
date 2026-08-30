@@ -95,6 +95,34 @@ class CapabilityTests(unittest.TestCase):
         self.assertEqual(state.availability, capabilities.Availability.AVAILABLE)
         self.assertEqual(state.selected_provider.provider.provider_id, "system-bash")
 
+    def test_linux_local_providers_are_supported_inside_wsl(self) -> None:
+        machine = capabilities.MachineState("Linux", "x86_64", "wsl")
+        for capability, provider_id in (
+            (capabilities.POPPLER, "host-poppler"),
+            (capabilities.GHOSTSCRIPT, "host-ghostscript"),
+            (capabilities.BASH, "system-bash"),
+        ):
+            with self.subTest(capability=capability.capability_id):
+                state = capabilities.detect_capability(
+                    capability,
+                    machine,
+                    locator=lambda probe, machine: f"/usr/bin/{probe.name}",
+                    version_reader=lambda probe, path: "1.0",
+                )
+                self.assertEqual(state.availability, capabilities.Availability.AVAILABLE)
+                self.assertEqual(state.selected_provider.provider.provider_id, provider_id)
+
+    def test_windows_host_wsl_provider_remains_separate(self) -> None:
+        machine = capabilities.MachineState("Windows", "x86_64", "host")
+        state = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, machine: "C:/Windows/System32/wsl.exe" if probe.locator_strategy == "wsl-bash" else None,
+            version_reader=lambda probe, path: "GNU bash 5.2",
+        )
+        self.assertEqual(state.availability, capabilities.Availability.ABSENT)
+        self.assertIsNone(state.selected_provider)
+
     def test_detection_reports_verified_paths_and_versions(self) -> None:
         state = capabilities.detect_capability(
             capabilities.POPPLER,

@@ -252,6 +252,27 @@ class CliTests(unittest.TestCase):
             self.assertEqual(cli.tools_status("unknown"), 2)
         self.assertIn("unknown capability: unknown", error.getvalue())
 
+    def test_doctor_and_tools_status_do_not_report_linux_wsl_as_unsupported(self) -> None:
+        machine = capabilities.MachineState("Linux", "x86_64", "wsl")
+        with (
+            patch.object(capabilities, "current_machine", return_value=machine),
+            patch.object(cli, "_distribution_version", return_value="1.2.3"),
+            patch.object(cli.importlib, "import_module"),
+            patch.object(capabilities, "locate_executable", side_effect=lambda probe, machine: f"/usr/bin/{probe.name}"),
+            patch.object(capabilities, "read_executable_version", return_value="1.0"),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(cli.doctor(), 0)
+            doctor_output = output.getvalue()
+            output.seek(0)
+            output.truncate(0)
+            self.assertEqual(cli.tools_status("bash"), 0)
+            status_output = output.getvalue()
+        self.assertNotIn("Poppler      unsupported", doctor_output)
+        self.assertNotIn("Ghostscript  unsupported", doctor_output)
+        self.assertIn("bash: available", status_output)
+        self.assertIn("system-bash: available", status_output)
+
     def test_distribution_version_tries_all_owning_distributions(self) -> None:
         with (
             patch.object(
