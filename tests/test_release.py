@@ -14,6 +14,53 @@ import release  # noqa: E402
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_pypi_workflow_is_stable_release_only_and_keyless(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "publish-pypi.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("release:\n    types: [published, released]", workflow)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("release_tag:", workflow)
+        self.assertNotIn("pull_request:", workflow)
+        self.assertNotIn("push:", workflow)
+        self.assertIn("github.event.release.prerelease == false", workflow)
+        self.assertIn("github.event_name == 'workflow_dispatch'", workflow)
+        self.assertIn("gh api", workflow)
+        self.assertIn('git show "$RELEASE_TAG:src/agent_tools/__init__.py"', workflow)
+        self.assertIn('test "$tag_version" = "${RELEASE_TAG#v}"', workflow)
+        self.assertIn("diff -u expected-files manifest-files", workflow)
+        self.assertIn("sha256sum --check SHA256SUMS", workflow)
+        self.assertEqual(workflow.count("gh attestation verify"), 2)
+        self.assertIn('--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"', workflow)
+        self.assertIn('--source-ref "refs/tags/$RELEASE_TAG"', workflow)
+        self.assertIn('--source-digest "$tag_commit"', workflow)
+        self.assertIn("name: pypi", workflow)
+        self.assertIn("id-token: write", workflow)
+        self.assertIn("contents: read", workflow)
+        self.assertIn(
+            "pypa/gh-action-pypi-publish@"
+            "dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
+            workflow,
+        )
+        self.assertNotIn("password:", workflow)
+        self.assertNotIn("username:", workflow)
+        self.assertNotIn("PYPI_API_TOKEN", workflow)
+
+    def test_release_workflow_attests_built_distributions(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("attestations: write", workflow)
+        self.assertIn("id-token: write", workflow)
+        self.assertIn(
+            "actions/attest@a1948c3f048ba23858d222213b7c278aabede763",
+            workflow,
+        )
+        self.assertIn("dist/*.whl", workflow)
+        self.assertIn("dist/*.tar.gz", workflow)
+
     def test_current_tag_matches_package_version(self) -> None:
         self.assertEqual(release.verify_tag("v0.1.1"), "v0.1.1")
         self.assertTrue((ROOT / "docs" / "releases" / "v0.1.1.md").is_file())

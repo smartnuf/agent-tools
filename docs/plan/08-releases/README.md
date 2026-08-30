@@ -55,13 +55,13 @@ mutation and must not expand into the M3 lifecycle work.
 
 | Acceptance criterion | State | Required evidence |
 |---|---|---|
-| PyPI project and trusted publisher are configured | not-started | Registry/project configuration |
+| PyPI project and trusted publisher are configured | not-started | Successful first upload creates the project and activates the configured pending publisher; foundation evidence is `publish-pypi.yml`, the protected GitHub `pypi` environment, and the exact identity in the [release runbook](../../releasing.md) |
 | Reviewed tag publishes without a long-lived upload token | not-started | Successful publish workflow |
 | Package installs from PyPI on all supported platforms | not-started | Post-publication matrix |
 | README promotes tested install/update/remove commands | not-started | Documentation validation |
 | Stable GitHub Release and PyPI metadata agree | not-started | Version and artifact comparison |
 
-Estimate: **1–2 person-days**, excluding registry or review waiting time.
+Estimate: **1–2 person-days**, excluding registry or review waiting time. Issue #19 owns the narrowly scoped trusted-publisher foundation; the remaining gates require the first reviewed stable publication and its cross-platform evidence.
 
 ## M3 — Tested update and capability lifecycle
 
