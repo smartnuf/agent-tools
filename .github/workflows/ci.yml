@@ -110,6 +110,10 @@ jobs:
           .venv\Scripts\python.exe -c "import importlib.util; assert importlib.util.find_spec('agent_tools_extraneous') is None"
           ./scripts/path.ps1
 
+      - name: Preseed Linux bootstrap Python fixture
+        if: runner.os == 'Linux'
+        run: uv python install 3.11
+
       - name: Bootstrap twice (Unix)
         if: runner.os != 'Windows'
         shell: bash

@@ -42,9 +42,11 @@ fi
 if [ -n "$PYTHON_PATH" ]; then
   BOOTSTRAP_PYTHON=$PYTHON_PATH
 else
-  if ! BOOTSTRAP_PYTHON=$(uv python find 3.11 --no-project --no-python-downloads --no-config); then
-    echo "No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap." >&2
-    exit 1
+  if ! BOOTSTRAP_PYTHON=$(uv python find 3.11 --system --no-project --no-python-downloads --no-config); then
+    if ! BOOTSTRAP_PYTHON=$(uv python find 3.11 --managed-python --no-project --no-python-downloads --no-config); then
+      echo "No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap." >&2
+      exit 1
+    fi
   fi
 fi
 if [ -n "$PYTHON_PATH" ]; then

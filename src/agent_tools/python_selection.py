@@ -42,9 +42,11 @@ class PythonCandidate:
     mechanism: ProviderMechanism
     execution_environment: str = "host"
     implementation: str = "cpython"
+    release_level: str = "final"
+    base_path: str | None = None
 
     def native_status(self, host: HostIdentity) -> NativeStatus:
-        if self.architecture is None or host.architecture == "unknown":
+        if self.architecture in {None, "unknown"} or host.architecture == "unknown":
             return NativeStatus.UNKNOWN
         return (
             NativeStatus.NATIVE
@@ -95,7 +97,11 @@ def current_host() -> HostIdentity:
             translated = process_architecture != host_architecture
     elif system == "Darwin":
         translated = _macos_process_translated()
-        host_architecture = _unix_kernel_architecture() or process_architecture
+        host_architecture = (
+            "arm64"
+            if translated is True
+            else _unix_kernel_architecture() or process_architecture
+        )
     else:
         host_architecture = _unix_kernel_architecture() or process_architecture
     return HostIdentity(
@@ -169,21 +175,51 @@ def _macos_process_translated() -> bool | None:
 def discover_with_uv(uv: str = "uv") -> tuple[dict[str, Any], ...]:
     """Return uv's installed catalogue without downloads or project configuration."""
 
+    records = _uv_python_list(uv)
+    managed = _uv_python_list(uv, managed_only=True)
+    managed_paths = {
+        os.path.normcase(os.path.normpath(str(item["path"]))) for item in managed
+    }
+    return tuple(
+        {
+            **item,
+            "agent_tools_mechanism": (
+                ProviderMechanism.TOOL_MANAGED.value
+                if os.path.normcase(os.path.normpath(str(item["path"]))) in managed_paths
+                else ProviderMechanism.SYSTEM.value
+            ),
+        }
+        for item in records
+    )
+
+
+def _uv_python_list(uv: str, *, managed_only: bool = False) -> tuple[dict[str, Any], ...]:
+    command = [
+        uv,
+        "python",
+        "list",
+        "--only-installed",
+        "--all-versions",
+        "--all-arches",
+        "--output-format",
+        "json",
+        "--no-python-downloads",
+        "--no-config",
+    ]
+    if managed_only:
+        command.append("--managed-python")
+    environment = os.environ.copy()
+    for variable in (
+        "UV_MANAGED_PYTHON",
+        "UV_NO_MANAGED_PYTHON",
+        "UV_PYTHON_PREFERENCE",
+    ):
+        environment.pop(variable, None)
     result = subprocess.run(
-        [
-            uv,
-            "python",
-            "list",
-            "--only-installed",
-            "--all-versions",
-            "--all-arches",
-            "--output-format",
-            "json",
-            "--no-python-downloads",
-            "--no-config",
-        ],
+        command,
         capture_output=True,
         check=False,
+        env=environment,
         text=True,
         timeout=30,
     )
@@ -205,7 +241,9 @@ def verify_candidate(record: dict[str, Any]) -> PythonCandidate | None:
     script = (
         "import json,platform,sys;"
         "print(json.dumps({'path':sys.executable,'version':list(sys.version_info[:3]),"
-        "'architecture':platform.machine(),'implementation':platform.python_implementation()}))"
+        "'release_level':sys.version_info.releaselevel,'architecture':platform.machine(),"
+        "'implementation':platform.python_implementation(),"
+        "'base_path':getattr(sys,'_base_executable',sys.executable)}))"
     )
     try:
         result = subprocess.run(
@@ -223,6 +261,7 @@ def verify_candidate(record: dict[str, Any]) -> PythonCandidate | None:
         facts = json.loads(result.stdout)
         version = tuple(int(part) for part in facts["version"])
         resolved_path = str(Path(facts["path"]).resolve())
+        base_path = str(Path(facts["base_path"]).resolve())
     except (KeyError, TypeError, ValueError, json.JSONDecodeError, OSError):
         return None
     if len(version) != 3:
@@ -231,18 +270,50 @@ def verify_candidate(record: dict[str, Any]) -> PythonCandidate | None:
         resolved_path,
         version,
         normalize_architecture(facts.get("architecture")),
-        _provider_mechanism(resolved_path),
+        _provider_mechanism(record, resolved_path),
         implementation=str(facts.get("implementation", "")).casefold(),
+        release_level=str(facts.get("release_level", "")),
+        base_path=base_path,
     )
 
 
-def _provider_mechanism(path: str) -> ProviderMechanism:
-    parts = tuple(part.casefold() for part in Path(path).parts)
-    return (
-        ProviderMechanism.TOOL_MANAGED
-        if "uv" in parts and "python" in parts
-        else ProviderMechanism.SYSTEM
+def _provider_mechanism(record: dict[str, Any], path: str) -> ProviderMechanism:
+    declared = record.get("agent_tools_mechanism")
+    if declared in {item.value for item in ProviderMechanism}:
+        return ProviderMechanism(declared)
+    manager_roots = _known_manager_roots()
+    resolved = os.path.normcase(os.path.normpath(path))
+    for root in manager_roots:
+        assert root is not None
+        normalized_root = os.path.normcase(os.path.normpath(str(Path(root).resolve())))
+        try:
+            if os.path.commonpath((resolved, normalized_root)) == normalized_root:
+                return ProviderMechanism.TOOL_MANAGED
+        except ValueError:
+            continue
+    return ProviderMechanism.SYSTEM
+
+
+def _known_manager_roots() -> tuple[str, ...]:
+    home = Path.home()
+    configured = tuple(
+        os.environ.get(variable)
+        for variable in (
+            "UV_PYTHON_INSTALL_DIR",
+            "PYENV_ROOT",
+            "CONDA_PREFIX",
+            "ASDF_DATA_DIR",
+            "MISE_DATA_DIR",
+        )
+        if os.environ.get(variable)
     )
+    defaults = (
+        home / ".local" / "share" / "uv" / "python",
+        home / ".pyenv" / "versions",
+        home / ".asdf" / "installs" / "python",
+        home / ".local" / "share" / "mise" / "installs" / "python",
+    )
+    return tuple(str(root) for root in (*configured, *defaults))
 
 
 def verified_candidates(records: Iterable[dict[str, Any]]) -> tuple[PythonCandidate, ...]:
@@ -276,6 +347,7 @@ def select_python(
         for candidate in candidates
         if candidate.version[:2] == minor
         and candidate.implementation == "cpython"
+        and candidate.release_level == "final"
         and candidate.execution_environment == host.execution_environment
     ]
     if preferred_path is not None:
@@ -318,15 +390,27 @@ def discover_verify_select(
     allow_translated: bool = False,
 ) -> tuple[HostIdentity, tuple[PythonCandidate, ...], PythonCandidate]:
     host = current_host()
-    candidates = verified_candidates(discover_with_uv(uv))
+    records = discover_with_uv(uv)
+    candidates = list(verified_candidates(records))
+    resolved_preference = preferred_path
+    if preferred_path is not None:
+        direct = verify_candidate({"path": preferred_path})
+        if direct is not None:
+            resolved_preference = direct.path
+            direct_key = os.path.normcase(os.path.normpath(direct.path))
+            if not any(
+                os.path.normcase(os.path.normpath(candidate.path)) == direct_key
+                for candidate in candidates
+            ):
+                candidates.append(direct)
     selected = select_python(
         candidates,
         host,
         minor=minor,
-        preferred_path=preferred_path,
+        preferred_path=resolved_preference,
         allow_translated=allow_translated,
     )
-    return host, candidates, selected
+    return host, tuple(candidates), selected
 
 
 def verify_final_environment(python: str, selected: PythonCandidate) -> None:
@@ -339,6 +423,8 @@ def verify_final_environment(python: str, selected: PythonCandidate) -> None:
         actual.version != selected.version
         or actual.architecture != selected.architecture
         or actual.implementation != selected.implementation
+        or os.path.normcase(os.path.normpath(actual.base_path or ""))
+        != os.path.normcase(os.path.normpath(selected.path))
     ):
         raise SelectionError(
             "final Python does not match the selected interpreter: "

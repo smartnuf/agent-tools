@@ -69,7 +69,10 @@ if ($PythonPath) {
     $BootstrapPython = $PythonPath
     $SelectorArgs += @('--prefer', $PythonPath)
 } else {
-    $BootstrapPython = & uv python find 3.11 --no-project --no-python-downloads --no-config
+    $BootstrapPython = & uv python find 3.11 --system --no-project --no-python-downloads --no-config
+    if ($LASTEXITCODE -ne 0) {
+        $BootstrapPython = & uv python find 3.11 --managed-python --no-project --no-python-downloads --no-config
+    }
     if ($LASTEXITCODE -ne 0) {
         throw 'No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap.'
     }

@@ -47,6 +47,18 @@ class PythonSelectionTests(unittest.TestCase):
             ("x86_64", "arm64"),
         )
 
+    def test_rosetta_translation_identifies_arm64_host(self) -> None:
+        with (
+            patch.object(selection.platform, "system", return_value="Darwin"),
+            patch.object(selection.platform, "machine", return_value="x86_64"),
+            patch.object(selection, "_macos_process_translated", return_value=True),
+            patch.object(selection, "_unix_kernel_architecture", return_value="x86_64"),
+        ):
+            host = selection.current_host()
+        self.assertEqual(host.architecture, "arm64")
+        self.assertEqual(host.process_architecture, "x86_64")
+        self.assertTrue(host.process_translated)
+
     def test_native_system_python_beats_emulated_managed_python(self) -> None:
         native = candidate("C:/Python311-arm64/python.exe", "arm64", selection.ProviderMechanism.SYSTEM)
         managed = candidate("C:/uv/python/python.exe", "x86_64", selection.ProviderMechanism.TOOL_MANAGED)
@@ -92,21 +104,46 @@ class PythonSelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(selection.SelectionError, "no compatible"):
             selection.select_python((wrong_version, wrong_environment), self.host)
 
+    def test_prerelease_is_not_compatible(self) -> None:
+        prerelease = selection.PythonCandidate(
+            "C:/Python311/python.exe",
+            (3, 11, 0),
+            "arm64",
+            selection.ProviderMechanism.SYSTEM,
+            release_level="candidate",
+        )
+        with self.assertRaisesRegex(selection.SelectionError, "no compatible"):
+            selection.select_python((prerelease,), self.host)
+
     def test_uv_discovery_is_installed_only_and_downloads_disabled(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '[{"path":"/python"}]', "")
-        with patch.object(selection.subprocess, "run", return_value=completed) as run:
-            self.assertEqual(selection.discover_with_uv(), ({"path": "/python"},))
-        command = run.call_args.args[0]
+        with (
+            patch.dict(
+                selection.os.environ,
+                {"UV_MANAGED_PYTHON": "1", "UV_NO_MANAGED_PYTHON": "1"},
+                clear=True,
+            ),
+            patch.object(selection.subprocess, "run", return_value=completed) as run,
+        ):
+            records = selection.discover_with_uv()
+        self.assertEqual(records[0]["agent_tools_mechanism"], "tool-managed")
+        command = run.call_args_list[0].args[0]
         self.assertIn("--only-installed", command)
         self.assertIn("--no-python-downloads", command)
         self.assertIn("--no-config", command)
+        self.assertIn("--managed-python", run.call_args_list[1].args[0])
+        for call in run.call_args_list:
+            self.assertNotIn("UV_MANAGED_PYTHON", call.kwargs["env"])
+            self.assertNotIn("UV_NO_MANAGED_PYTHON", call.kwargs["env"])
 
     def test_verify_candidate_uses_executed_facts(self) -> None:
         facts = {
             "path": str(Path("C:/Python311/python.exe")),
             "version": [3, 11, 9],
+            "release_level": "final",
             "architecture": "ARM64",
             "implementation": "CPython",
+            "base_path": str(Path("C:/Python311/python.exe")),
         }
         completed = subprocess.CompletedProcess([], 0, json.dumps(facts), "")
         with patch.object(selection.subprocess, "run", return_value=completed):
@@ -116,6 +153,7 @@ class PythonSelectionTests(unittest.TestCase):
         self.assertEqual(verified.version, (3, 11, 9))
         self.assertEqual(verified.architecture, "arm64")
         self.assertEqual(verified.mechanism, selection.ProviderMechanism.SYSTEM)
+        self.assertEqual(verified.release_level, "final")
 
     def test_aliases_deduplicate_and_conflicting_evidence_fails(self) -> None:
         first = candidate("C:/Python311/python.exe", "arm64", selection.ProviderMechanism.SYSTEM)
@@ -132,17 +170,79 @@ class PythonSelectionTests(unittest.TestCase):
 
     def test_final_environment_must_match_selected_runtime(self) -> None:
         selected = candidate("C:/Python311/python.exe", "arm64", selection.ProviderMechanism.SYSTEM)
-        matching = candidate("C:/venv/python.exe", "arm64", selection.ProviderMechanism.SYSTEM)
-        mismatch = candidate(
-            "C:/venv/python.exe",
-            "x86_64",
-            selection.ProviderMechanism.SYSTEM,
+        matching = selection.PythonCandidate(
+            "C:/venv/python.exe", (3, 11, 9), "arm64", selection.ProviderMechanism.SYSTEM,
+            base_path=selected.path,
+        )
+        wrong_base = selection.PythonCandidate(
+            "C:/venv/python.exe", (3, 11, 9), "arm64", selection.ProviderMechanism.SYSTEM,
+            base_path="C:/uv/python/python.exe",
         )
         with patch.object(selection, "verify_candidate", return_value=matching):
             selection.verify_final_environment("C:/venv/python.exe", selected)
-        with patch.object(selection, "verify_candidate", return_value=mismatch):
+        with patch.object(selection, "verify_candidate", return_value=wrong_base):
             with self.assertRaisesRegex(selection.SelectionError, "does not match"):
                 selection.verify_final_environment("C:/venv/python.exe", selected)
+
+    def test_direct_preference_is_verified_even_when_uv_omits_it(self) -> None:
+        direct = candidate("C:/custom/python.exe", "arm64", selection.ProviderMechanism.SYSTEM)
+        with (
+            patch.object(selection, "current_host", return_value=self.host),
+            patch.object(selection, "discover_with_uv", return_value=()),
+            patch.object(selection, "verify_candidate", return_value=direct) as verify,
+        ):
+            _, _, selected = selection.discover_verify_select(preferred_path=direct.path)
+        self.assertIs(selected, direct)
+        self.assertEqual(verify.call_args.args[0]["path"], direct.path)
+
+    def test_direct_alias_reuses_discovered_mechanism_evidence(self) -> None:
+        managed = candidate(
+            "C:/uv/python/python.exe", "arm64", selection.ProviderMechanism.TOOL_MANAGED
+        )
+        alias = candidate(
+            managed.path, "arm64", selection.ProviderMechanism.SYSTEM
+        )
+        with (
+            patch.object(selection, "current_host", return_value=self.host),
+            patch.object(selection, "discover_with_uv", return_value=({"path": managed.path},)),
+            patch.object(selection, "verified_candidates", return_value=(managed,)),
+            patch.object(selection, "verify_candidate", return_value=alias),
+        ):
+            _, candidates, selected = selection.discover_verify_select(
+                preferred_path="C:/alias/python.exe"
+            )
+        self.assertEqual(candidates, (managed,))
+        self.assertIs(selected, managed)
+
+    def test_discovery_mechanism_evidence_controls_ranking(self) -> None:
+        facts = {
+            "path": "C:/managed/python.exe",
+            "version": [3, 11, 9],
+            "release_level": "final",
+            "architecture": "arm64",
+            "implementation": "CPython",
+            "base_path": "C:/managed/python.exe",
+        }
+        completed = subprocess.CompletedProcess([], 0, json.dumps(facts), "")
+        record = {"path": facts["path"], "agent_tools_mechanism": "tool-managed"}
+        with patch.object(selection.subprocess, "run", return_value=completed):
+            verified = selection.verify_candidate(record)
+        assert verified is not None
+        self.assertEqual(verified.mechanism, selection.ProviderMechanism.TOOL_MANAGED)
+
+    def test_provider_specific_manager_root_is_not_classified_as_system(self) -> None:
+        with (
+            patch.dict(selection.os.environ, {"PYENV_ROOT": "C:/pyenv"}, clear=True),
+            patch.object(selection.Path, "home", return_value=Path("C:/home")),
+        ):
+            mechanism = selection._provider_mechanism(
+                {}, "C:/pyenv/versions/3.11.9/python.exe"
+            )
+        self.assertEqual(mechanism, selection.ProviderMechanism.TOOL_MANAGED)
+
+    def test_normalized_unknown_architecture_uses_unknown_class(self) -> None:
+        unknown = candidate("C:/Python311/python.exe", "unknown", selection.ProviderMechanism.SYSTEM)
+        self.assertEqual(unknown.native_status(self.host), selection.NativeStatus.UNKNOWN)
 
 
 if __name__ == "__main__":
