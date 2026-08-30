@@ -61,6 +61,23 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("dist/*.whl", workflow)
         self.assertIn("dist/*.tar.gz", workflow)
 
+    def test_pypi_smoke_workflow_uses_the_public_index_on_all_platforms(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "pypi-smoke.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("release_version:", workflow)
+        self.assertNotIn("pull_request:", workflow)
+        self.assertNotIn("push:", workflow)
+        self.assertIn("os: [windows-latest, ubuntu-latest, macos-latest]", workflow)
+        self.assertEqual(workflow.count("smartnuf-agent-tools=="), 2)
+        self.assertNotIn("github.com/", workflow.replace("github.com/actions/", ""))
+        self.assertIn("tools list", workflow)
+        self.assertIn("doctor", workflow)
+        self.assertIn("--reinstall", workflow)
+        self.assertIn("uv tool uninstall smartnuf-agent-tools", workflow)
+
     def test_current_tag_matches_package_version(self) -> None:
         self.assertEqual(release.verify_tag("v0.1.2"), "v0.1.2")
         self.assertTrue((ROOT / "docs" / "releases" / "v0.1.2.md").is_file())
