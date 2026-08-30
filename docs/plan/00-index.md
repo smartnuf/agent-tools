@@ -15,11 +15,14 @@
 | M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
 | M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
-| M3 | Tested update and capability lifecycle | in-progress | 2/9 | 6–10 days | 5–8.5 days |
+| M3 | Tested update and capability lifecycle | in-progress | 3/9 | 6–10 days | 4–8 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **5–8.5 person-days remaining**. The selector implementation consumes the first 1–1.5-day slice; its joint acceptance gate remains open until #49 supplies seeded-workstation evidence. Native discovery channels and the independent document-dependency boundary are excluded; review time is reported separately.
+Estimated implementation effort through M3: **4–8 person-days remaining**. The
+selector and pre-seeded-workstation evidence slices complete the first joint
+M3 gate. Native discovery channels and the independent document-dependency
+boundary are excluded; review time is reported separately.
 
 Gate counts are binary readiness measures. Estimates are ranges and must be revised when implementation reveals new facts.
 
@@ -43,6 +46,9 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
 - PyPI v0.1.2 metadata reports the expected project/version/Python range; its wheel and source-distribution sizes and SHA-256 digests match the GitHub release exactly.
 - [PyPI lifecycle run 33313165322](https://github.com/smartnuf/agent-tools/actions/runs/33313165322) resolved the unpinned public package, version-checked, diagnosed, upgraded, exactly reinstalled, and removed it on Windows, Ubuntu, and macOS.
 - [PR #72](https://github.com/smartnuf/agent-tools/pull/72) implements read-only installed-Python discovery, independent host/process evidence, deterministic native/system-first ranking, explicit-path clone bootstrap, and final-environment verification; its pure fixtures do not substitute for #49 platform evidence.
+- Issue #49 adds repeatable pre-seeded Python, Git Bash, Poppler, and Ghostscript
+  fixture evidence plus honest Windows, Ubuntu, and macOS hosted-runner checks;
+  it explicitly does not claim hosted ARM64 coverage.
 
 M1 is complete and its factual record is frozen except for corrections. M1.5
 completed on 2026-08-29; M2 completed on 2026-08-30 with the first stable PyPI
@@ -52,7 +58,12 @@ excluded.
 
 ## Recommended next work
 
-Prove pre-seeded selection in [issue #49](https://github.com/smartnuf/agent-tools/issues/49) on realistic fixtures and the platform/disposable-host evidence that is actually available (M, **0.5–1 day**) before beginning provider planning or mutation. [Issue #26](https://github.com/smartnuf/agent-tools/issues/26) records the complete ordered M3 dependency chain.
+Implement inspectable, read-only provider plan generation and package-manager
+adapters in [issue #50](https://github.com/smartnuf/agent-tools/issues/50) (L,
+**1–2 days**). An all-satisfied plan must contain zero install actions, and a
+validated native-provisioning override must remain visibly separate from
+mutation authorization. [Issue #26](https://github.com/smartnuf/agent-tools/issues/26)
+records the complete ordered M3 dependency chain.
 
 ## Known risks and assumptions
 
