@@ -31,6 +31,10 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn('test "$tag_version" = "${RELEASE_TAG#v}"', workflow)
         self.assertIn("diff -u expected-files manifest-files", workflow)
         self.assertIn("sha256sum --check SHA256SUMS", workflow)
+        self.assertEqual(workflow.count("gh attestation verify"), 2)
+        self.assertIn('--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"', workflow)
+        self.assertIn('--source-ref "refs/tags/$RELEASE_TAG"', workflow)
+        self.assertIn('--source-digest "$tag_commit"', workflow)
         self.assertIn("name: pypi", workflow)
         self.assertIn("id-token: write", workflow)
         self.assertIn("contents: read", workflow)
@@ -42,6 +46,20 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn("password:", workflow)
         self.assertNotIn("username:", workflow)
         self.assertNotIn("PYPI_API_TOKEN", workflow)
+
+    def test_release_workflow_attests_built_distributions(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("attestations: write", workflow)
+        self.assertIn("id-token: write", workflow)
+        self.assertIn(
+            "actions/attest@a1948c3f048ba23858d222213b7c278aabede763",
+            workflow,
+        )
+        self.assertIn("dist/*.whl", workflow)
+        self.assertIn("dist/*.tar.gz", workflow)
 
     def test_current_tag_matches_package_version(self) -> None:
         self.assertEqual(release.verify_tag("v0.1.1"), "v0.1.1")

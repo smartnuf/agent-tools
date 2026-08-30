@@ -9,7 +9,7 @@ GitHub tags and releases are the canonical artifact history. The tag workflow cr
 3. Create an annotated `v<version>` tag at the reviewed `main` commit, for example `v1.2.3`.
 4. Push only that tag. Do not move or reuse a published version tag.
 
-The tag workflow rejects a tag whose name differs from the package version, lacks reviewed release notes, or points to a commit outside the repository's default branch. It then builds and validates one wheel and one source distribution, writes deterministic `SHA256SUMS`, creates a GitHub prerelease with the checked-in notes, and exercises install, pin, and uninstall against the published wheel on Windows, Ubuntu, and macOS.
+The tag workflow rejects a tag whose name differs from the package version, lacks reviewed release notes, or points to a commit outside the repository's default branch. It then builds and validates one wheel and one source distribution, writes deterministic `SHA256SUMS`, records signed GitHub build-provenance attestations for both distributions, creates a GitHub prerelease with the checked-in notes, and exercises install, pin, and uninstall against the published wheel on Windows, Ubuntu, and macOS.
 
 The workflow has repository read permission by default. Only its release job receives `contents: write`, using GitHub's short-lived workflow token. It has no PyPI credentials or other publishing secret.
 
@@ -29,13 +29,13 @@ This pending publisher and the protected `pypi` environment were configured and 
 
 Configure the GitHub `pypi` environment with required reviewer protection so publication requires a maintainer's explicit approval. Do not add a PyPI API token, username, password, repository secret, or environment secret.
 
-After the tag workflow and its cross-platform smoke jobs pass, promote the reviewed GitHub prerelease to a stable release without replacing its assets. Publishing that stable release triggers `publish-pypi.yml`. Pull requests, branch pushes, and tag pushes cannot trigger PyPI publication. The publish job rejects drafts and prereleases, verifies that the immutable tag matches the package version and belongs to the default branch, downloads the existing wheel, source distribution, and checksum manifest, verifies the release assets, and exposes `id-token: write` only to the environment-protected publish job. The pinned PyPA action exchanges GitHub's OIDC identity for a short-lived PyPI publishing credential.
+After the tag workflow and its cross-platform smoke jobs pass, promote the reviewed GitHub prerelease to a stable release without replacing its assets. Publishing that stable release triggers `publish-pypi.yml`. Pull requests, branch pushes, and tag pushes cannot trigger PyPI publication. The publish job rejects drafts and prereleases, verifies that the immutable tag matches the package version and belongs to the default branch, downloads the existing wheel, source distribution, and checksum manifest, verifies both checksums and each distribution's signed provenance against the exact tag commit and `release.yml`, and exposes `id-token: write` only to the environment-protected publish job. The pinned PyPA action exchanges GitHub's OIDC identity for a short-lived PyPI publishing credential.
 
 Before approving the environment deployment, verify the workflow run references the expected tag, commit, release assets, and workflow file. After it succeeds, confirm the PyPI version and files match the stable GitHub release before promoting the PyPI install command in user documentation.
 
 ## Validate or recover
 
-Download all three release assets and verify the checksums when auditing a release. The tag workflow automatically tests the published installation lifecycle on supported-platform runners; inspect those jobs before treating the prerelease as complete.
+Download all three release assets and verify the checksums and GitHub attestations when auditing a release. The tag workflow automatically tests the published installation lifecycle on supported-platform runners; inspect those jobs before treating the prerelease as complete.
 
 If the workflow fails before creating a release, correct the cause through a pull request and create a new version rather than moving a published tag. If GitHub created an incomplete draft or prerelease, record what happened before removing it, then use a new version for the replacement. Never overwrite an artifact attached to an existing release.
 

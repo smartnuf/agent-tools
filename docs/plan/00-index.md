@@ -14,12 +14,12 @@
 | M0 | Distribution decision and executable roadmap | complete | 5/5 | 0.5–1 day | none |
 | M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
-| M2 | Public PyPI release | in-progress | 1/5 | 1–2 days | 0.75–1.5 days |
+| M2 | Public PyPI release | in-progress | 0/5 | 1–2 days | 1–2 days |
 | M3 | Tested update and capability lifecycle | not-started | 0/8 | 3–6 days | 3–6 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **3.75–7.5 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
+Estimated implementation effort through M3: **4–8 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
 
 Gate counts are binary readiness measures. Estimates are ranges and must be revised when implementation reveals new facts.
 
@@ -45,7 +45,7 @@ estimate remains the historical forecast; review and CI wait were excluded.
 
 ## Recommended next work
 
-Prepare the first reviewed stable release and exercise the environment-approved PyPI publication, then verify the PyPI files and cross-platform installation before promoting the public install command (M, **0.75–1.5 days**). Do not publish an untagged development wheel merely because it builds.
+Prepare the first reviewed stable release and exercise the environment-approved PyPI publication, then verify the PyPI files and cross-platform installation before promoting the public install command (M, **1–2 days**). Do not publish an untagged development wheel merely because it builds.
 
 ## Known risks and assumptions
 
