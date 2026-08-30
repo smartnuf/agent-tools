@@ -8,6 +8,7 @@ from typing import Iterable
 from .capabilities import (
     Availability,
     CapabilityState,
+    ExecutableProbe,
     ProviderPackage,
     ProviderSpec,
     ProbePolicy,
@@ -23,7 +24,7 @@ class PlanningError(RuntimeError):
 
 @dataclass(frozen=True)
 class VerificationRequirement:
-    probes: tuple[str, ...]
+    probes: tuple[ExecutableProbe, ...]
     policy: ProbePolicy
 
 
@@ -171,11 +172,13 @@ def generate_provider_plan(
             verified = tuple(
                 item for item in selected_provider.executables if item.verified
             )
+            provider_architectures = tuple(
+                normalize_architecture(item.architecture) for item in verified
+            )
             if not verified or any(
-                item.architecture is None
-                or normalize_architecture(item.architecture)
-                == host_architecture
-                for item in verified
+                architecture not in {"x86_64", "x86", "arm64", "arm"}
+                or architecture == host_architecture
+                for architecture in provider_architectures
             ):
                 raise PlanningError(
                     f"native-provisioning override is not a verified translated provider: {capability_id}"
@@ -212,7 +215,7 @@ def generate_provider_plan(
                     else "no compatible provider verified"
                 ),
                 verification=VerificationRequirement(
-                    tuple(probe.name for probe in provider.probes),
+                    provider.probes,
                     provider.probe_policy,
                 ),
                 commands=adapter_commands(

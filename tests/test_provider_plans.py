@@ -34,12 +34,22 @@ class ProviderPlanTests(unittest.TestCase):
         self.assertTrue(all(action.shared_package for action in plan.actions))
         self.assertEqual(
             plan.actions[0].verification,
-            provider_plans.VerificationRequirement(("gs", "gswin64c", "gswin32c"), capabilities.ProbePolicy.ANY),
+            provider_plans.VerificationRequirement(
+                capabilities.GHOSTSCRIPT.providers[0].probes,
+                capabilities.ProbePolicy.ANY,
+            ),
         )
         self.assertEqual(
             plan.actions[1].verification,
-            provider_plans.VerificationRequirement(("pdfinfo", "pdftotext", "pdftoppm"), capabilities.ProbePolicy.ALL),
+            provider_plans.VerificationRequirement(
+                capabilities.POPPLER.providers[0].probes,
+                capabilities.ProbePolicy.ALL,
+            ),
         )
+        poppler_probe = plan.actions[1].verification.probes[0]
+        self.assertEqual(poppler_probe.version_args, ("-v",))
+        self.assertEqual(poppler_probe.locator_strategy, "path")
+        self.assertEqual(poppler_probe.nonzero_version_pattern, r"\bversion\b")
 
     def test_platform_adapters_render_expected_argv(self):
         cases = {
@@ -122,6 +132,28 @@ class ProviderPlanTests(unittest.TestCase):
             provider_plans.generate_provider_plan(
                 (state,), ("bash",), available_managers=("winget",), native_provisioning=("bash",)
             )
+
+    def test_native_override_rejects_unknown_provider_architecture(self):
+        machine = capabilities.MachineState("Windows", "arm64")
+        for architecture in (None, "unknown", "unrecognized"):
+            state = capabilities.detect_capability(
+                capabilities.BASH,
+                machine,
+                locator=lambda probe, machine: (
+                    "C:/Git/bin/bash.exe" if probe.locator_strategy == "git-bash" else None
+                ),
+                version_reader=lambda probe, path: "GNU bash 5.2",
+                architecture_reader=lambda probe, path, value=architecture: value,
+            )
+            with self.subTest(architecture=architecture), self.assertRaisesRegex(
+                provider_plans.PlanningError, "not a verified translated"
+            ):
+                provider_plans.generate_provider_plan(
+                    (state,),
+                    ("bash",),
+                    available_managers=("winget",),
+                    native_provisioning=("bash",),
+                )
 
     def test_duplicate_detected_states_are_ambiguous(self):
         state = self.state(capabilities.POPPLER)
