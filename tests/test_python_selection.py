@@ -280,6 +280,23 @@ class PythonSelectionTests(unittest.TestCase):
             records,
         )
 
+    def test_manager_enumeration_rejects_python_helper_names(self) -> None:
+        root = (Path.cwd() / "pyenv-fixture").resolve()
+        interpreter = root / "3.11.9" / "bin" / "python3.11"
+        helper = root / "3.11.9" / "bin" / "python3.11-config"
+        with (
+            patch.dict(selection.os.environ, {"PYENV_ROOT": str(root.parent)}, clear=True),
+            patch.object(selection.Path, "home", return_value=Path.cwd()),
+            patch.object(
+                selection.Path,
+                "glob",
+                side_effect=(iter((interpreter, helper)),) + (iter(()),) * 5,
+            ),
+            patch.object(selection.Path, "is_file", return_value=True),
+        ):
+            records = selection._manager_python_records()
+        self.assertEqual(tuple(item["path"] for item in records), (str(interpreter),))
+
     def test_discovery_mechanism_evidence_controls_ranking(self) -> None:
         facts = {
             "path": "C:/managed/python.exe",

@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import subprocess
 from dataclasses import dataclass
 from enum import Enum
@@ -384,6 +385,8 @@ def _manager_python_records() -> tuple[dict[str, Any], ...]:
         try:
             for pattern in ("*/bin/python*", "*/python.exe"):
                 for path in root.glob(pattern):
+                    if re.fullmatch(r"python(?:3(?:\.11)?)?(?:\.exe)?", path.name) is None:
+                        continue
                     if not path.is_file():
                         continue
                     key = os.path.normcase(os.path.normpath(str(path)))

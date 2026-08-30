@@ -20,7 +20,7 @@ function Assert-NativeSuccess {
 }
 
 function Find-BootstrapPython {
-    $FilterNames = @('UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON', 'UV_PYTHON_PREFERENCE')
+    $FilterNames = @('UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_SYSTEM_PYTHON')
     $SavedFilters = @{}
     foreach ($Name in $FilterNames) {
         $SavedFilters[$Name] = [Environment]::GetEnvironmentVariable($Name, 'Process')
@@ -32,6 +32,23 @@ function Find-BootstrapPython {
             $Found = & uv python find 3.11 --managed-python --no-project --no-python-downloads --no-config
         }
         if ($LASTEXITCODE -ne 0) {
+            $ManagerRoots = @(
+                if ($env:PYENV_ROOT) { Join-Path $env:PYENV_ROOT 'versions' } else { Join-Path $HOME '.pyenv\versions' }
+                if ($env:ASDF_DATA_DIR) { Join-Path $env:ASDF_DATA_DIR 'installs\python' } else { Join-Path $HOME '.asdf\installs\python' }
+                if ($env:MISE_DATA_DIR) { Join-Path $env:MISE_DATA_DIR 'installs\python' } else { Join-Path $HOME '.local\share\mise\installs\python' }
+            )
+            foreach ($ManagerRoot in $ManagerRoots) {
+                $Candidates = @(
+                    Get-ChildItem -Path (Join-Path $ManagerRoot '*\python.exe') -File -ErrorAction SilentlyContinue
+                    Get-ChildItem -Path (Join-Path $ManagerRoot '*\bin\python.exe') -File -ErrorAction SilentlyContinue
+                )
+                foreach ($Candidate in $Candidates | Sort-Object -Property FullName) {
+                    $Compatible = & $Candidate.FullName -I -c 'import sys; print(sys.version_info[:2] == (3, 11))'
+                    if ($LASTEXITCODE -eq 0 -and $Compatible -eq 'True') {
+                        return $Candidate.FullName
+                    }
+                }
+            }
             throw 'No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap.'
         }
         return $Found

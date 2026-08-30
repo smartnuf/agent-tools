@@ -42,11 +42,27 @@ fi
 if [ -n "$PYTHON_PATH" ]; then
   BOOTSTRAP_PYTHON=$PYTHON_PATH
 else
-  if ! BOOTSTRAP_PYTHON=$(env -u UV_MANAGED_PYTHON -u UV_NO_MANAGED_PYTHON -u UV_PYTHON_PREFERENCE uv python find 3.11 --system --no-project --no-python-downloads --no-config); then
-    if ! BOOTSTRAP_PYTHON=$(env -u UV_MANAGED_PYTHON -u UV_NO_MANAGED_PYTHON -u UV_PYTHON_PREFERENCE uv python find 3.11 --managed-python --no-project --no-python-downloads --no-config); then
-      echo "No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap." >&2
-      exit 1
-    fi
+  if ! BOOTSTRAP_PYTHON=$(env -u UV_MANAGED_PYTHON -u UV_NO_MANAGED_PYTHON -u UV_PYTHON_PREFERENCE -u UV_SYSTEM_PYTHON uv python find 3.11 --system --no-project --no-python-downloads --no-config); then
+    BOOTSTRAP_PYTHON=$(env -u UV_MANAGED_PYTHON -u UV_NO_MANAGED_PYTHON -u UV_PYTHON_PREFERENCE -u UV_SYSTEM_PYTHON uv python find 3.11 --managed-python --no-project --no-python-downloads --no-config) || BOOTSTRAP_PYTHON=
+  fi
+  if [ -z "$BOOTSTRAP_PYTHON" ]; then
+    for MANAGER_ROOT in \
+      "${PYENV_ROOT:-$HOME/.pyenv}/versions" \
+      "${ASDF_DATA_DIR:-$HOME/.asdf}/installs/python" \
+      "${MISE_DATA_DIR:-$HOME/.local/share/mise}/installs/python"
+    do
+      for CANDIDATE in "$MANAGER_ROOT"/*/bin/python3.11 "$MANAGER_ROOT"/*/bin/python3 "$MANAGER_ROOT"/*/bin/python
+      do
+        if [ -x "$CANDIDATE" ] && "$CANDIDATE" -I -c 'import sys; raise SystemExit(sys.version_info[:2] != (3, 11))'; then
+          BOOTSTRAP_PYTHON=$CANDIDATE
+          break 2
+        fi
+      done
+    done
+  fi
+  if [ -z "$BOOTSTRAP_PYTHON" ]; then
+    echo "No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap." >&2
+    exit 1
   fi
 fi
 if [ -n "$PYTHON_PATH" ]; then
