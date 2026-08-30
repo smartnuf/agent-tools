@@ -30,6 +30,7 @@ class ProviderAction:
     commands: tuple[tuple[str, ...], ...]
     shared_package: bool
     displaces_verified_paths: tuple[str, ...] = ()
+    target_architecture: str | None = None
 
 
 @dataclass(frozen=True)
@@ -42,11 +43,19 @@ class ProviderPlan:
         return bool(self.actions)
 
 
-def adapter_commands(manager: str, unit: str) -> tuple[tuple[str, ...], ...]:
+def adapter_commands(
+    manager: str, unit: str, *, target_architecture: str | None = None
+) -> tuple[tuple[str, ...], ...]:
     """Render inspectable argv without executing it."""
 
+    winget = (
+        "winget", "install", "--id", unit, "-e",
+        "--accept-package-agreements", "--accept-source-agreements",
+    )
+    if target_architecture is not None:
+        winget += ("--architecture", target_architecture)
     adapters = {
-        "winget": (("winget", "install", "--id", unit, "-e", "--accept-package-agreements", "--accept-source-agreements"),),
+        "winget": (winget,),
         "apt": (("apt-get", "update"), ("apt-get", "install", "-y", unit)),
         "dnf": (("dnf", "install", "-y", unit),),
         "pacman": (("pacman", "-S", "--needed", "--noconfirm", unit),),
@@ -59,13 +68,21 @@ def adapter_commands(manager: str, unit: str) -> tuple[tuple[str, ...], ...]:
 
 
 def _option(
-    provider: ProviderSpec, platform: str, available_managers: frozenset[str]
+    provider: ProviderSpec,
+    platform: str,
+    architecture: str,
+    available_managers: frozenset[str],
 ) -> ProviderPackage | None:
     return next(
         (
             package
             for package in provider.packages
-            if platform in package.platforms and package.manager in available_managers
+            if platform in package.platforms
+            and package.manager in available_managers
+            and (
+                not package.architectures
+                or normalize_architecture(architecture) in package.architectures
+            )
         ),
         None,
     )
@@ -137,7 +154,9 @@ def generate_provider_plan(
             provider = provider_state.provider
             if not provider.satisfies_capability or not provider.supports(state.machine):
                 continue
-            package = _option(provider, state.machine.platform, managers)
+            package = _option(
+                provider, state.machine.platform, state.machine.architecture, managers
+            )
             if package is not None:
                 selected = (provider, package)
                 break
@@ -159,9 +178,22 @@ def generate_provider_plan(
                     else "no compatible provider verified"
                 ),
                 expected_probes=tuple(probe.name for probe in provider.probes),
-                commands=adapter_commands(package.manager, package.installation_unit),
+                commands=adapter_commands(
+                    package.manager,
+                    package.installation_unit,
+                    target_architecture=(
+                        normalize_architecture(state.machine.architecture)
+                        if displaced
+                        else None
+                    ),
+                ),
                 shared_package=provider.shared_package,
                 displaces_verified_paths=displaced,
+                target_architecture=(
+                    normalize_architecture(state.machine.architecture)
+                    if displaced
+                    else None
+                ),
             )
         )
     return ProviderPlan(requested, tuple(actions))

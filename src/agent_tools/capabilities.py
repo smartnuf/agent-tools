@@ -41,6 +41,7 @@ class ProviderPackage:
     manager: str
     installation_unit: str
     platforms: frozenset[str]
+    architectures: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)

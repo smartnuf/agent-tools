@@ -86,6 +86,8 @@ class ProviderPlanTests(unittest.TestCase):
         )
         self.assertEqual(plan.actions[0].displaces_verified_paths, ("C:/Git/bin/bash.exe",))
         self.assertIn("explicit native-provisioning override", plan.actions[0].reason)
+        self.assertEqual(plan.actions[0].target_architecture, "arm64")
+        self.assertEqual(plan.actions[0].commands[0][-2:], ("--architecture", "arm64"))
 
     def test_native_override_rejects_native_or_unrequested_capability(self):
         native = self.state(capabilities.BASH, "Windows", available=True)
