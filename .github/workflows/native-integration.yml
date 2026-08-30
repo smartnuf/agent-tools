@@ -75,6 +75,10 @@ jobs:
       - name: Install native tools through external providers
         timeout-minutes: 10
         uses: ./.github/actions/install-native
+      - name: Verify repeated pre-seeded native selection
+        env:
+          PYTHONPATH: src
+        run: python tests/check_preseeded_selection.py --capabilities-only --require-native
       - name: Install and test wheel (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
