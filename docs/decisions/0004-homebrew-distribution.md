@@ -35,4 +35,3 @@ set cannot be represented reproducibly, core maintainers require a different
 architecture, or measured demand justifies a separately approved binary/cask.
 
 Research and alternatives are recorded in the [Homebrew research record](../plan/08-releases/03-homebrew-research.md).
-

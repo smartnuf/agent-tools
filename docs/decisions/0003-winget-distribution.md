@@ -34,4 +34,3 @@ with coherent install/upgrade/uninstall state, or a later decision authorizes a
 complete Windows artifact with durable lifecycle and supply-chain evidence.
 
 Research and alternatives are recorded in the [WinGet research record](../plan/08-releases/02-winget-research.md).
-
