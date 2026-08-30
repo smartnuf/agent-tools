@@ -1,0 +1,73 @@
+name: PyPI release smoke test
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Published stable version to verify from PyPI
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  install-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_VERSION: ${{ inputs.release_version }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.7"
+      - name: Validate stable release version
+        shell: bash
+        run: '[[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]'
+      - name: Qualify fresh native installation through external providers
+        timeout-minutes: 10
+        uses: ./.github/actions/install-native
+      - name: Install, pin, and uninstall from PyPI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          UV_TOOL_DIR: ${{ runner.temp }}\pypi-tools
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}\pypi-bin
+        run: |
+          $requirement = "smartnuf-agent-tools==$env:RELEASE_VERSION"
+          uv tool install --python 3.13 $requirement
+          if ($LASTEXITCODE -ne 0) { throw "initial PyPI install failed with exit code $LASTEXITCODE" }
+          $executable = "$(uv tool dir --bin)\agent-tools.exe"
+          if ($LASTEXITCODE -ne 0) { throw "tool bin lookup failed with exit code $LASTEXITCODE" }
+          $reportedVersion = & $executable --version
+          if ($LASTEXITCODE -ne 0) { throw "version command failed with exit code $LASTEXITCODE" }
+          if ($reportedVersion -ne "agent-tools $env:RELEASE_VERSION") { throw "unexpected version output: $reportedVersion" }
+          & $executable tools list
+          if ($LASTEXITCODE -ne 0) { throw "tools list failed with exit code $LASTEXITCODE" }
+          & $executable doctor
+          if ($LASTEXITCODE -ne 0) { throw "complete native doctor failed with exit code $LASTEXITCODE" }
+          uv tool install --python 3.13 --reinstall $requirement
+          if ($LASTEXITCODE -ne 0) { throw "pinned PyPI reinstall failed with exit code $LASTEXITCODE" }
+          uv tool uninstall smartnuf-agent-tools
+          if ($LASTEXITCODE -ne 0) { throw "tool uninstall failed with exit code $LASTEXITCODE" }
+          if (Test-Path $executable) { throw 'agent-tools executable remains after uninstall' }
+      - name: Install, pin, and uninstall from PyPI (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          UV_TOOL_DIR: ${{ runner.temp }}/pypi-tools
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}/pypi-bin
+        run: |
+          requirement="smartnuf-agent-tools==$RELEASE_VERSION"
+          uv tool install --python 3.13 "$requirement"
+          tool_bin="$(uv tool dir --bin)"
+          test "$("$tool_bin/agent-tools" --version)" = "agent-tools $RELEASE_VERSION"
+          "$tool_bin/agent-tools" tools list
+          "$tool_bin/agent-tools" doctor
+          uv tool install --python 3.13 --reinstall "$requirement"
+          uv tool uninstall smartnuf-agent-tools
+          test ! -e "$tool_bin/agent-tools"
