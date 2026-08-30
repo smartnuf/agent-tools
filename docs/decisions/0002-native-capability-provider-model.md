@@ -168,16 +168,21 @@ falls back to another provider. Without such a preference, the default order
 above is authoritative.
 
 Candidates in the same ranking class use stable tie-breakers rather than
-discovery order. First deduplicate paths that resolve to the same executable.
-Then compare built-in provider priority, a capability-declared version score,
-and the normalized resolved absolute path in that order. A version score must
-state its rule: Python bootstrap prefers the requested compatible minor and
-then the greatest verified stable patch; a capability without a declared
-version preference assigns equal version scores. Path comparison is ordinal
-after platform normalization (including case folding on Windows). If distinct
-candidates still have identical keys but contradictory evidence, selection
-fails visibly as ambiguous instead of choosing whichever discovery returned
-first.
+discovery order. First group observations by normalized resolved executable
+identity. Complementary evidence for one executable may be merged only when
+all overlapping facts agree. Conflicting provider, version, architecture,
+environment, provenance, or suitability evidence for that identity fails
+visibly before deduplication; no discovery channel wins by arrival order.
+
+After each identity has one consistent candidate, compare built-in provider
+priority, a capability-declared version score, and the normalized resolved
+absolute path in that order. A version score must state its rule: Python
+bootstrap prefers the requested compatible minor and then the greatest
+verified stable patch; a capability without a declared version preference
+assigns equal version scores. Path comparison is ordinal after platform
+normalization (including case folding on Windows). If distinct candidates
+still have identical keys but contradictory evidence, selection fails visibly
+as ambiguous instead of choosing whichever discovery returned first.
 
 A documented compatibility constraint may reject a higher-ranked candidate,
 but its evidence and reason must be visible. In particular, an ARM64 host with
