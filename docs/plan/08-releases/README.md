@@ -61,7 +61,7 @@ mutation and must not expand into the M3 lifecycle work.
 | README promotes tested install/update/remove commands | not-started | Documentation validation |
 | Stable GitHub Release and PyPI metadata agree | not-started | Version and artifact comparison |
 
-Estimate: **1–2 person-days**, excluding registry or review waiting time. Issue #19 owns the narrowly scoped trusted-publisher foundation; the remaining gates require the first reviewed stable publication and its cross-platform evidence.
+Estimate: **1–2 person-days**, excluding registry or review waiting time. Issue #19 supplied the merged trusted-publisher foundation; [issue #45](https://github.com/smartnuf/agent-tools/issues/45) owns the first reviewed stable publication and its cross-platform evidence.
 
 ## M3 — Tested update and capability lifecycle
 
