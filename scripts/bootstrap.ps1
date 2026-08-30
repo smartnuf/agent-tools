@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
     [switch]$InstallUv,
+    [switch]$AllowEmulatedPython,
+    [string]$PythonPath,
     [switch]$InstallNativeTools,
     [switch]$AddToPath
 )
@@ -17,6 +19,111 @@ function Assert-NativeSuccess {
     }
 }
 
+function Test-BootstrapPython {
+    param([Parameter(Mandatory)][string]$Path)
+    $StartInfo = [System.Diagnostics.ProcessStartInfo]::new($Path)
+    $StartInfo.UseShellExecute = $false
+    $StartInfo.RedirectStandardOutput = $true
+    $StartInfo.RedirectStandardError = $true
+    foreach ($Argument in @('-I', '-c', 'import sys; print(sys.version_info[:2] == (3, 11))')) {
+        $StartInfo.ArgumentList.Add($Argument)
+    }
+    $Process = [System.Diagnostics.Process]::new()
+    $Process.StartInfo = $StartInfo
+    try {
+        if (-not $Process.Start()) { return $false }
+        if (-not $Process.WaitForExit(10000)) {
+            $Process.Kill($true)
+            $Process.WaitForExit()
+            return $false
+        }
+        return $Process.ExitCode -eq 0 -and $Process.StandardOutput.ReadToEnd().Trim() -eq 'True'
+    } catch {
+        return $false
+    } finally {
+        $Process.Dispose()
+    }
+}
+
+function Find-BootstrapPython {
+    $FilterNames = @('UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_SYSTEM_PYTHON')
+    $SavedFilters = @{}
+    $SavedNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+    $PSNativeCommandUseErrorActionPreference = $false
+    foreach ($Name in $FilterNames) {
+        $SavedFilters[$Name] = [Environment]::GetEnvironmentVariable($Name, 'Process')
+        Remove-Item -LiteralPath "Env:$Name" -ErrorAction SilentlyContinue
+    }
+    try {
+        $Found = & uv python find 3.11 --system --no-project --no-python-downloads --no-config
+        if ($LASTEXITCODE -ne 0) {
+            $Found = & uv python find 3.11 --managed-python --no-project --no-python-downloads --no-config
+        }
+        if ($LASTEXITCODE -ne 0) {
+            $ManagerRoots = @(
+                if ($env:PYENV_ROOT) { Join-Path $env:PYENV_ROOT 'versions' } else { Join-Path $HOME '.pyenv\versions' }
+                if ($env:ASDF_DATA_DIR) { Join-Path $env:ASDF_DATA_DIR 'installs\python' } else { Join-Path $HOME '.asdf\installs\python' }
+                if ($env:MISE_DATA_DIR) { Join-Path $env:MISE_DATA_DIR 'installs\python' } else { Join-Path $HOME '.local\share\mise\installs\python' }
+                if ($env:CONDA_ENVS_PATH) { $env:CONDA_ENVS_PATH -split [IO.Path]::PathSeparator }
+                Join-Path $HOME '.conda\envs'
+                Join-Path $HOME 'miniconda3\envs'
+                Join-Path $HOME 'anaconda3\envs'
+                Join-Path $HOME 'miniforge3\envs'
+                Join-Path $HOME 'mambaforge\envs'
+                if ($env:ProgramData) { Join-Path $env:ProgramData 'conda\envs' }
+            )
+            $CondaRegistry = Join-Path $HOME '.conda\environments.txt'
+            $CondaBaseRoots = @(
+                Join-Path $HOME 'miniconda3'
+                Join-Path $HOME 'anaconda3'
+                Join-Path $HOME 'miniforge3'
+                Join-Path $HOME 'mambaforge'
+                if ($env:ProgramData) {
+                    Join-Path $env:ProgramData 'miniconda3'
+                    Join-Path $env:ProgramData 'anaconda3'
+                }
+                if (Test-Path -LiteralPath $CondaRegistry -PathType Leaf) {
+                    Get-Content -LiteralPath $CondaRegistry -ErrorAction SilentlyContinue |
+                        ForEach-Object { $_.Trim() } | Where-Object { $_ }
+                }
+            )
+            foreach ($ManagerRoot in $ManagerRoots) {
+                $Candidates = @(
+                    Get-ChildItem -Path (Join-Path $ManagerRoot '*\python.exe') -File -ErrorAction SilentlyContinue
+                    Get-ChildItem -Path (Join-Path $ManagerRoot '*\bin\python.exe') -File -ErrorAction SilentlyContinue
+                )
+                foreach ($Candidate in $Candidates | Sort-Object -Property FullName) {
+                    if (Test-BootstrapPython -Path $Candidate.FullName) {
+                        return $Candidate.FullName
+                    }
+                }
+            }
+            foreach ($CondaBaseRoot in $CondaBaseRoots) {
+                foreach ($CandidatePath in @(
+                    (Join-Path $CondaBaseRoot 'python.exe'),
+                    (Join-Path $CondaBaseRoot 'bin\python.exe')
+                )) {
+                    if ((Test-Path -LiteralPath $CandidatePath -PathType Leaf) -and
+                        (Test-BootstrapPython -Path $CandidatePath)) {
+                        return $CandidatePath
+                    }
+                }
+            }
+            throw 'No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap.'
+        }
+        return $Found
+    } finally {
+        $PSNativeCommandUseErrorActionPreference = $SavedNativeErrorPreference
+        foreach ($Name in $FilterNames) {
+            if ($null -eq $SavedFilters[$Name]) {
+                Remove-Item -LiteralPath "Env:$Name" -ErrorAction SilentlyContinue
+            } else {
+                [Environment]::SetEnvironmentVariable($Name, $SavedFilters[$Name], 'Process')
+            }
+        }
+    }
+}
+
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     if (-not $InstallUv) {
         throw 'uv is not installed. Re-run with -InstallUv, or install uv yourself.'
@@ -28,6 +135,32 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Assert-NativeSuccess 'uv installation'
     Update-ProcessPath
 }
+
+$Selector = Join-Path $PSScriptRoot 'select-python.py'
+$SelectorArgs = @($Selector)
+if ($AllowEmulatedPython) { $SelectorArgs += '--allow-translated' }
+if ($PythonPath) {
+    $BootstrapPython = $PythonPath
+    $SelectorArgs += @('--prefer', $PythonPath)
+} else {
+    $BootstrapPython = Find-BootstrapPython
+}
+$SelectedPython = & $BootstrapPython -I @SelectorArgs
+Assert-NativeSuccess 'final Python selection'
+$SelectedPython = $SelectedPython | Select-Object -Last 1
+
+$Python = Join-Path $Root '.venv\Scripts\python.exe'
+$EnvironmentPath = Join-Path $Root '.venv'
+if ((Test-Path -LiteralPath $EnvironmentPath -PathType Container) -and
+    -not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+    throw 'Existing .venv is damaged or incomplete; remove it deliberately before bootstrap can recreate it.'
+}
+if (-not (Test-Path -LiteralPath $EnvironmentPath -PathType Container)) {
+    & uv venv (Join-Path $Root '.venv') --python $SelectedPython --no-python-downloads
+    Assert-NativeSuccess 'virtual environment creation'
+}
+& $BootstrapPython -I @SelectorArgs --verify-final $Python | Out-Null
+Assert-NativeSuccess 'final Python verification'
 
 if ($InstallNativeTools) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
@@ -58,12 +191,6 @@ if ($InstallNativeTools) {
     if (-not (Get-Command gswin64c,gswin32c -ErrorAction SilentlyContinue)) {
         throw 'Ghostscript installation completed but no supported console executable is on PATH.'
     }
-}
-
-$Python = Join-Path $Root '.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $Python)) {
-    & uv venv (Join-Path $Root '.venv') --python 3.11
-    Assert-NativeSuccess 'virtual environment creation'
 }
 & uv pip install --exact --python $Python -r (Join-Path $Root 'requirements.txt') -e $Root
 Assert-NativeSuccess 'Python package installation'

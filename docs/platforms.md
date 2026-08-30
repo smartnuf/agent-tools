@@ -10,7 +10,13 @@
 | Arch Linux | `uv` standalone installer | `pacman` | Use `poppler` and `ghostscript`. |
 | macOS | `uv` via Homebrew or standalone installer | Homebrew | `brew install poppler ghostscript`. |
 
-On Windows ARM64, a package may currently install an x64 build and run through Windows emulation. `agent-tools doctor` reports the executable actually found; architecture-sensitive work should be tested explicitly.
+On Windows ARM64, a package may currently install an x64 build and run through Windows emulation. Clone bootstrap distinguishes the native host architecture from the bootstrap process architecture, verifies installed Python candidates, and normally selects a compatible native system interpreter. A translated Python fallback is visible and requires the explicit `-AllowEmulatedPython` flag. `agent-tools doctor` reports the executable actually found; architecture-sensitive work should be tested explicitly.
+
+Native interpreter selection does not imply that every dependency publishes a
+wheel for that architecture or that a compatible native compiler is installed.
+Bootstrap reports the selected interpreter before package synchronization and
+lets `uv pip` report an unavailable wheel or build-tool failure; it does not
+silently retry under an emulated interpreter.
 
 ## Read-only capability discovery
 

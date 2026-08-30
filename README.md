@@ -124,7 +124,9 @@ cd "$HOME/.agent-tools"
 agent-tools doctor
 ```
 
-All mutation flags are opt-in. On Windows, `-InstallUv` delegates to WinGet. On systems with Homebrew, `--install-uv` delegates to Homebrew. The scripts never execute a downloaded installer response directly. Without installation flags, bootstrap creates or refreshes `.venv` only when `uv` is already available and prints actionable diagnostics.
+All mutation flags are opt-in. On Windows, `-InstallUv` delegates to WinGet. On systems with Homebrew, `--install-uv` delegates to Homebrew. Python discovery and environment creation disable automatic downloads; install a compatible Python 3.11 with a trusted provider before bootstrap. A translated/emulated fallback requires `-AllowEmulatedPython` or `--allow-emulated-python`. Use `-PythonPath PATH` or `--python PATH` to require a particular compatible installed interpreter. The scripts never execute a downloaded installer response directly.
+
+Bootstrap discovers installed interpreters without downloads, verifies each executable, and passes the selected absolute path to `uv`. A temporary bootstrap process does not determine the final runtime: a compatible native system Python normally wins over a translated managed Python. The resulting `.venv` is verified again before packages are installed. If an existing `.venv` no longer matches the selected runtime, bootstrap stops without replacing it; remove that checkout-owned environment deliberately and rerun.
 
 PATH changes are also opt-in. Windows backups are written under `.backups/path/`; Unix shell-profile changes create a timestamped sibling backup before editing an existing profile.
 Unix profile updates use a per-profile lock. If an interrupted update leaves that lock behind, the command stops without changing the profile and reports the exact lock path and recorded PID. Verify that no update process owns it before removing it manually and rerunning.
