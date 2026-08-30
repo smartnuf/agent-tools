@@ -30,7 +30,15 @@ class BootstrapOrderTests(unittest.TestCase):
         powershell = (ROOT / "scripts" / "bootstrap.ps1").read_text(encoding="utf-8")
         posix = (ROOT / "scripts" / "bootstrap.sh").read_text(encoding="utf-8")
         self.assertIn("PYENV_ROOT", powershell)
-        self.assertIn('$MANAGER_ROOT"/*/bin/python3.11', posix)
+        self.assertIn('$1"/*/bin/python3.11', posix)
+
+    def test_inactive_conda_and_bounded_probes_are_present_on_both_platforms(self) -> None:
+        powershell = (ROOT / "scripts" / "bootstrap.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "scripts" / "bootstrap.sh").read_text(encoding="utf-8")
+        self.assertIn("CONDA_ENVS_PATH", powershell)
+        self.assertIn("CONDA_ENVS_PATH", posix)
+        self.assertIn("WaitForExit(10000)", powershell)
+        self.assertIn("sleep 10", posix)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import unittest
 from pathlib import Path
@@ -290,12 +291,26 @@ class PythonSelectionTests(unittest.TestCase):
             patch.object(
                 selection.Path,
                 "glob",
-                side_effect=(iter((interpreter, helper)),) + (iter(()),) * 5,
+                return_value=iter((interpreter, helper)),
             ),
             patch.object(selection.Path, "is_file", return_value=True),
         ):
             records = selection._manager_python_records()
         self.assertEqual(tuple(item["path"] for item in records), (str(interpreter),))
+
+    def test_conda_environment_roots_include_configured_and_standard_locations(self) -> None:
+        home = (Path.cwd() / "home-fixture").resolve()
+        first = (Path.cwd() / "conda-one").resolve()
+        second = (Path.cwd() / "conda-two").resolve()
+        with patch.dict(
+            selection.os.environ,
+            {"CONDA_ENVS_PATH": os.pathsep.join((str(first), str(second)))},
+            clear=True,
+        ):
+            roots = selection._conda_environment_roots(home)
+        self.assertIn(first, roots)
+        self.assertIn(second, roots)
+        self.assertIn(home / ".conda" / "envs", roots)
 
     def test_discovery_mechanism_evidence_controls_ranking(self) -> None:
         facts = {

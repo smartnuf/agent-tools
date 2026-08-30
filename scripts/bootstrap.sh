@@ -6,6 +6,33 @@ ALLOW_EMULATED_PYTHON=0
 PYTHON_PATH=
 INSTALL_NATIVE=0
 ADD_PATH=0
+
+probe_bootstrap_python() {
+  "$1" -I -c 'import sys; raise SystemExit(sys.version_info[:2] != (3, 11))' >/dev/null 2>&1 &
+  PROBE_PID=$!
+  (sleep 10; kill "$PROBE_PID" 2>/dev/null || :) &
+  WATCHDOG_PID=$!
+  if wait "$PROBE_PID"; then
+    PROBE_RESULT=0
+  else
+    PROBE_RESULT=$?
+  fi
+  kill "$WATCHDOG_PID" 2>/dev/null || :
+  wait "$WATCHDOG_PID" 2>/dev/null || :
+  return "$PROBE_RESULT"
+}
+
+probe_manager_root() {
+  for CANDIDATE in "$1"/*/bin/python3.11 "$1"/*/bin/python3 "$1"/*/bin/python
+  do
+    if [ -x "$CANDIDATE" ] && probe_bootstrap_python "$CANDIDATE"; then
+      BOOTSTRAP_PYTHON=$CANDIDATE
+      return 0
+    fi
+  done
+  return 1
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --install-uv) INSTALL_UV=1; shift ;;
@@ -49,16 +76,24 @@ else
     for MANAGER_ROOT in \
       "${PYENV_ROOT:-$HOME/.pyenv}/versions" \
       "${ASDF_DATA_DIR:-$HOME/.asdf}/installs/python" \
-      "${MISE_DATA_DIR:-$HOME/.local/share/mise}/installs/python"
+      "${MISE_DATA_DIR:-$HOME/.local/share/mise}/installs/python" \
+      "$HOME/.conda/envs" \
+      "$HOME/miniconda3/envs" \
+      "$HOME/anaconda3/envs" \
+      "$HOME/miniforge3/envs" \
+      "$HOME/mambaforge/envs"
     do
-      for CANDIDATE in "$MANAGER_ROOT"/*/bin/python3.11 "$MANAGER_ROOT"/*/bin/python3 "$MANAGER_ROOT"/*/bin/python
-      do
-        if [ -x "$CANDIDATE" ] && "$CANDIDATE" -I -c 'import sys; raise SystemExit(sys.version_info[:2] != (3, 11))'; then
-          BOOTSTRAP_PYTHON=$CANDIDATE
-          break 2
-        fi
-      done
+      probe_manager_root "$MANAGER_ROOT" && break
     done
+  fi
+  if [ -z "$BOOTSTRAP_PYTHON" ] && [ -n "${CONDA_ENVS_PATH:-}" ]; then
+    SAVED_IFS=$IFS
+    IFS=:
+    for MANAGER_ROOT in $CONDA_ENVS_PATH
+    do
+      if probe_manager_root "$MANAGER_ROOT"; then break; fi
+    done
+    IFS=$SAVED_IFS
   fi
   if [ -z "$BOOTSTRAP_PYTHON" ]; then
     echo "No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap." >&2

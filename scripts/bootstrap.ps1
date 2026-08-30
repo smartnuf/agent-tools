@@ -19,6 +19,32 @@ function Assert-NativeSuccess {
     }
 }
 
+function Test-BootstrapPython {
+    param([Parameter(Mandatory)][string]$Path)
+    $StartInfo = [System.Diagnostics.ProcessStartInfo]::new($Path)
+    $StartInfo.UseShellExecute = $false
+    $StartInfo.RedirectStandardOutput = $true
+    $StartInfo.RedirectStandardError = $true
+    foreach ($Argument in @('-I', '-c', 'import sys; print(sys.version_info[:2] == (3, 11))')) {
+        $StartInfo.ArgumentList.Add($Argument)
+    }
+    $Process = [System.Diagnostics.Process]::new()
+    $Process.StartInfo = $StartInfo
+    try {
+        if (-not $Process.Start()) { return $false }
+        if (-not $Process.WaitForExit(10000)) {
+            $Process.Kill($true)
+            $Process.WaitForExit()
+            return $false
+        }
+        return $Process.ExitCode -eq 0 -and $Process.StandardOutput.ReadToEnd().Trim() -eq 'True'
+    } catch {
+        return $false
+    } finally {
+        $Process.Dispose()
+    }
+}
+
 function Find-BootstrapPython {
     $FilterNames = @('UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_SYSTEM_PYTHON')
     $SavedFilters = @{}
@@ -36,6 +62,13 @@ function Find-BootstrapPython {
                 if ($env:PYENV_ROOT) { Join-Path $env:PYENV_ROOT 'versions' } else { Join-Path $HOME '.pyenv\versions' }
                 if ($env:ASDF_DATA_DIR) { Join-Path $env:ASDF_DATA_DIR 'installs\python' } else { Join-Path $HOME '.asdf\installs\python' }
                 if ($env:MISE_DATA_DIR) { Join-Path $env:MISE_DATA_DIR 'installs\python' } else { Join-Path $HOME '.local\share\mise\installs\python' }
+                if ($env:CONDA_ENVS_PATH) { $env:CONDA_ENVS_PATH -split [IO.Path]::PathSeparator }
+                Join-Path $HOME '.conda\envs'
+                Join-Path $HOME 'miniconda3\envs'
+                Join-Path $HOME 'anaconda3\envs'
+                Join-Path $HOME 'miniforge3\envs'
+                Join-Path $HOME 'mambaforge\envs'
+                if ($env:ProgramData) { Join-Path $env:ProgramData 'conda\envs' }
             )
             foreach ($ManagerRoot in $ManagerRoots) {
                 $Candidates = @(
@@ -43,8 +76,7 @@ function Find-BootstrapPython {
                     Get-ChildItem -Path (Join-Path $ManagerRoot '*\bin\python.exe') -File -ErrorAction SilentlyContinue
                 )
                 foreach ($Candidate in $Candidates | Sort-Object -Property FullName) {
-                    $Compatible = & $Candidate.FullName -I -c 'import sys; print(sys.version_info[:2] == (3, 11))'
-                    if ($LASTEXITCODE -eq 0 -and $Compatible -eq 'True') {
+                    if (Test-BootstrapPython -Path $Candidate.FullName) {
                         return $Candidate.FullName
                     }
                 }

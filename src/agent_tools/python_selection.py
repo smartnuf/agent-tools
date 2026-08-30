@@ -352,8 +352,30 @@ def _known_manager_roots() -> tuple[str, ...]:
         home / ".pyenv" / "versions",
         home / ".asdf" / "installs" / "python",
         home / ".local" / "share" / "mise" / "installs" / "python",
+        *_conda_environment_roots(home),
     )
     return tuple(str(root) for root in (*configured, *defaults))
+
+
+def _conda_environment_roots(home: Path) -> tuple[Path, ...]:
+    configured = tuple(
+        Path(value)
+        for value in os.environ.get("CONDA_ENVS_PATH", "").split(os.pathsep)
+        if value
+    )
+    defaults = tuple(
+        home / relative
+        for relative in (
+            ".conda/envs",
+            "miniconda3/envs",
+            "anaconda3/envs",
+            "miniforge3/envs",
+            "mambaforge/envs",
+        )
+    )
+    program_data = os.environ.get("ProgramData")
+    shared = (Path(program_data) / "conda" / "envs",) if program_data else ()
+    return configured + defaults + shared
 
 
 def _manager_python_records() -> tuple[dict[str, Any], ...]:
@@ -380,6 +402,8 @@ def _manager_python_records() -> tuple[dict[str, Any], ...]:
             else home / ".local" / "share" / "mise"
         )
         roots[-1] = roots[-1] / "installs" / "python"
+    if home is not None:
+        roots.extend(_conda_environment_roots(home))
     paths: dict[str, dict[str, Any]] = {}
     for root in roots:
         try:
