@@ -360,6 +360,18 @@ class PythonSelectionTests(unittest.TestCase):
         self.assertIn(home / ".conda" / "envs", roots)
         self.assertIn(home / "miniconda3", selection._conda_base_roots(home))
 
+    def test_conda_registered_prefixes_are_discovered(self) -> None:
+        home = (Path.cwd() / "home-fixture").resolve()
+        registry = home / ".conda" / "environments.txt"
+        with patch.object(
+            selection.Path,
+            "read_text",
+            return_value="/custom/one\n\n/custom/two\n",
+        ) as read_text:
+            prefixes = selection._conda_registered_prefixes(home)
+        read_text.assert_called_once_with(encoding="utf-8")
+        self.assertEqual(prefixes, (Path("/custom/one"), Path("/custom/two")))
+
     def test_discovery_mechanism_evidence_controls_ranking(self) -> None:
         facts = {
             "path": "C:/managed/python.exe",

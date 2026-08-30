@@ -56,6 +56,12 @@ class BootstrapOrderTests(unittest.TestCase):
         self.assertIn("Existing .venv is damaged or incomplete", posix)
         self.assertIn('kill -KILL "$PROBE_PID"', posix)
 
+    def test_conda_registered_prefixes_are_consulted_on_both_platforms(self) -> None:
+        powershell = (ROOT / "scripts" / "bootstrap.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "scripts" / "bootstrap.sh").read_text(encoding="utf-8")
+        self.assertIn("environments.txt", powershell)
+        self.assertIn("environments.txt", posix)
+
 
 if __name__ == "__main__":
     unittest.main()

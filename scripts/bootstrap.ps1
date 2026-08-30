@@ -72,6 +72,7 @@ function Find-BootstrapPython {
                 Join-Path $HOME 'mambaforge\envs'
                 if ($env:ProgramData) { Join-Path $env:ProgramData 'conda\envs' }
             )
+            $CondaRegistry = Join-Path $HOME '.conda\environments.txt'
             $CondaBaseRoots = @(
                 Join-Path $HOME 'miniconda3'
                 Join-Path $HOME 'anaconda3'
@@ -80,6 +81,10 @@ function Find-BootstrapPython {
                 if ($env:ProgramData) {
                     Join-Path $env:ProgramData 'miniconda3'
                     Join-Path $env:ProgramData 'anaconda3'
+                }
+                if (Test-Path -LiteralPath $CondaRegistry -PathType Leaf) {
+                    Get-Content -LiteralPath $CondaRegistry -ErrorAction SilentlyContinue |
+                        ForEach-Object { $_.Trim() } | Where-Object { $_ }
                 }
             )
             foreach ($ManagerRoot in $ManagerRoots) {

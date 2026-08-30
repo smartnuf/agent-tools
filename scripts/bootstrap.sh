@@ -116,6 +116,12 @@ else
       probe_conda_base "$CONDA_BASE" && break
     done
   fi
+  if [ -z "$BOOTSTRAP_PYTHON" ] && [ -f "$HOME/.conda/environments.txt" ]; then
+    while IFS= read -r CONDA_PREFIX || [ -n "$CONDA_PREFIX" ]
+    do
+      if [ -n "$CONDA_PREFIX" ] && probe_conda_base "$CONDA_PREFIX"; then break; fi
+    done < "$HOME/.conda/environments.txt"
+  fi
   if [ -z "$BOOTSTRAP_PYTHON" ]; then
     echo "No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap." >&2
     exit 1

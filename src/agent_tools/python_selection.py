@@ -378,6 +378,7 @@ def _known_manager_roots() -> tuple[str, ...]:
         home / ".local" / "share" / "mise" / "installs" / "python",
         *_conda_environment_roots(home),
         *_conda_base_roots(home),
+        *_conda_registered_prefixes(home),
     )
     return tuple(str(root) for root in (*configured, *defaults))
 
@@ -417,6 +418,15 @@ def _conda_base_roots(home: Path) -> tuple[Path, ...]:
     return defaults + shared
 
 
+def _conda_registered_prefixes(home: Path) -> tuple[Path, ...]:
+    registry = home / ".conda" / "environments.txt"
+    try:
+        lines = registry.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return ()
+    return tuple(Path(line.strip()) for line in lines if line.strip())
+
+
 def _manager_python_records() -> tuple[dict[str, Any], ...]:
     """Enumerate installed runtimes that may be inactive and omitted by uv."""
 
@@ -444,6 +454,7 @@ def _manager_python_records() -> tuple[dict[str, Any], ...]:
     if home is not None:
         roots.extend(_conda_environment_roots(home))
         roots.extend(_conda_base_roots(home))
+        roots.extend(_conda_registered_prefixes(home))
     paths: dict[str, dict[str, Any]] = {}
     for root in roots:
         try:
