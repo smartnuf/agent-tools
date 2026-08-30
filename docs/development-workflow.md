@@ -79,6 +79,11 @@ Before making changes:
 5. reconcile documentation claims with code, tests, workflows, merged changes,
    and published artifacts.
 
+Confirm that roadmap work has a corresponding open GitHub milestone and that
+the selected issue is assigned to it. Treat an unassigned roadmap issue, a
+closed milestone for active work, or an open milestone whose roadmap gates are
+already complete as stale state to reconcile before implementation.
+
 Record pre-existing dirty paths and stashes. Never hide, overwrite, apply,
 drop, or include them unless the task explicitly owns them.
 
@@ -115,8 +120,15 @@ After durable evidence exists:
   providing evidence;
 - update estimates when new facts justify it;
 - record unresolved work instead of hiding variance;
-- reconcile the issue and milestone; and
+- reconcile issue assignments and the GitHub milestone state; and
 - recommend one next task.
+
+When this change completes a milestone, confirm that every required acceptance
+criterion has durable evidence, close or move every remaining issue according
+to its actual owner, explicitly close the GitHub milestone, and verify it is
+closed. GitHub does not close a milestone merely because its open-issue count
+reaches zero. Open the next milestone and assign its initial planned issues
+only when roadmap work is ready to begin there.
 
 Do not infer completion from prose, commit count, or issue count. A pull request
 that is merely open or merge-ready is not merged evidence.
@@ -293,8 +305,8 @@ a distinct operation:
 3. confirm every required check passed for that exact head;
 4. confirm automated review completed for that exact head;
 5. query review threads again and confirm no unresolved actionable thread;
-6. confirm mergeability, scope, roadmap/evidence consistency, and absence of
-   unresolved contradictions; and
+6. confirm mergeability, scope, roadmap/evidence consistency, issue assignment,
+   and intended GitHub milestone state, with no unresolved contradictions; and
 7. confirm that the stream currently owns merging.
 
 If the base moved, use the concurrent-integration procedure before treating
