@@ -100,8 +100,10 @@ Selection keeps these facts separate:
 - execution environment, such as the Windows host, WSL, a container, or a
   native Unix host;
 - provider executable architecture;
-- provider origin/provenance, including external/system versus
-  Agent-Tools-managed; and
+- provider mechanism/origin, such as system/external versus a runtime managed
+  by uv or another tool;
+- Agent Tools mutation provenance, meaning pre-existing/unrecorded versus a
+  mutation Agent Tools requested, without implying package ownership; and
 - compatibility with the intended final execution environment.
 
 `platform.machine()` describes the running Python context and is not, by
@@ -139,19 +141,20 @@ and post-mutation rediscovery/final verification is mandatory.
 
 The normal installed-candidate ranking is:
 
-1. compatible existing native host/system provider;
-2. compatible existing external/system host provider where native status is
-   unavailable or irrelevant;
-3. compatible existing managed native provider;
-4. compatible existing translated/emulated external/system provider;
-5. compatible existing managed provider where native status is unavailable or
-   irrelevant; and
-6. compatible existing translated/emulated managed provider only as a
-   deliberate, visibly reported fallback, explicitly authorized where
-   practical.
+1. compatible existing native system/external-mechanism provider;
+2. compatible existing system/external-mechanism provider where native status
+   is unavailable or irrelevant;
+3. compatible existing native tool-managed-mechanism provider;
+4. compatible existing translated/emulated system/external-mechanism provider;
+5. compatible existing tool-managed-mechanism provider where native status is
+   unavailable or irrelevant; and
+6. compatible existing translated/emulated tool-managed-mechanism provider
+   only as a deliberate, visibly reported fallback, explicitly authorized
+   where practical.
 
-Installable options use native-before-translated and external/system-before-
-managed principles where the platform can actually supply those alternatives.
+Installable options use native-before-translated and system/external-mechanism-
+before-tool-managed-mechanism principles where the platform can actually
+supply those alternatives.
 Provisioning is considered only when no acceptable installed candidate
 exists; it never displaces a compatible existing external translated provider
 under the default policy. A validated explicit preference for native
@@ -174,15 +177,22 @@ all overlapping facts agree. Conflicting provider, version, architecture,
 environment, provenance, or suitability evidence for that identity fails
 visibly before deduplication; no discovery channel wins by arrival order.
 
+Provider mechanism and Agent Tools mutation provenance remain independent. For
+example, a uv-managed Python that predates Agent Tools is a tool-managed-
+mechanism provider with pre-existing/unrecorded Agent Tools provenance. A
+managed-state record changes reporting of the requested mutation, not the
+candidate's mechanism class or ownership.
+
 After each identity has one consistent candidate, compare built-in provider
 priority, a capability-declared version score, and the normalized resolved
 absolute path in that order. A version score must state its rule: Python
 bootstrap prefers the requested compatible minor and then the greatest
 verified stable patch; a capability without a declared version preference
 assigns equal version scores. Path comparison is ordinal after platform
-normalization (including case folding on Windows). If distinct candidates
-still have identical keys but contradictory evidence, selection fails visibly
-as ambiguous instead of choosing whichever discovery returned first.
+normalization (including case folding on Windows); the lowest ordinal
+normalized path wins. If distinct candidates still have identical keys but
+contradictory evidence, selection fails visibly as ambiguous instead of
+choosing whichever discovery returned first.
 
 A documented compatibility constraint may reject a higher-ranked candidate,
 but its evidence and reason must be visible. In particular, an ARM64 host with
