@@ -35,6 +35,15 @@ class RemovalPolicy(str, Enum):
 
 
 @dataclass(frozen=True)
+class ProviderPackage:
+    """One catalogue-owned package-manager installation option."""
+
+    manager: str
+    installation_unit: str
+    platforms: frozenset[str]
+
+
+@dataclass(frozen=True)
 class MachineState:
     """Platform facts used during pure capability evaluation."""
 
@@ -66,6 +75,7 @@ class ProviderSpec:
     probe_policy: ProbePolicy
     architectures: frozenset[str] = frozenset()
     installation_unit: str | None = None
+    packages: tuple[ProviderPackage, ...] = ()
     shared_package: bool = True
     removal_policy: RemovalPolicy = RemovalPolicy.PROHIBITED
     provided_environment: str = "host"
@@ -164,6 +174,13 @@ POPPLER = CapabilitySpec(
                 ExecutableProbe("pdftoppm", ("-v",), nonzero_version_pattern=r"\bversion\b"),
             ),
             probe_policy=ProbePolicy.ALL,
+            packages=(
+                ProviderPackage("winget", "oschwartz10612.Poppler", frozenset({"Windows"})),
+                ProviderPackage("apt", "poppler-utils", frozenset({"Linux"})),
+                ProviderPackage("dnf", "poppler-utils", frozenset({"Linux"})),
+                ProviderPackage("pacman", "poppler", frozenset({"Linux"})),
+                ProviderPackage("brew", "poppler", frozenset({"Darwin"})),
+            ),
         ),
     ),
 )
@@ -184,6 +201,13 @@ GHOSTSCRIPT = CapabilitySpec(
                 ExecutableProbe("gswin32c", ("--version",), "windows-ghostscript"),
             ),
             probe_policy=ProbePolicy.ANY,
+            packages=(
+                ProviderPackage("winget", "ArtifexSoftware.GhostScript", frozenset({"Windows"})),
+                ProviderPackage("apt", "ghostscript", frozenset({"Linux"})),
+                ProviderPackage("dnf", "ghostscript", frozenset({"Linux"})),
+                ProviderPackage("pacman", "ghostscript", frozenset({"Linux"})),
+                ProviderPackage("brew", "ghostscript", frozenset({"Darwin"})),
+            ),
         ),
     ),
 )
@@ -208,6 +232,9 @@ BASH = CapabilitySpec(
             ),
             probe_policy=ProbePolicy.ANY,
             installation_unit="Git.Git",
+            packages=(
+                ProviderPackage("winget", "Git.Git", frozenset({"Windows"})),
+            ),
             provided_environment="windows-host",
         ),
         ProviderSpec(
