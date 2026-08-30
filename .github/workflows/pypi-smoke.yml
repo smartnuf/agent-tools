@@ -38,8 +38,9 @@ jobs:
           UV_TOOL_DIR: ${{ runner.temp }}\pypi-tools
           UV_TOOL_BIN_DIR: ${{ runner.temp }}\pypi-bin
         run: |
-          $requirement = "smartnuf-agent-tools==$env:RELEASE_VERSION"
-          uv tool install --python 3.13 $requirement
+          $package = "smartnuf-agent-tools"
+          $pin = "$package==$env:RELEASE_VERSION"
+          uv tool install --python 3.13 $package
           if ($LASTEXITCODE -ne 0) { throw "initial PyPI install failed with exit code $LASTEXITCODE" }
           $executable = "$(uv tool dir --bin)\agent-tools.exe"
           if ($LASTEXITCODE -ne 0) { throw "tool bin lookup failed with exit code $LASTEXITCODE" }
@@ -54,7 +55,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "PyPI upgrade failed with exit code $LASTEXITCODE" }
           $upgradedVersion = & $executable --version
           if ($upgradedVersion -ne "agent-tools $env:RELEASE_VERSION") { throw "unexpected upgraded version: $upgradedVersion" }
-          uv tool install --python 3.13 --reinstall $requirement
+          uv tool install --python 3.13 --reinstall $pin
           if ($LASTEXITCODE -ne 0) { throw "pinned PyPI reinstall failed with exit code $LASTEXITCODE" }
           uv tool uninstall smartnuf-agent-tools
           if ($LASTEXITCODE -ne 0) { throw "tool uninstall failed with exit code $LASTEXITCODE" }
@@ -66,14 +67,15 @@ jobs:
           UV_TOOL_DIR: ${{ runner.temp }}/pypi-tools
           UV_TOOL_BIN_DIR: ${{ runner.temp }}/pypi-bin
         run: |
-          requirement="smartnuf-agent-tools==$RELEASE_VERSION"
-          uv tool install --python 3.13 "$requirement"
+          package="smartnuf-agent-tools"
+          pin="smartnuf-agent-tools==$RELEASE_VERSION"
+          uv tool install --python 3.13 "$package"
           tool_bin="$(uv tool dir --bin)"
           test "$("$tool_bin/agent-tools" --version)" = "agent-tools $RELEASE_VERSION"
           "$tool_bin/agent-tools" tools list
           "$tool_bin/agent-tools" doctor
           uv tool upgrade smartnuf-agent-tools
           test "$("$tool_bin/agent-tools" --version)" = "agent-tools $RELEASE_VERSION"
-          uv tool install --python 3.13 --reinstall "$requirement"
+          uv tool install --python 3.13 --reinstall "$pin"
           uv tool uninstall smartnuf-agent-tools
           test ! -e "$tool_bin/agent-tools"
