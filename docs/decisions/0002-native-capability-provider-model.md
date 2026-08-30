@@ -210,11 +210,15 @@ controls; they do not determine native suitability for Agent Tools. Python
 bootstrap must apply this contract first, then give uv the selected verified
 interpreter path.
 
-Provider plans must contain no installation action when a suitable candidate
-already verifies. Selection and planning require both empty/disposable-host
-and already-equipped workstation evidence. Pure fixtures cover otherwise
-unavailable combinations; platform CI claims only the runner architectures it
-actually exercises and does not imply hosted Windows ARM64 coverage.
+Under the default policy, provider plans must contain no installation action
+when a suitable candidate already verifies. The only exception is a validated
+explicit preference for native provisioning under the rule above; that plan
+must identify the compatible installed provider it would displace and remains
+subject to separate mutation authorization. Selection and planning require
+both empty/disposable-host and already-equipped workstation evidence. Pure
+fixtures cover otherwise unavailable combinations; platform CI claims only
+the runner architectures it actually exercises and does not imply hosted
+Windows ARM64 coverage.
 
 ## Bash capability
 
