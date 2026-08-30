@@ -185,7 +185,11 @@ class PythonSelectionTests(unittest.TestCase):
                 selection.verify_final_environment("C:/venv/python.exe", selected)
 
     def test_direct_preference_is_verified_even_when_uv_omits_it(self) -> None:
-        direct = candidate("C:/custom/python.exe", "arm64", selection.ProviderMechanism.SYSTEM)
+        direct = candidate(
+            str((Path.cwd() / "custom-python" / "python").resolve()),
+            "arm64",
+            selection.ProviderMechanism.SYSTEM,
+        )
         with (
             patch.object(selection, "current_host", return_value=self.host),
             patch.object(selection, "discover_with_uv", return_value=()),
@@ -197,7 +201,9 @@ class PythonSelectionTests(unittest.TestCase):
 
     def test_direct_alias_reuses_discovered_mechanism_evidence(self) -> None:
         managed = candidate(
-            "C:/uv/python/python.exe", "arm64", selection.ProviderMechanism.TOOL_MANAGED
+            str((Path.cwd() / "managed-python" / "python").resolve()),
+            "arm64",
+            selection.ProviderMechanism.TOOL_MANAGED,
         )
         alias = candidate(
             managed.path, "arm64", selection.ProviderMechanism.SYSTEM
@@ -209,7 +215,7 @@ class PythonSelectionTests(unittest.TestCase):
             patch.object(selection, "verify_candidate", return_value=alias),
         ):
             _, candidates, selected = selection.discover_verify_select(
-                preferred_path="C:/alias/python.exe"
+                preferred_path=str((Path.cwd() / "python-alias").resolve())
             )
         self.assertEqual(candidates, (managed,))
         self.assertIs(selected, managed)
@@ -231,12 +237,18 @@ class PythonSelectionTests(unittest.TestCase):
         self.assertEqual(verified.mechanism, selection.ProviderMechanism.TOOL_MANAGED)
 
     def test_provider_specific_manager_root_is_not_classified_as_system(self) -> None:
+        manager_root = (Path.cwd() / "pyenv-fixture").resolve()
+        executable = manager_root / "versions" / "3.11.9" / "python"
         with (
-            patch.dict(selection.os.environ, {"PYENV_ROOT": "C:/pyenv"}, clear=True),
-            patch.object(selection.Path, "home", return_value=Path("C:/home")),
+            patch.dict(
+                selection.os.environ,
+                {"PYENV_ROOT": str(manager_root)},
+                clear=True,
+            ),
+            patch.object(selection.Path, "home", return_value=Path.cwd()),
         ):
             mechanism = selection._provider_mechanism(
-                {}, "C:/pyenv/versions/3.11.9/python.exe"
+                {"agent_tools_mechanism": "system"}, str(executable)
             )
         self.assertEqual(mechanism, selection.ProviderMechanism.TOOL_MANAGED)
 

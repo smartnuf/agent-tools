@@ -19,6 +19,33 @@ function Assert-NativeSuccess {
     }
 }
 
+function Find-BootstrapPython {
+    $FilterNames = @('UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON', 'UV_PYTHON_PREFERENCE')
+    $SavedFilters = @{}
+    foreach ($Name in $FilterNames) {
+        $SavedFilters[$Name] = [Environment]::GetEnvironmentVariable($Name, 'Process')
+        Remove-Item -LiteralPath "Env:$Name" -ErrorAction SilentlyContinue
+    }
+    try {
+        $Found = & uv python find 3.11 --system --no-project --no-python-downloads --no-config
+        if ($LASTEXITCODE -ne 0) {
+            $Found = & uv python find 3.11 --managed-python --no-project --no-python-downloads --no-config
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw 'No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap.'
+        }
+        return $Found
+    } finally {
+        foreach ($Name in $FilterNames) {
+            if ($null -eq $SavedFilters[$Name]) {
+                Remove-Item -LiteralPath "Env:$Name" -ErrorAction SilentlyContinue
+            } else {
+                [Environment]::SetEnvironmentVariable($Name, $SavedFilters[$Name], 'Process')
+            }
+        }
+    }
+}
+
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     if (-not $InstallUv) {
         throw 'uv is not installed. Re-run with -InstallUv, or install uv yourself.'
@@ -30,6 +57,19 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Assert-NativeSuccess 'uv installation'
     Update-ProcessPath
 }
+
+$Selector = Join-Path $PSScriptRoot 'select-python.py'
+$SelectorArgs = @($Selector)
+if ($AllowEmulatedPython) { $SelectorArgs += '--allow-translated' }
+if ($PythonPath) {
+    $BootstrapPython = $PythonPath
+    $SelectorArgs += @('--prefer', $PythonPath)
+} else {
+    $BootstrapPython = Find-BootstrapPython
+}
+$SelectedPython = & $BootstrapPython @SelectorArgs
+Assert-NativeSuccess 'final Python selection'
+$SelectedPython = $SelectedPython | Select-Object -Last 1
 
 if ($InstallNativeTools) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
@@ -61,25 +101,6 @@ if ($InstallNativeTools) {
         throw 'Ghostscript installation completed but no supported console executable is on PATH.'
     }
 }
-
-$Selector = Join-Path $PSScriptRoot 'select-python.py'
-$SelectorArgs = @($Selector)
-if ($AllowEmulatedPython) { $SelectorArgs += '--allow-translated' }
-if ($PythonPath) {
-    $BootstrapPython = $PythonPath
-    $SelectorArgs += @('--prefer', $PythonPath)
-} else {
-    $BootstrapPython = & uv python find 3.11 --system --no-project --no-python-downloads --no-config
-    if ($LASTEXITCODE -ne 0) {
-        $BootstrapPython = & uv python find 3.11 --managed-python --no-project --no-python-downloads --no-config
-    }
-    if ($LASTEXITCODE -ne 0) {
-        throw 'No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap.'
-    }
-}
-$SelectedPython = & $BootstrapPython @SelectorArgs
-Assert-NativeSuccess 'final Python selection'
-$SelectedPython = $SelectedPython | Select-Object -Last 1
 
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $Python)) {

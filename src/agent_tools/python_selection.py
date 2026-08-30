@@ -279,8 +279,8 @@ def verify_candidate(record: dict[str, Any]) -> PythonCandidate | None:
 
 def _provider_mechanism(record: dict[str, Any], path: str) -> ProviderMechanism:
     declared = record.get("agent_tools_mechanism")
-    if declared in {item.value for item in ProviderMechanism}:
-        return ProviderMechanism(declared)
+    if declared == ProviderMechanism.TOOL_MANAGED.value:
+        return ProviderMechanism.TOOL_MANAGED
     manager_roots = _known_manager_roots()
     resolved = os.path.normcase(os.path.normpath(path))
     for root in manager_roots:
@@ -291,7 +291,11 @@ def _provider_mechanism(record: dict[str, Any], path: str) -> ProviderMechanism:
                 return ProviderMechanism.TOOL_MANAGED
         except ValueError:
             continue
-    return ProviderMechanism.SYSTEM
+    return (
+        ProviderMechanism.SYSTEM
+        if declared in {None, ProviderMechanism.SYSTEM.value}
+        else ProviderMechanism(declared)
+    )
 
 
 def _known_manager_roots() -> tuple[str, ...]:

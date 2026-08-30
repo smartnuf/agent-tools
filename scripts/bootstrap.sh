@@ -42,8 +42,8 @@ fi
 if [ -n "$PYTHON_PATH" ]; then
   BOOTSTRAP_PYTHON=$PYTHON_PATH
 else
-  if ! BOOTSTRAP_PYTHON=$(uv python find 3.11 --system --no-project --no-python-downloads --no-config); then
-    if ! BOOTSTRAP_PYTHON=$(uv python find 3.11 --managed-python --no-project --no-python-downloads --no-config); then
+  if ! BOOTSTRAP_PYTHON=$(env -u UV_MANAGED_PYTHON -u UV_NO_MANAGED_PYTHON -u UV_PYTHON_PREFERENCE uv python find 3.11 --system --no-project --no-python-downloads --no-config); then
+    if ! BOOTSTRAP_PYTHON=$(env -u UV_MANAGED_PYTHON -u UV_NO_MANAGED_PYTHON -u UV_PYTHON_PREFERENCE uv python find 3.11 --managed-python --no-project --no-python-downloads --no-config); then
       echo "No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap." >&2
       exit 1
     fi
@@ -62,7 +62,11 @@ fi
 if [ ! -x "$ROOT/.venv/bin/python" ]; then
   uv venv "$ROOT/.venv" --python "$SELECTED_PYTHON" --no-python-downloads
 fi
-"$BOOTSTRAP_PYTHON" "$ROOT/scripts/select-python.py" $SELECTOR_ARGS --verify-final "$ROOT/.venv/bin/python" >/dev/null
+if [ -n "$PYTHON_PATH" ]; then
+  "$BOOTSTRAP_PYTHON" "$ROOT/scripts/select-python.py" $SELECTOR_ARGS --prefer "$PYTHON_PATH" --verify-final "$ROOT/.venv/bin/python" >/dev/null
+else
+  "$BOOTSTRAP_PYTHON" "$ROOT/scripts/select-python.py" $SELECTOR_ARGS --verify-final "$ROOT/.venv/bin/python" >/dev/null
+fi
 uv pip install --exact --python "$ROOT/.venv/bin/python" -r "$ROOT/requirements.txt" -e "$ROOT"
 if [ "$ADD_PATH" -eq 1 ]; then
   "$ROOT/scripts/path.sh" --apply
