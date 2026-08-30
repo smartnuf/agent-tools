@@ -44,7 +44,7 @@ def _one_match(names: list[str], suffix: str) -> str:
 
 def _check_metadata(metadata: Message) -> str:
     assert metadata["Name"] == "smartnuf-agent-tools"
-    assert metadata["Version"] == "0.1.1"
+    assert metadata["Version"] == "0.1.2"
     assert metadata["Summary"] == EXPECTED_SUMMARY
     assert {keyword.strip() for keyword in metadata["Keywords"].split(",")} == EXPECTED_KEYWORDS
     python_constraints = {

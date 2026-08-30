@@ -30,12 +30,12 @@ requirements.in         reviewed direct Python dependencies
 requirements.txt        generated, fully pinned Python environment lock
 ```
 
-## Install the packaged prerelease
+## Install the packaged release
 
-The current [v0.1.1 GitHub prerelease](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.1) is pinned to its reviewed release asset. Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) through a trusted package manager, then run:
+The current [v0.1.2 GitHub release](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.2) is pinned to its reviewed release asset. Until [issue #45](https://github.com/smartnuf/agent-tools/issues/45) records successful PyPI publication and three-platform installation evidence, use this exact GitHub wheel. Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) through a trusted package manager, then run:
 
 ```sh
-uv tool install --python 3.13 "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl"
+uv tool install --python 3.13 "https://github.com/smartnuf/agent-tools/releases/download/v0.1.2/smartnuf_agent_tools-0.1.2-py3-none-any.whl"
 ```
 
 Verify it without assuming uv's executable directory is already on `PATH`.
@@ -57,7 +57,7 @@ To make `agent-tools` directly discoverable in future shells, `uv tool update-sh
 The versioned URL is the pin. To restore that exact release if its isolated environment is damaged:
 
 ```sh
-uv tool install --python 3.13 --reinstall "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl"
+uv tool install --python 3.13 --reinstall "https://github.com/smartnuf/agent-tools/releases/download/v0.1.2/smartnuf_agent_tools-0.1.2-py3-none-any.whl"
 ```
 
 To remove it:
@@ -66,7 +66,7 @@ To remove it:
 uv tool uninstall smartnuf-agent-tools
 ```
 
-Poppler and Ghostscript are not bundled. Install them through the operating-system package manager before expecting `agent-tools doctor` to pass completely. See the [v0.1.1 release notes](docs/releases/v0.1.1.md) for current limitations.
+Poppler and Ghostscript are not bundled. Install them through the operating-system package manager before expecting `agent-tools doctor` to pass completely. See the [v0.1.2 release notes](docs/releases/v0.1.2.md) for current limitations.
 
 ## Capability discovery in reviewed source
 
@@ -84,8 +84,8 @@ environment, and executable architecture where observable. On Windows it
 discovers Git Bash outside the normal process `PATH`; the default WSL
 distribution is reported separately and never silently treated as
 Windows-hosted Bash. These commands do not install software, alter `PATH`, or
-configure an agent. The published v0.1.1 prerelease predates M1.5; public
-availability of these commands begins with M2.
+configure an agent. Version 0.1.2 is the first packaged release containing
+these commands.
 
 ## Get the source
 
@@ -153,4 +153,4 @@ For routine operation:
 
 The maintained roadmap is [`docs/plan/00-index.md`](docs/plan/00-index.md). It records the current milestone, acceptance gates, estimates, evidence, remaining effort, and recommended next work. [`docs/plan/README.md`](docs/plan/README.md) defines how humans and agents plan tasks and report progress consistently.
 
-The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md) is complete. The next objective is [issue #19](https://github.com/smartnuf/agent-tools/issues/19), the first M2 trusted-publishing slice. The versioned GitHub prerelease and clone-based shared environment remain supported until a reviewed M2 release makes the M1.5 commands public.
+The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md) is complete. [Issue #45](https://github.com/smartnuf/agent-tools/issues/45) owns the first stable PyPI publication and verification slice. The versioned GitHub prerelease and clone-based shared environment remain supported until that reviewed M2 release makes the M1.5 commands public.

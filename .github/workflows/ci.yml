@@ -39,7 +39,7 @@ jobs:
       - name: Validate release version and checksums
         shell: bash
         run: |
-          python scripts/release.py verify-tag v0.1.1
+          python scripts/release.py verify-tag v0.1.2
           python scripts/release.py checksums "${{ runner.temp }}/dist/SHA256SUMS" "${{ runner.temp }}"/dist/*.whl "${{ runner.temp }}"/dist/*.tar.gz
       - name: Install wheel and declared dependencies
         run: |
