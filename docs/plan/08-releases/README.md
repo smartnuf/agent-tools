@@ -87,23 +87,47 @@ Start only after M3 is complete and user demand justifies the maintenance burden
 
 ### M4a — WinGet
 
+Architecture: [Decision 0003](../../decisions/0003-winget-distribution.md)
+and the [WinGet research record](02-winget-research.md). A thin uv bootstrap is
+rejected. Implementation stops unless a later decision authorizes a complete
+WinGet-owned Windows artifact. Issues [#59–#64](https://github.com/smartnuf/agent-tools/issues/59)
+track the ordered decision, generation, validation, host lifecycle, automation,
+and separately authorized submission slices.
+
 | Acceptance criterion | State | Required evidence |
 |---|---|---|
-| Versioned manifest is generated from a published release | deferred | Generated manifest review |
-| Architecture, URL, and checksum are validated | deferred | Manifest validation output |
-| Install and upgrade work on disposable Windows hosts | deferred | Disposable-host test |
-| Community-repository submission is accepted | deferred | Accepted submission link |
+| Demand and a complete Windows artifact class are approved | deferred | Demand evidence and accepted artifact decision |
+| Deterministic multi-file manifests are generated from a stable release | deferred | Generator test and reviewed output |
+| Schema, identifier, URL, architecture, and checksum are validated | deferred | `winget validate`, hash, and scoped policy checks |
+| Install, repeat, upgrade, rollback/recovery, and remove pass unattended | deferred | Disposable x64/ARM64 Windows evidence where supported |
+| Release-version update proposals are automated and review-gated | deferred | Exact-version automation test and maintainer runbook |
+| Community-repository submission is accepted | deferred | Accepted external submission link |
 
-Estimate: **2–4 person-days**, excluding external review time.
+Estimate: **4–7 person-days**, excluding external review time and the separately
+estimated artifact implementation. Stop if no artifact is approved, demand is
+insufficient, or lifecycle/architecture evidence cannot be produced.
 
 ### M4b — Homebrew
 
-| Acceptance criterion | State | Required evidence |
-| Formula or tap is generated from a published release | deferred | Formula or tap review |
-| Checksum and version updates are automated | deferred | Update workflow test |
-| Intel and Apple-silicon behaviour is tested where runners are available | deferred | Platform test results |
-| Install and upgrade documentation is verified | deferred | Documentation smoke test |
+Architecture: [Decision 0004](../../decisions/0004-homebrew-distribution.md)
+and the [Homebrew research record](03-homebrew-research.md). Begin with a native
+Python formula in a project-owned tap; do not delegate to uv at install time.
+Issues [#65–#70](https://github.com/smartnuf/agent-tools/issues/65) track the
+ordered demand/boundary, generation, audit, host lifecycle, automation, and
+separately authorized publication slices.
 
-Estimate: **1.5–3 person-days**.
+| Acceptance criterion | State | Required evidence |
+|---|---|---|
+| Demand and native-capability dependency boundary are approved | deferred | Demand evidence and post-M3 dependency decision |
+| Deterministic formula/resources are generated from a stable sdist | deferred | Generator test and reviewed formula/resource set |
+| Style, audit, source install, test, version, and checksums pass | deferred | `brew` validation output on the exact formula |
+| Install, repeat, upgrade, pin/recovery, and remove pass on disposable hosts | deferred | Apple-silicon, Intel where available, and Linuxbrew evidence |
+| Release-version update proposals are automated and review-gated | deferred | Exact-version automation test and tap runbook |
+| Project tap is published; core promotion remains separately justified | deferred | Published tap/release evidence or accepted external submission |
+
+Estimate: **3–5 person-days** for a project tap, excluding external review;
+homebrew-core preparation adds **1–2 person-days** if later justified. Stop if
+resources cannot be reproduced without install-time resolution, platform tests
+are unavailable, or maintenance demand is insufficient.
 
 Do not schedule MSI, macOS package, deb/rpm, standalone binary, self-updater, or bundled native-program work without a new decision record and demonstrated need.

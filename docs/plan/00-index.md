@@ -1,6 +1,6 @@
 # Plan status
 
-- Last reconciled: 2026-08-30
+- Last reconciled: 2026-08-30 at base `e7f35ffb84b45c6a62249b312f0c0642be5f0b92`
 - Current milestone: M3 — tested update and capability lifecycle
 - Current state: M2 complete; M3 not started
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
@@ -16,10 +16,14 @@
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
 | M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
 | M3 | Tested update and capability lifecycle | not-started | 0/8 | 3–6 days | 3–6 days |
-| M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
-| M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
+| M4a | WinGet discovery | deferred | 0/6 | 4–7 days | 4–7 days |
+| M4b | Homebrew discovery | deferred | 0/6 | 3–5 days | 3–5 days |
 
 Estimated implementation effort through M3: **3–6 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
+
+Post-M3 optional-channel implementation is now estimated at **7–12
+person-days**, excluding external moderation. Research completed the architecture
+decisions but did not complete an implementation acceptance gate.
 
 Gate counts are binary readiness measures. Estimates are ranges and must be revised when implementation reveals new facts.
 
@@ -30,6 +34,8 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
 - The repository has platform bootstrap, update, PATH, and diagnostic implementations.
 - [Decision 0001](../decisions/0001-distribution-model.md) establishes the intended public distribution model.
 - [Decision 0002](../decisions/0002-native-capability-provider-model.md) establishes the packaged native-capability boundary and safe provider semantics.
+- [Decision 0003](../decisions/0003-winget-distribution.md) rejects WinGet-to-uv delegation and requires a later-approved WinGet-owned artifact.
+- [Decision 0004](../decisions/0004-homebrew-distribution.md) selects a native Python formula in a project tap rather than uv delegation.
 - The packaged [capability catalogue and detected-state model](../../src/agent_tools/capabilities.py) covers Poppler and Ghostscript with fixture-driven tests and `doctor` integration.
 - The same catalogue distinguishes Git Bash, system Bash, and WSL Bash; the packaged read-only `tools list/status` interface is exercised outside a checkout.
 - Distribution metadata, platform guidance, and the transferred-wheel CI matrix now describe and test the capability-discovery product boundary.
@@ -52,6 +58,12 @@ excluded.
 ## Recommended next work
 
 Begin the M3 provider-mutation and managed-state design in [issue #26](https://github.com/smartnuf/agent-tools/issues/26), splitting implementation into reviewable execution, provenance, and integration slices before changing native programs (L, **3–6 days** for M3 overall).
+
+After M3, evaluate measured demand first, then prefer M4b Homebrew because its
+native formula can reuse the stable sdist without authorizing a new upstream
+artifact. Start M4a only after a separate decision accepts a complete portable
+Windows artifact or installer. See the [WinGet](08-releases/02-winget-research.md)
+and [Homebrew](08-releases/03-homebrew-research.md) research records.
 
 ## Known risks and assumptions
 
