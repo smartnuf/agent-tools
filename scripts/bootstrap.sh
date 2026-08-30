@@ -33,6 +33,17 @@ probe_manager_root() {
   return 1
 }
 
+probe_conda_base() {
+  for CANDIDATE in "$1"/bin/python3.11 "$1"/bin/python3 "$1"/bin/python
+  do
+    if [ -x "$CANDIDATE" ] && probe_bootstrap_python "$CANDIDATE"; then
+      BOOTSTRAP_PYTHON=$CANDIDATE
+      return 0
+    fi
+  done
+  return 1
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --install-uv) INSTALL_UV=1; shift ;;
@@ -94,6 +105,16 @@ else
       if probe_manager_root "$MANAGER_ROOT"; then break; fi
     done
     IFS=$SAVED_IFS
+  fi
+  if [ -z "$BOOTSTRAP_PYTHON" ]; then
+    for CONDA_BASE in \
+      "$HOME/miniconda3" \
+      "$HOME/anaconda3" \
+      "$HOME/miniforge3" \
+      "$HOME/mambaforge"
+    do
+      probe_conda_base "$CONDA_BASE" && break
+    done
   fi
   if [ -z "$BOOTSTRAP_PYTHON" ]; then
     echo "No installed Python 3.11 can run selection. Install a compatible Python with a trusted provider, then rerun bootstrap." >&2

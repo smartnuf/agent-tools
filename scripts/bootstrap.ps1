@@ -70,6 +70,16 @@ function Find-BootstrapPython {
                 Join-Path $HOME 'mambaforge\envs'
                 if ($env:ProgramData) { Join-Path $env:ProgramData 'conda\envs' }
             )
+            $CondaBaseRoots = @(
+                Join-Path $HOME 'miniconda3'
+                Join-Path $HOME 'anaconda3'
+                Join-Path $HOME 'miniforge3'
+                Join-Path $HOME 'mambaforge'
+                if ($env:ProgramData) {
+                    Join-Path $env:ProgramData 'miniconda3'
+                    Join-Path $env:ProgramData 'anaconda3'
+                }
+            )
             foreach ($ManagerRoot in $ManagerRoots) {
                 $Candidates = @(
                     Get-ChildItem -Path (Join-Path $ManagerRoot '*\python.exe') -File -ErrorAction SilentlyContinue
@@ -78,6 +88,17 @@ function Find-BootstrapPython {
                 foreach ($Candidate in $Candidates | Sort-Object -Property FullName) {
                     if (Test-BootstrapPython -Path $Candidate.FullName) {
                         return $Candidate.FullName
+                    }
+                }
+            }
+            foreach ($CondaBaseRoot in $CondaBaseRoots) {
+                foreach ($CandidatePath in @(
+                    (Join-Path $CondaBaseRoot 'python.exe'),
+                    (Join-Path $CondaBaseRoot 'bin\python.exe')
+                )) {
+                    if ((Test-Path -LiteralPath $CandidatePath -PathType Leaf) -and
+                        (Test-BootstrapPython -Path $CandidatePath)) {
+                        return $CandidatePath
                     }
                 }
             }

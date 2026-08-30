@@ -353,6 +353,7 @@ def _known_manager_roots() -> tuple[str, ...]:
         home / ".asdf" / "installs" / "python",
         home / ".local" / "share" / "mise" / "installs" / "python",
         *_conda_environment_roots(home),
+        *_conda_base_roots(home),
     )
     return tuple(str(root) for root in (*configured, *defaults))
 
@@ -376,6 +377,20 @@ def _conda_environment_roots(home: Path) -> tuple[Path, ...]:
     program_data = os.environ.get("ProgramData")
     shared = (Path(program_data) / "conda" / "envs",) if program_data else ()
     return configured + defaults + shared
+
+
+def _conda_base_roots(home: Path) -> tuple[Path, ...]:
+    defaults = tuple(
+        home / name
+        for name in ("miniconda3", "anaconda3", "miniforge3", "mambaforge")
+    )
+    program_data = os.environ.get("ProgramData")
+    shared = (
+        tuple(Path(program_data) / name for name in ("miniconda3", "anaconda3"))
+        if program_data
+        else ()
+    )
+    return defaults + shared
 
 
 def _manager_python_records() -> tuple[dict[str, Any], ...]:
@@ -404,10 +419,16 @@ def _manager_python_records() -> tuple[dict[str, Any], ...]:
         roots[-1] = roots[-1] / "installs" / "python"
     if home is not None:
         roots.extend(_conda_environment_roots(home))
+        roots.extend(_conda_base_roots(home))
     paths: dict[str, dict[str, Any]] = {}
     for root in roots:
         try:
-            for pattern in ("*/bin/python*", "*/python.exe"):
+            for pattern in (
+                "*/bin/python*",
+                "*/python.exe",
+                "bin/python*",
+                "python.exe",
+            ):
                 for path in root.glob(pattern):
                     if re.fullmatch(r"python(?:3(?:\.11)?)?(?:\.exe)?", path.name) is None:
                         continue
@@ -544,6 +565,7 @@ def verify_final_environment(python: str, selected: PythonCandidate) -> None:
         raise SelectionError(f"final Python verification failed: {python}")
     if (
         actual.version != selected.version
+        or actual.release_level != selected.release_level
         or actual.architecture != selected.architecture
         or actual.implementation != selected.implementation
         or os.path.normcase(os.path.normpath(actual.base_path or ""))

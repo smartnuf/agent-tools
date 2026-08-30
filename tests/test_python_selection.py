@@ -179,9 +179,20 @@ class PythonSelectionTests(unittest.TestCase):
             "C:/venv/python.exe", (3, 11, 9), "arm64", selection.ProviderMechanism.SYSTEM,
             base_path="C:/uv/python/python.exe",
         )
+        prerelease = selection.PythonCandidate(
+            "C:/venv/python.exe",
+            (3, 11, 9),
+            "arm64",
+            selection.ProviderMechanism.SYSTEM,
+            release_level="candidate",
+            base_path=selected.path,
+        )
         with patch.object(selection, "verify_candidate", return_value=matching):
             selection.verify_final_environment("C:/venv/python.exe", selected)
         with patch.object(selection, "verify_candidate", return_value=wrong_base):
+            with self.assertRaisesRegex(selection.SelectionError, "does not match"):
+                selection.verify_final_environment("C:/venv/python.exe", selected)
+        with patch.object(selection, "verify_candidate", return_value=prerelease):
             with self.assertRaisesRegex(selection.SelectionError, "does not match"):
                 selection.verify_final_environment("C:/venv/python.exe", selected)
 
@@ -311,6 +322,7 @@ class PythonSelectionTests(unittest.TestCase):
         self.assertIn(first, roots)
         self.assertIn(second, roots)
         self.assertIn(home / ".conda" / "envs", roots)
+        self.assertIn(home / "miniconda3", selection._conda_base_roots(home))
 
     def test_discovery_mechanism_evidence_controls_ranking(self) -> None:
         facts = {

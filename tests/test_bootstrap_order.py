@@ -39,6 +39,8 @@ class BootstrapOrderTests(unittest.TestCase):
         self.assertIn("CONDA_ENVS_PATH", posix)
         self.assertIn("WaitForExit(10000)", powershell)
         self.assertIn("sleep 10", posix)
+        self.assertIn("CondaBaseRoots", powershell)
+        self.assertIn("probe_conda_base", posix)
 
 
 if __name__ == "__main__":
