@@ -142,19 +142,19 @@ The normal installed-candidate ranking is:
 1. compatible existing native host/system provider;
 2. compatible existing external/system host provider where native status is
    unavailable or irrelevant;
-3. compatible existing managed native provider;
-4. compatible existing translated/emulated external/system provider;
+3. compatible existing translated/emulated external/system provider;
+4. compatible existing managed native provider;
 5. compatible existing managed provider where native status is unavailable or
    irrelevant; and
 6. compatible existing translated/emulated managed provider only as a
    deliberate, visibly reported fallback, explicitly authorized where
    practical.
 
-Installable options use the same native-before-translated and
-external/system-before-managed principles where the platform can actually
-supply those alternatives. Provisioning a native managed provider may
-therefore outrank reusing an existing translated external provider; that
-departure from reuse is deliberate and must appear in the plan.
+Installable options use native-before-translated and external/system-before-
+managed principles where the platform can actually supply those alternatives.
+Provisioning is considered only when no acceptable installed candidate
+exists; it never displaces a compatible existing external translated provider
+under the default policy.
 
 A validated explicit user provider preference narrows the compatible options
 before default ranking. Selecting a lower-ranked compatible option requires
