@@ -102,6 +102,40 @@ class CapabilityTests(unittest.TestCase):
             tuple((f"/tools/{name}", f"{name} 1.2.3") for name in ("pdfinfo", "pdftotext", "pdftoppm")),
         )
 
+    def test_preseeded_required_providers_are_reused_repeatably(self) -> None:
+        paths = {
+            "pdfinfo": "/existing/poppler/pdfinfo",
+            "pdftotext": "/existing/poppler/pdftotext",
+            "pdftoppm": "/existing/poppler/pdftoppm",
+            "gs": "/existing/ghostscript/gs",
+        }
+        locator = Mock(side_effect=lambda probe, machine: paths.get(probe.name))
+        version_reader = Mock(side_effect=lambda probe, path: f"{probe.name} 1.2.3")
+
+        first = capabilities.detect_capabilities(
+            (capabilities.POPPLER, capabilities.GHOSTSCRIPT),
+            self.machine,
+            locator=locator,
+            version_reader=version_reader,
+        )
+        second = capabilities.detect_capabilities(
+            (capabilities.POPPLER, capabilities.GHOSTSCRIPT),
+            self.machine,
+            locator=locator,
+            version_reader=version_reader,
+        )
+
+        self.assertEqual(first, second)
+        self.assertTrue(
+            all(state.availability is capabilities.Availability.AVAILABLE for state in first)
+        )
+        self.assertEqual(
+            tuple(state.selected_provider.provider.provider_id for state in first),
+            ("host-poppler", "host-ghostscript"),
+        )
+        self.assertEqual(locator.call_count, 12)
+        self.assertEqual(version_reader.call_count, 8)
+
     def test_found_but_unverified_executable_does_not_satisfy_provider(self) -> None:
         state = capabilities.detect_capability(
             capabilities.GHOSTSCRIPT,

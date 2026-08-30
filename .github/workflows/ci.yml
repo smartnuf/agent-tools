@@ -124,6 +124,15 @@ jobs:
           .venv/bin/python -c "import importlib.util; assert importlib.util.find_spec('agent_tools_extraneous') is None"
           sh scripts/path.sh
 
+      - name: Verify repeated pre-seeded selection (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .venv\Scripts\python.exe tests/check_preseeded_selection.py
+
+      - name: Verify repeated pre-seeded selection (Unix)
+        if: runner.os != 'Windows'
+        run: .venv/bin/python tests/check_preseeded_selection.py
+
       - name: Exercise checkout doctor (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
