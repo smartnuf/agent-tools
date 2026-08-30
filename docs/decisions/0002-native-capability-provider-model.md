@@ -83,6 +83,85 @@ Stage the CLI:
   requested and observed host change, and refuse when provenance or safety is
   uncertain.
 
+## Final-provider selection contract
+
+Discovery and bootstrap are not provider-selection policy. For every
+capability that Agent Tools selects or arranges for later use, the finalized
+setup normally reuses a compatible existing native/system provider. A
+bootstrap process may run under translation or use a temporary managed tool,
+but that does not make a translated or managed provider preferable for the
+final environment.
+
+Selection keeps these facts separate:
+
+- host platform and host architecture;
+- discovery/bootstrap process architecture and translated/emulated state,
+  where observable;
+- execution environment, such as the Windows host, WSL, a container, or a
+  native Unix host;
+- provider executable architecture;
+- provider origin/provenance, including external/system versus
+  Agent-Tools-managed; and
+- compatibility with the intended final execution environment.
+
+`platform.machine()` describes the running Python context and is not, by
+itself, sufficient evidence of host architecture when that Python may be
+translated. Platform adapters may therefore add host/process evidence. On
+Windows, [`IsWow64Process2`](https://learn.microsoft.com/windows/win32/api/wow64apiset/nf-wow64apiset-iswow64process2)
+can report the process machine and native host machine; older or unavailable
+APIs require an explicitly limited fallback.
+On macOS, translation evidence such as `sysctl.proc_translated` may supplement
+process and hardware architecture observations. On Linux and other Unix-like
+systems, kernel-reported architecture is useful host-environment evidence, but
+containers, virtual machines, and compatibility layers remain distinct
+execution environments rather than facts to guess through. Unknown evidence
+stays unknown and is reported; architecture aliases are normalized before
+comparison.
+
+The deterministic pipeline is:
+
+1. **Discover candidates** through provider-specific, read-only channels,
+   including candidates outside `PATH`.
+2. **Verify candidates** by executing bounded identity/version probes and
+   collecting path, architecture, environment, and provenance evidence.
+3. **Rank compatible candidates** for the intended final environment.
+4. **Select explicitly**, passing a verified executable path to downstream
+   tooling instead of relying on that tool's implicit preference order.
+5. **Verify the final result** again and fail rather than report success when
+   the selected provider and resulting environment disagree.
+
+The normal ranking is:
+
+1. compatible existing native host/system provider;
+2. compatible existing host provider where native status is unavailable or
+   irrelevant;
+3. compatible managed native provider when no suitable existing provider
+   exists; and
+4. translated/emulated managed provider only as a deliberate, visibly
+   reported fallback, explicitly authorized where practical.
+
+A documented compatibility constraint may reject a higher-ranked candidate,
+but its evidence and reason must be visible. In particular, an ARM64 host with
+an x64/emulated bootstrap process and a compatible existing native ARM64
+Python selects the native ARM64 Python for the final environment.
+
+uv's current documented
+[`python-preference = "managed"`](https://docs.astral.sh/uv/concepts/python-versions/#adjusting-python-version-preferences)
+can prefer an already
+installed uv-managed Python over an installed system Python, although a
+compatible system Python is considered before uv downloads a new managed
+Python. `system`, `only-system`/`--no-managed-python`, automatic-download
+controls, and explicit interpreter paths are useful discovery/execution
+controls; they do not determine native suitability for Agent Tools. Python
+bootstrap must apply this contract first, then give uv the selected verified
+interpreter path.
+
+Provider plans must contain no installation action when a suitable candidate
+already verifies. Selection and planning require both empty/disposable-host
+and already-equipped workstation evidence. Pure fixtures cover otherwise
+unavailable combinations; platform CI claims only the runner architectures it
+actually exercises and does not imply hosted Windows ARM64 coverage.
+
 ## Bash capability
 
 Represent `bash` as an optional capability whose contract is a verified

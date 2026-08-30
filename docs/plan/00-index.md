@@ -2,7 +2,7 @@
 
 - Last reconciled: 2026-08-30
 - Current milestone: M3 — tested update and capability lifecycle
-- Current state: M2 complete; M3 not started
+- Current state: M2 complete; M3 design reconciled and implementation not started
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
 - Target lifecycle: tested upgrade, pin, rollback, safe provider mutation, and removal
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
@@ -15,11 +15,11 @@
 | M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
 | M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
-| M3 | Tested update and capability lifecycle | not-started | 0/8 | 3–6 days | 3–6 days |
+| M3 | Tested update and capability lifecycle | in-progress | 2/8 | 6–10 days | 6–10 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **3–6 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
+Estimated implementation effort through M3: **6–10 person-days remaining**. The increase reflects the required native/system-first selection and seeded-workstation evidence that must precede mutation. Native discovery channels and the independent document-dependency boundary are excluded; review time is reported separately.
 
 Gate counts are binary readiness measures. Estimates are ranges and must be revised when implementation reveals new facts.
 
@@ -51,7 +51,7 @@ excluded.
 
 ## Recommended next work
 
-Begin the M3 provider-mutation and managed-state design in [issue #26](https://github.com/smartnuf/agent-tools/issues/26), splitting implementation into reviewable execution, provenance, and integration slices before changing native programs (L, **3–6 days** for M3 overall).
+Implement [issue #14](https://github.com/smartnuf/agent-tools/issues/14): distinguish host/process/provider identity and make clone Python bootstrap select a verified native/system interpreter independently of the bootstrap process architecture (L, **1–1.5 days**). Then prove pre-seeded selection in [issue #49](https://github.com/smartnuf/agent-tools/issues/49) before beginning provider planning or mutation. [Issue #26](https://github.com/smartnuf/agent-tools/issues/26) records the complete ordered M3 dependency chain.
 
 ## Known risks and assumptions
 
@@ -60,7 +60,8 @@ Begin the M3 provider-mutation and managed-state design in [issue #26](https://g
 - Repository wrappers and the shared `.venv` are not part of the wheel contract.
 - Windows ARM64/x64 emulation and macOS Intel/Apple-silicon coverage may require later expansion.
 - On Windows ARM64, unconstrained Python 3.14 selected a native interpreter but `cryptography` lacked a wheel and required an unavailable MSVC linker. The initial `<3.14` Python bound makes `uv tool` choose a supported managed interpreter; Python 3.14 support must be revalidated before widening it.
-- Native-versus-emulated interpreter selection and reporting is preserved as [issue #14](https://github.com/smartnuf/agent-tools/issues/14); it remains outside the completed M1 scope.
+- Native/system-first interpreter selection and reporting is the first M3 implementation slice in [issue #14](https://github.com/smartnuf/agent-tools/issues/14). The bootstrap process architecture must not redefine the host or silently displace a suitable native provider.
+- Current uv defaults prefer an already-installed managed Python over an installed system Python. M3 selection must rank verified candidates itself and pass an explicit interpreter path rather than relying on a version-only request.
 - Git Bash can exist outside `PATH`; discovery must verify provider-specific candidates rather than equating `shutil.which("bash")` with capability absence.
 - WSL Bash is a separate Linux execution environment and must not silently satisfy a Windows-hosted Bash preference.
 
