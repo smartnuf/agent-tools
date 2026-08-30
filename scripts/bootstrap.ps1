@@ -48,6 +48,8 @@ function Test-BootstrapPython {
 function Find-BootstrapPython {
     $FilterNames = @('UV_MANAGED_PYTHON', 'UV_NO_MANAGED_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_SYSTEM_PYTHON')
     $SavedFilters = @{}
+    $SavedNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+    $PSNativeCommandUseErrorActionPreference = $false
     foreach ($Name in $FilterNames) {
         $SavedFilters[$Name] = [Environment]::GetEnvironmentVariable($Name, 'Process')
         Remove-Item -LiteralPath "Env:$Name" -ErrorAction SilentlyContinue
@@ -106,6 +108,7 @@ function Find-BootstrapPython {
         }
         return $Found
     } finally {
+        $PSNativeCommandUseErrorActionPreference = $SavedNativeErrorPreference
         foreach ($Name in $FilterNames) {
             if ($null -eq $SavedFilters[$Name]) {
                 Remove-Item -LiteralPath "Env:$Name" -ErrorAction SilentlyContinue
@@ -137,7 +140,7 @@ if ($PythonPath) {
 } else {
     $BootstrapPython = Find-BootstrapPython
 }
-$SelectedPython = & $BootstrapPython @SelectorArgs
+$SelectedPython = & $BootstrapPython -I @SelectorArgs
 Assert-NativeSuccess 'final Python selection'
 $SelectedPython = $SelectedPython | Select-Object -Last 1
 
@@ -146,7 +149,7 @@ if (-not (Test-Path -LiteralPath $Python)) {
     & uv venv (Join-Path $Root '.venv') --python $SelectedPython --no-python-downloads
     Assert-NativeSuccess 'virtual environment creation'
 }
-& $BootstrapPython @SelectorArgs --verify-final $Python | Out-Null
+& $BootstrapPython -I @SelectorArgs --verify-final $Python | Out-Null
 Assert-NativeSuccess 'final Python verification'
 
 if ($InstallNativeTools) {

@@ -42,6 +42,13 @@ class BootstrapOrderTests(unittest.TestCase):
         self.assertIn("CondaBaseRoots", powershell)
         self.assertIn("probe_conda_base", posix)
 
+    def test_selector_launches_are_isolated_and_native_errors_allow_fallback(self) -> None:
+        powershell = (ROOT / "scripts" / "bootstrap.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "scripts" / "bootstrap.sh").read_text(encoding="utf-8")
+        self.assertIn("$PSNativeCommandUseErrorActionPreference = $false", powershell)
+        self.assertGreaterEqual(powershell.count("$BootstrapPython -I"), 2)
+        self.assertGreaterEqual(posix.count('"$BOOTSTRAP_PYTHON" -I'), 4)
+
 
 if __name__ == "__main__":
     unittest.main()

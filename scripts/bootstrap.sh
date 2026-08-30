@@ -122,18 +122,18 @@ else
   fi
 fi
 if [ -n "$PYTHON_PATH" ]; then
-  SELECTED_PYTHON=$("$BOOTSTRAP_PYTHON" "$ROOT/scripts/select-python.py" $SELECTOR_ARGS --prefer "$PYTHON_PATH")
+  SELECTED_PYTHON=$("$BOOTSTRAP_PYTHON" -I "$ROOT/scripts/select-python.py" $SELECTOR_ARGS --prefer "$PYTHON_PATH")
 else
-  SELECTED_PYTHON=$("$BOOTSTRAP_PYTHON" "$ROOT/scripts/select-python.py" $SELECTOR_ARGS)
+  SELECTED_PYTHON=$("$BOOTSTRAP_PYTHON" -I "$ROOT/scripts/select-python.py" $SELECTOR_ARGS)
 fi
 
 if [ ! -x "$ROOT/.venv/bin/python" ]; then
   uv venv "$ROOT/.venv" --python "$SELECTED_PYTHON" --no-python-downloads
 fi
 if [ -n "$PYTHON_PATH" ]; then
-  "$BOOTSTRAP_PYTHON" "$ROOT/scripts/select-python.py" $SELECTOR_ARGS --prefer "$PYTHON_PATH" --verify-final "$ROOT/.venv/bin/python" >/dev/null
+  "$BOOTSTRAP_PYTHON" -I "$ROOT/scripts/select-python.py" $SELECTOR_ARGS --prefer "$PYTHON_PATH" --verify-final "$ROOT/.venv/bin/python" >/dev/null
 else
-  "$BOOTSTRAP_PYTHON" "$ROOT/scripts/select-python.py" $SELECTOR_ARGS --verify-final "$ROOT/.venv/bin/python" >/dev/null
+  "$BOOTSTRAP_PYTHON" -I "$ROOT/scripts/select-python.py" $SELECTOR_ARGS --verify-final "$ROOT/.venv/bin/python" >/dev/null
 fi
 if [ "$INSTALL_NATIVE" -eq 1 ]; then
   sh "$ROOT/scripts/install-native.sh"
