@@ -21,6 +21,7 @@ NATIVE_PATHS = (
     "src/agent_tools/cli.py",
     "src/agent_tools/python_selection.py",
     "tests/check_installed_cli.py",
+    "tests/check_preseeded_selection.py",
     "tests/test_capabilities.py",
     "tests/test_cli.py",
     "tests/test_install_native.sh",

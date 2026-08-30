@@ -20,6 +20,7 @@ def main() -> None:
     )
     parser.add_argument("--capabilities-only", action="store_true")
     parser.add_argument("--require-native", action="store_true")
+    parser.add_argument("--require-system-native-python", action="store_true")
     args = parser.parse_args()
 
     first_host = first_candidates = first = None
@@ -34,6 +35,11 @@ def main() -> None:
         if first_host != second_host or first != second or first_candidates != second_candidates:
             raise AssertionError("repeated read-only Python selection changed its result")
         python_selection.verify_final_environment(sys.executable, first)
+        if args.require_system_native_python and (
+            first.mechanism is not python_selection.ProviderMechanism.SYSTEM
+            or first.native_status(first_host) is not python_selection.NativeStatus.NATIVE
+        ):
+            raise AssertionError("pre-seeded native system Python was not selected")
 
     first_capabilities = capabilities.detect_capabilities()
     second_capabilities = capabilities.detect_capabilities()
@@ -103,6 +109,7 @@ def main() -> None:
                 },
                 "provider_install_actions": 0,
                 "required_native_providers": args.require_native,
+                "required_system_native_python": args.require_system_native_python,
                 "hosted_arm64_claim": False,
             },
             sort_keys=True,

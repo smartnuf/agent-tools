@@ -10,6 +10,7 @@ class NativeIntegrationSelectionTests(unittest.TestCase):
             "scripts/bootstrap.ps1",
             ".github/actions/install-native/action.yml",
             ".github/workflows/native-integration.yml",
+            "tests/check_preseeded_selection.py",
         ):
             with self.subTest(path=path):
                 self.assertTrue(requires_native([path]))
