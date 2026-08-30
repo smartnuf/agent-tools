@@ -109,7 +109,19 @@ def current_host() -> HostIdentity:
         host_architecture,
         process_architecture,
         translated,
+        _current_execution_environment(system),
     )
+
+
+def _current_execution_environment(system: str | None = None) -> str:
+    system = system or platform.system()
+    if system == "Linux" and (
+        os.environ.get("WSL_INTEROP")
+        or os.environ.get("WSL_DISTRO_NAME")
+        or "microsoft" in platform.release().casefold()
+    ):
+        return "wsl"
+    return "host"
 
 
 def _windows_host_process_architectures() -> tuple[str, str] | None:
@@ -180,7 +192,7 @@ def discover_with_uv(uv: str = "uv") -> tuple[dict[str, Any], ...]:
     managed_paths = {
         os.path.normcase(os.path.normpath(str(item["path"]))) for item in managed
     }
-    return tuple(
+    discovered = tuple(
         {
             **item,
             "agent_tools_mechanism": (
@@ -190,6 +202,14 @@ def discover_with_uv(uv: str = "uv") -> tuple[dict[str, Any], ...]:
             ),
         }
         for item in records
+    )
+    known = {
+        os.path.normcase(os.path.normpath(str(item["path"]))) for item in discovered
+    }
+    return discovered + tuple(
+        item
+        for item in _manager_python_records()
+        if os.path.normcase(os.path.normpath(str(item["path"]))) not in known
     )
 
 
@@ -243,6 +263,10 @@ def verify_candidate(record: dict[str, Any]) -> PythonCandidate | None:
         "print(json.dumps({'path':sys.executable,'version':list(sys.version_info[:3]),"
         "'release_level':sys.version_info.releaselevel,'architecture':platform.machine(),"
         "'implementation':platform.python_implementation(),"
+        "'system':platform.system(),'release':platform.release(),"
+        "'wsl':bool(__import__('os').environ.get('WSL_INTEROP') or "
+        "__import__('os').environ.get('WSL_DISTRO_NAME') or "
+        "('microsoft' in platform.release().casefold())),"
         "'base_path':getattr(sys,'_base_executable',sys.executable)}))"
     )
     try:
@@ -271,10 +295,21 @@ def verify_candidate(record: dict[str, Any]) -> PythonCandidate | None:
         version,
         normalize_architecture(facts.get("architecture")),
         _provider_mechanism(record, resolved_path),
+        execution_environment=_candidate_execution_environment(facts),
         implementation=str(facts.get("implementation", "")).casefold(),
         release_level=str(facts.get("release_level", "")),
         base_path=base_path,
     )
+
+
+def _candidate_execution_environment(facts: dict[str, Any]) -> str:
+    candidate_system = str(facts.get("system", "")).casefold()
+    current_system = platform.system().casefold()
+    if candidate_system == "linux" and bool(facts.get("wsl")):
+        return "wsl"
+    if candidate_system and candidate_system != current_system:
+        return candidate_system
+    return "host"
 
 
 def _provider_mechanism(record: dict[str, Any], path: str) -> ProviderMechanism:
@@ -318,6 +353,47 @@ def _known_manager_roots() -> tuple[str, ...]:
         home / ".local" / "share" / "mise" / "installs" / "python",
     )
     return tuple(str(root) for root in (*configured, *defaults))
+
+
+def _manager_python_records() -> tuple[dict[str, Any], ...]:
+    """Enumerate installed runtimes that may be inactive and omitted by uv."""
+
+    try:
+        home: Path | None = Path.home()
+    except RuntimeError:
+        home = None
+    roots: list[Path] = []
+    configured = os.environ.get("PYENV_ROOT")
+    if configured or home is not None:
+        roots.append(Path(configured) if configured else home / ".pyenv")
+        roots[-1] = roots[-1] / "versions"
+    configured = os.environ.get("ASDF_DATA_DIR")
+    if configured or home is not None:
+        roots.append(Path(configured) if configured else home / ".asdf")
+        roots[-1] = roots[-1] / "installs" / "python"
+    configured = os.environ.get("MISE_DATA_DIR")
+    if configured or home is not None:
+        roots.append(
+            Path(configured)
+            if configured
+            else home / ".local" / "share" / "mise"
+        )
+        roots[-1] = roots[-1] / "installs" / "python"
+    paths: dict[str, dict[str, Any]] = {}
+    for root in roots:
+        try:
+            for pattern in ("*/bin/python*", "*/python.exe"):
+                for path in root.glob(pattern):
+                    if not path.is_file():
+                        continue
+                    key = os.path.normcase(os.path.normpath(str(path)))
+                    paths[key] = {
+                        "path": str(path),
+                        "agent_tools_mechanism": ProviderMechanism.TOOL_MANAGED.value,
+                    }
+        except OSError:
+            continue
+    return tuple(paths[key] for key in sorted(paths))
 
 
 def verified_candidates(records: Iterable[dict[str, Any]]) -> tuple[PythonCandidate, ...]:
@@ -402,11 +478,27 @@ def discover_verify_select(
         if direct is not None:
             resolved_preference = direct.path
             direct_key = os.path.normcase(os.path.normpath(direct.path))
-            if not any(
-                os.path.normcase(os.path.normpath(candidate.path)) == direct_key
-                for candidate in candidates
-            ):
+            matching = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if os.path.normcase(os.path.normpath(candidate.path)) == direct_key
+                ),
+                None,
+            )
+            if matching is None:
                 candidates.append(direct)
+            elif (
+                matching.version != direct.version
+                or matching.architecture != direct.architecture
+                or matching.implementation != direct.implementation
+                or matching.release_level != direct.release_level
+                or matching.base_path != direct.base_path
+                or matching.execution_environment != direct.execution_environment
+            ):
+                raise SelectionError(
+                    f"conflicting direct evidence for Python executable: {direct.path}"
+                )
     selected = select_python(
         candidates,
         host,

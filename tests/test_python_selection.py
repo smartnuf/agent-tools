@@ -220,6 +220,66 @@ class PythonSelectionTests(unittest.TestCase):
         self.assertEqual(candidates, (managed,))
         self.assertIs(selected, managed)
 
+    def test_direct_alias_rejects_conflicting_runtime_evidence(self) -> None:
+        managed = candidate(
+            str((Path.cwd() / "managed-python" / "python").resolve()),
+            "arm64",
+            selection.ProviderMechanism.TOOL_MANAGED,
+        )
+        changed = candidate(
+            managed.path,
+            "x86_64",
+            selection.ProviderMechanism.SYSTEM,
+        )
+        with (
+            patch.object(selection, "current_host", return_value=self.host),
+            patch.object(selection, "discover_with_uv", return_value=({"path": managed.path},)),
+            patch.object(selection, "verified_candidates", return_value=(managed,)),
+            patch.object(selection, "verify_candidate", return_value=changed),
+        ):
+            with self.assertRaisesRegex(selection.SelectionError, "conflicting direct evidence"):
+                selection.discover_verify_select(preferred_path="python-alias")
+
+    def test_cross_environment_interpreter_is_rejected(self) -> None:
+        facts = {
+            "path": "C:/Python311/python.exe",
+            "version": [3, 11, 9],
+            "release_level": "final",
+            "architecture": "AMD64",
+            "implementation": "CPython",
+            "base_path": "C:/Python311/python.exe",
+            "system": "Windows",
+            "release": "11",
+            "wsl": False,
+        }
+        completed = subprocess.CompletedProcess([], 0, json.dumps(facts), "")
+        with (
+            patch.object(selection.platform, "system", return_value="Linux"),
+            patch.object(selection.subprocess, "run", return_value=completed),
+        ):
+            verified = selection.verify_candidate({"path": "python.exe"})
+        assert verified is not None
+        self.assertEqual(verified.execution_environment, "windows")
+        wsl = selection.HostIdentity("Linux", "x86_64", "x86_64", False, "wsl")
+        with self.assertRaisesRegex(selection.SelectionError, "no compatible"):
+            selection.select_python((verified,), wsl)
+
+    def test_inactive_manager_runtimes_are_added_to_uv_catalogue(self) -> None:
+        root = (Path.cwd() / "pyenv-fixture").resolve()
+        inactive = root / "versions" / "3.11.9" / "bin" / "python3.11"
+        completed = subprocess.CompletedProcess([], 0, "[]", "")
+        with (
+            patch.dict(selection.os.environ, {"PYENV_ROOT": str(root)}, clear=True),
+            patch.object(selection.subprocess, "run", return_value=completed),
+            patch.object(selection.Path, "glob", return_value=iter((inactive,))),
+            patch.object(selection.Path, "is_file", return_value=True),
+        ):
+            records = selection.discover_with_uv()
+        self.assertIn(
+            {"path": str(inactive), "agent_tools_mechanism": "tool-managed"},
+            records,
+        )
+
     def test_discovery_mechanism_evidence_controls_ranking(self) -> None:
         facts = {
             "path": "C:/managed/python.exe",
