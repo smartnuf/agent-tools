@@ -1,10 +1,10 @@
 # Plan status
 
 - Last reconciled: 2026-08-30
-- Current milestone: M2 — public PyPI release
-- Current state: in-progress (trusted-publishing foundation merged; v0.1.2 stable release candidate under review in issue #45)
-- Current user installation: versioned GitHub prerelease asset, repository clone, or source archive
-- Target user installation: `uv tool install smartnuf-agent-tools`
+- Current milestone: M3 — tested update and capability lifecycle
+- Current state: M2 complete; M3 not started
+- Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
+- Target lifecycle: tested upgrade, pin, rollback, safe provider mutation, and removal
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
 
 ## Status summary
@@ -14,12 +14,12 @@
 | M0 | Distribution decision and executable roadmap | complete | 5/5 | 0.5–1 day | none |
 | M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
-| M2 | Public PyPI release | in-progress | 0/5 | 1–2 days | 1–2 days |
+| M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
 | M3 | Tested update and capability lifecycle | not-started | 0/8 | 3–6 days | 3–6 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **4–8 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
+Estimated implementation effort through M3: **3–6 person-days remaining**. Native discovery channels are optional and excluded from that total; review time is reported separately.
 
 Gate counts are binary readiness measures. Estimates are ranges and must be revised when implementation reveals new facts.
 
@@ -38,19 +38,24 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
 - [Release run 33231066203](https://github.com/smartnuf/agent-tools/actions/runs/33231066203) installed, pinned, version-checked, and uninstalled the public wheel on Windows, Ubuntu, and macOS.
 - [Revised smoke run 33232110219](https://github.com/smartnuf/agent-tools/actions/runs/33232110219) repeated the published-wheel lifecycle on all three platforms using Python 3.13 and `uv tool dir --bin`.
 - [PR #44](https://github.com/smartnuf/agent-tools/pull/44) merged the protected, tokenless PyPI workflow and exact-tag artifact provenance checks.
+- [v0.1.2](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.2) is the first stable GitHub release with signed provenance for its wheel and source distribution.
+- [Publication run 33312422488](https://github.com/smartnuf/agent-tools/actions/runs/33312422488) published v0.1.2 through the protected PyPI environment and GitHub OIDC without a long-lived upload token.
+- PyPI v0.1.2 metadata reports the expected project/version/Python range; its wheel and source-distribution sizes and SHA-256 digests match the GitHub release exactly.
+- [PyPI smoke run 33312715313](https://github.com/smartnuf/agent-tools/actions/runs/33312715313) installed, version-checked, diagnosed, reinstalled, and removed the exact public version on Windows, Ubuntu, and macOS.
 
 M1 is complete and its factual record is frozen except for corrections. M1.5
-completed on 2026-08-29; public release work now resumes in M2. Actual M1.5
-engineering effort was not recorded, so its accepted **2–3.25 person-day**
-estimate remains the historical forecast; review and CI wait were excluded.
+completed on 2026-08-29; M2 completed on 2026-08-30 with the first stable PyPI
+release. Actual M1.5 and M2 engineering effort was not recorded, so their
+accepted estimates remain the historical forecasts; review and CI wait were
+excluded.
 
 ## Recommended next work
 
-Complete review of the v0.1.2 candidate in [issue #45](https://github.com/smartnuf/agent-tools/issues/45), create and validate its attested GitHub prerelease, then exercise the environment-approved PyPI publication and cross-platform installation before promoting the public install command (M, **1–2 days**). Do not publish an untagged development wheel merely because it builds.
+Begin the M3 provider-mutation and managed-state design in [issue #26](https://github.com/smartnuf/agent-tools/issues/26), splitting implementation into reviewable execution, provenance, and integration slices before changing native programs (L, **3–6 days** for M3 overall).
 
 ## Known risks and assumptions
 
-- `smartnuf-agent-tools` returned no existing PyPI project on 2026-08-30, but the name is not reserved until publication and must be rechecked.
+- `smartnuf-agent-tools` is now the published PyPI project; trusted publication remains restricted to the exact repository, workflow, and protected environment.
 - The published wheel and sdist pass independent checksum and metadata audits; install, pin, and uninstall pass on Windows, Ubuntu, and macOS runners.
 - Repository wrappers and the shared `.venv` are not part of the wheel contract.
 - Windows ARM64/x64 emulation and macOS Intel/Apple-silicon coverage may require later expansion.

@@ -32,10 +32,10 @@ requirements.txt        generated, fully pinned Python environment lock
 
 ## Install the packaged release
 
-The current [v0.1.2 GitHub release](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.2) is pinned to its reviewed release asset. Until [issue #45](https://github.com/smartnuf/agent-tools/issues/45) records successful PyPI publication and three-platform installation evidence, use this exact GitHub wheel. Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) through a trusted package manager, then run:
+The current stable release is [v0.1.2](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.2). Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) through a trusted package manager, then install `agent-tools` from PyPI:
 
 ```sh
-uv tool install --python 3.13 "https://github.com/smartnuf/agent-tools/releases/download/v0.1.2/smartnuf_agent_tools-0.1.2-py3-none-any.whl"
+uv tool install --python 3.13 smartnuf-agent-tools
 ```
 
 Verify it without assuming uv's executable directory is already on `PATH`.
@@ -54,10 +54,16 @@ Linux or macOS:
 
 To make `agent-tools` directly discoverable in future shells, `uv tool update-shell` can update the user shell configuration. That is an explicit profile change; review uv's reported change and open a new shell afterward.
 
-The versioned URL is the pin. To restore that exact release if its isolated environment is damaged:
+Upgrade an unpinned installation to the latest compatible release:
 
 ```sh
-uv tool install --python 3.13 --reinstall "https://github.com/smartnuf/agent-tools/releases/download/v0.1.2/smartnuf_agent_tools-0.1.2-py3-none-any.whl"
+uv tool upgrade smartnuf-agent-tools
+```
+
+Pin the current release when reproducibility matters, or reinstall that exact version if its isolated environment is damaged:
+
+```sh
+uv tool install --python 3.13 --reinstall "smartnuf-agent-tools==0.1.2"
 ```
 
 To remove it:

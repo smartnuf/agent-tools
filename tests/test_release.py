@@ -75,6 +75,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn("github.com/", workflow.replace("github.com/actions/", ""))
         self.assertIn("tools list", workflow)
         self.assertIn("doctor", workflow)
+        self.assertEqual(workflow.count("uv tool upgrade smartnuf-agent-tools"), 2)
         self.assertIn("--reinstall", workflow)
         self.assertIn("uv tool uninstall smartnuf-agent-tools", workflow)
 

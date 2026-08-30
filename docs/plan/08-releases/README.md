@@ -55,13 +55,13 @@ mutation and must not expand into the M3 lifecycle work.
 
 | Acceptance criterion | State | Required evidence |
 |---|---|---|
-| PyPI project and trusted publisher are configured | not-started | Successful first upload creates the project and activates the configured pending publisher; foundation evidence is `publish-pypi.yml`, the protected GitHub `pypi` environment, and the exact identity in the [release runbook](../../releasing.md) |
-| Reviewed tag publishes without a long-lived upload token | not-started | Successful publish workflow |
-| Package installs from PyPI on all supported platforms | not-started | Post-publication matrix |
-| README promotes tested install/update/remove commands | not-started | Documentation validation |
-| Stable GitHub Release and PyPI metadata agree | not-started | Version and artifact comparison |
+| PyPI project and trusted publisher are configured | complete | The v0.1.2 upload created the project through the protected GitHub `pypi` environment and exact identity in the [release runbook](../../releasing.md) |
+| Reviewed tag publishes without a long-lived upload token | complete | [OIDC publication run 33312422488](https://github.com/smartnuf/agent-tools/actions/runs/33312422488) |
+| Package installs from PyPI on all supported platforms | complete | [PyPI lifecycle run 33312715313](https://github.com/smartnuf/agent-tools/actions/runs/33312715313) passed on Windows, Ubuntu, and macOS |
+| README promotes tested install/update/remove commands | complete | PyPI install, upgrade, exact reinstall pin, and removal commands in the root README are covered by the lifecycle workflow |
+| Stable GitHub Release and PyPI metadata agree | complete | v0.1.2 filename, size, version, Python constraint, and SHA-256 comparison |
 
-Estimate: **1–2 person-days**, excluding registry or review waiting time. Issue #19 supplied the merged trusted-publisher foundation; [issue #45](https://github.com/smartnuf/agent-tools/issues/45) owns the first reviewed stable publication and its cross-platform evidence.
+Estimate: **1–2 person-days**, excluding registry or review waiting time. Complete on 2026-08-30 through issues #19 and #45. Actual engineering effort was not recorded; the accepted estimate remains the historical forecast.
 
 ## M3 — Tested update and capability lifecycle
 

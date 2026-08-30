@@ -50,6 +50,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "tools list failed with exit code $LASTEXITCODE" }
           & $executable doctor
           if ($LASTEXITCODE -ne 0) { throw "complete native doctor failed with exit code $LASTEXITCODE" }
+          uv tool upgrade smartnuf-agent-tools
+          if ($LASTEXITCODE -ne 0) { throw "PyPI upgrade failed with exit code $LASTEXITCODE" }
+          $upgradedVersion = & $executable --version
+          if ($upgradedVersion -ne "agent-tools $env:RELEASE_VERSION") { throw "unexpected upgraded version: $upgradedVersion" }
           uv tool install --python 3.13 --reinstall $requirement
           if ($LASTEXITCODE -ne 0) { throw "pinned PyPI reinstall failed with exit code $LASTEXITCODE" }
           uv tool uninstall smartnuf-agent-tools
@@ -68,6 +72,8 @@ jobs:
           test "$("$tool_bin/agent-tools" --version)" = "agent-tools $RELEASE_VERSION"
           "$tool_bin/agent-tools" tools list
           "$tool_bin/agent-tools" doctor
+          uv tool upgrade smartnuf-agent-tools
+          test "$("$tool_bin/agent-tools" --version)" = "agent-tools $RELEASE_VERSION"
           uv tool install --python 3.13 --reinstall "$requirement"
           uv tool uninstall smartnuf-agent-tools
           test ! -e "$tool_bin/agent-tools"
