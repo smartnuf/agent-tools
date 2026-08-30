@@ -106,6 +106,14 @@ Selection keeps these facts separate:
   mutation Agent Tools requested, without implying package ownership; and
 - compatibility with the intended final execution environment.
 
+A provider plan is bound to exactly one immutable machine/execution context;
+requested detected states from different contexts cannot be combined. Linux
+providers local to a process running inside WSL are valid in that WSL context,
+while a WSL provider discovered from the Windows host remains a separate
+environment and does not satisfy the Windows-host request. Each planned action
+preserves both its verification probes and their `ALL`/`ANY` composition policy
+so an executor need not reconstruct the reviewed post-action condition.
+
 `platform.machine()` describes the running Python context and is not, by
 itself, sufficient evidence of host architecture when that Python may be
 translated. Platform adapters may therefore add host/process evidence. On
