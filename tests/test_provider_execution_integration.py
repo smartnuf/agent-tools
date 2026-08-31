@@ -3,6 +3,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import unittest
 from unittest import mock
@@ -141,19 +142,27 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
         self.assertTrue(result.stdout.endswith("o" * 100))
         self.assertTrue(result.stderr.endswith("e" * 100))
 
-    @unittest.skipIf(os.name == "nt", "POSIX process-group fixture")
-    def test_runner_terminates_descendant_that_retains_output_pipes(self):
+    def test_runner_bounds_retained_pipe_as_uncertain_external_state(self):
         code = (
             "import subprocess,sys;"
-            "subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'])"
+            "subprocess.Popen([sys.executable,'-c','import time;time.sleep(1)'])"
         )
         with mock.patch.object(
             provider_execution, "OUTPUT_PIPE_CLOSURE_GUARD_SECONDS", 0.1
         ):
             started = time.monotonic()
-            result = provider_execution._run((sys.executable, "-c", code), 5)
-        self.assertEqual(result.returncode, 0)
+            with self.assertRaises(
+                provider_execution.UncertainSupervisionError
+            ) as raised:
+                provider_execution._run((sys.executable, "-c", code), 5)
+        self.assertEqual(raised.exception.result.returncode, 0)
         self.assertLess(time.monotonic() - started, 2)
+        self.assertFalse(
+            any(
+                thread.is_alive() and thread.name.startswith("provider-output-")
+                for thread in threading.enumerate()
+            )
+        )
 
     @unittest.skipIf(os.name == "nt", "POSIX signal fixture")
     def test_interrupt_terminates_descendant_process_before_propagating(self):

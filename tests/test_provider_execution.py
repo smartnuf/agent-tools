@@ -618,6 +618,155 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         runner.assert_not_called()
 
+    def test_uncertain_retained_output_never_verifies_or_advises_retry(self):
+        plan = self.plan()
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        result = subprocess.CompletedProcess(
+            plan.actions[0].commands[0], 0, "bounded-out", "bounded-err"
+        )
+        detector = Mock(return_value=absent)
+        report = self.execute(
+            plan,
+            detector=detector,
+            runner=Mock(
+                side_effect=provider_execution.UncertainSupervisionError(result)
+            ),
+        )
+        action = report.actions[0]
+        self.assertEqual(
+            action.outcome, provider_execution.ActionOutcome.SUPERVISOR_FAILED
+        )
+        self.assertEqual(action.commands[0].returncode, 0)
+        self.assertEqual(action.commands[0].stdout, "bounded-out")
+        self.assertIn("could not establish quiescence", action.detail)
+        self.assertTrue(any("do not retry" in item for item in report.recovery_guidance))
+        self.assertTrue(any("do not attempt rollback" in item for item in report.recovery_guidance))
+        detector.assert_called_once()
+
+    def test_later_uncertain_command_preserves_all_evidence_and_blocks_retry(self):
+        plan = self.plan(capabilities.POPPLER)
+        first, second = plan.actions[0].commands
+        runner = Mock(
+            side_effect=(
+                subprocess.CompletedProcess(first, 0, "updated", ""),
+                provider_execution.UncertainSupervisionError(
+                    subprocess.CompletedProcess(second, 0, "installed?", "hook-open")
+                ),
+            )
+        )
+        report = self.execute(
+            plan,
+            detector=Mock(return_value=self.state(capabilities.POPPLER)),
+            runner=runner,
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.SUPERVISOR_FAILED,
+        )
+        self.assertEqual(
+            tuple(command.returncode for command in report.actions[0].commands),
+            (0, 0),
+        )
+        self.assertTrue(any("fresh plan" in item for item in report.recovery_guidance))
+        self.assertFalse(any("idempotent" in item for item in report.recovery_guidance))
+
+    def test_stale_homebrew_bash_action_skips_for_fresh_system_bash(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        manager = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+        absent = capabilities.detect_capability(
+            capabilities.BASH, machine, locator=lambda probe, context: None
+        )
+        plan = provider_plans.generate_provider_plan(
+            (absent,), ("bash",), package_managers=(manager,)
+        )
+        system = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, context: (
+                "/bin/bash" if probe.locator_strategy == "system-bash" else None
+            ),
+            version_reader=lambda probe, path: "GNU bash 3.2",
+            architecture_reader=lambda probe, path: "arm64",
+        )
+        runner = Mock(side_effect=AssertionError("must not run"))
+        report = provider_execution.execute_provider_plan(
+            plan,
+            allow_provider_mutation=True,
+            current_context=lambda: machine,
+            detector=lambda capability, context: system,
+            runner=runner,
+        )
+        action = report.actions[0]
+        self.assertEqual(action.outcome, provider_execution.ActionOutcome.ALREADY_SATISFIED)
+        self.assertEqual(action.satisfied_by_provider_id, "system-bash")
+        self.assertEqual(action.final_verified_paths, ("/bin/bash",))
+        runner.assert_not_called()
+
+    def test_native_replacement_uses_any_fresh_native_provider_but_not_translated(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        manager = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+
+        def bash_state(system_arch=None, homebrew_arch=None):
+            return capabilities.detect_capability(
+                capabilities.BASH,
+                machine,
+                locator=lambda probe, context: (
+                    "/bin/bash"
+                    if probe.locator_strategy == "system-bash" and system_arch
+                    else "/usr/local/bin/bash"
+                    if probe.locator_strategy == "homebrew-bash" and homebrew_arch
+                    else None
+                ),
+                version_reader=lambda probe, path: "GNU bash 5.2",
+                architecture_reader=lambda probe, path: (
+                    system_arch if path == "/bin/bash" else homebrew_arch
+                ),
+            )
+
+        translated = bash_state(homebrew_arch="x86_64")
+        plan = provider_plans.generate_provider_plan(
+            (translated,),
+            ("bash",),
+            package_managers=(manager,),
+            native_provisioning=("bash",),
+        )
+        fresh_native = bash_state(system_arch="arm64", homebrew_arch="x86_64")
+        runner = Mock(side_effect=AssertionError("must not run"))
+        skipped = provider_execution.execute_provider_plan(
+            plan,
+            allow_provider_mutation=True,
+            current_context=lambda: machine,
+            detector=lambda capability, context: fresh_native,
+            runner=runner,
+        )
+        self.assertEqual(
+            skipped.actions[0].outcome,
+            provider_execution.ActionOutcome.ALREADY_SATISFIED,
+        )
+        self.assertEqual(skipped.actions[0].satisfied_by_provider_id, "system-bash")
+        runner.assert_not_called()
+
+        installed_native = bash_state(homebrew_arch="arm64")
+        mutated = provider_execution.execute_provider_plan(
+            plan,
+            allow_provider_mutation=True,
+            current_context=lambda: machine,
+            detector=self.detector_sequence_for_machine(
+                machine, translated, installed_native
+            ),
+            manager_verifier=lambda state, context: True,
+            manager_architecture_reader=lambda state: "arm64",
+            privilege_resolver=lambda action: "",
+            runner=lambda argv, timeout: subprocess.CompletedProcess(
+                argv, 0, "", ""
+            ),
+        )
+        self.assertEqual(mutated.actions[0].outcome, provider_execution.ActionOutcome.SUCCEEDED)
+
     def test_refreshed_precheck_skips_newly_visible_provider(self):
         available = self.state(capabilities.GHOSTSCRIPT, available=True)
         runner = Mock(side_effect=AssertionError("must not run"))

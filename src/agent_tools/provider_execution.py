@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import codecs
 import ntpath
 import os
 import posixpath
+import select
 import signal
 import shutil
 import subprocess
 import threading
+import time
 from collections import deque
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -46,7 +50,7 @@ DEFAULT_COMMAND_TIMEOUT_SECONDS = 300
 MAX_CAPTURED_OUTPUT_CHARS = 1024 * 1024
 ELEVATED_TERM_TO_KILL_GRACE_SECONDS = 5
 ELEVATED_SUPERVISOR_GUARD_SECONDS = 10
-OUTPUT_PIPE_CLOSURE_GUARD_SECONDS = 10
+OUTPUT_PIPE_CLOSURE_GUARD_SECONDS = 1
 POSIX_SIGKILL_RETURNCODE = -9
 _ENVIRONMENT_LOCK = threading.RLock()
 _EXECUTION_LOCK = threading.RLock()
@@ -54,6 +58,16 @@ _EXECUTION_LOCK = threading.RLock()
 
 class ExecutionContractError(RuntimeError):
     """Raised before mutation when a plan is stale or not catalogue-authoritative."""
+
+
+class UncertainSupervisionError(ExecutionContractError):
+    """Raised when observable post-exit evidence prevents a quiescence claim."""
+
+    def __init__(self, result: subprocess.CompletedProcess[str]) -> None:
+        super().__init__(
+            "the synchronous supervisor exited but output remained inherited"
+        )
+        self.result = result
 
 
 class PlanOutcome(str, Enum):
@@ -102,6 +116,7 @@ class ActionReport:
     target_architecture: str | None = None
     displaces_verified_paths: tuple[str, ...] = ()
     translated_manager_fallback_authorized: bool = False
+    satisfied_by_provider_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -162,21 +177,23 @@ def _run(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         **process_options,
-        text=True,
-        errors="replace",
     )
     stdout_tail = _BoundedOutputTail(MAX_CAPTURED_OUTPUT_CHARS)
     stderr_tail = _BoundedOutputTail(MAX_CAPTURED_OUTPUT_CHARS)
+    stop_readers = threading.Event()
+    reader_errors: list[OSError] = []
     readers = (
         threading.Thread(
             target=_drain_output,
-            args=(process.stdout, stdout_tail),
+            args=(process.stdout, stdout_tail, stop_readers, reader_errors),
             daemon=True,
+            name="provider-output-stdout",
         ),
         threading.Thread(
             target=_drain_output,
-            args=(process.stderr, stderr_tail),
+            args=(process.stderr, stderr_tail, stop_readers, reader_errors),
             daemon=True,
+            name="provider-output-stderr",
         ),
     )
     for reader in readers:
@@ -188,7 +205,10 @@ def _run(
             _terminate_privileged_supervisor(process)
         else:
             _terminate_process_tree(process)
-        _join_output_readers(process, readers, privileged_supervision)
+        if not _join_output_readers(readers, stop_readers, reader_errors):
+            raise _uncertain_output_error(
+                argv, process.returncode, stdout_tail, stderr_tail
+            )
         raise subprocess.TimeoutExpired(
             argv,
             timeout,
@@ -200,14 +220,36 @@ def _run(
             _terminate_privileged_supervisor(process)
         else:
             _terminate_process_tree(process)
-        _join_output_readers(process, readers, privileged_supervision)
+        if not _join_output_readers(readers, stop_readers, reader_errors):
+            raise _uncertain_output_error(
+                argv, process.returncode, stdout_tail, stderr_tail
+            )
         raise
-    _join_output_readers(process, readers, privileged_supervision)
+    if not _join_output_readers(readers, stop_readers, reader_errors):
+        raise _uncertain_output_error(
+            argv, process.returncode, stdout_tail, stderr_tail
+        )
     return subprocess.CompletedProcess(
         argv,
         process.returncode,
         stdout_tail.value(),
         stderr_tail.value(),
+    )
+
+
+def _uncertain_output_error(
+    argv: tuple[str, ...],
+    returncode: int | None,
+    stdout_tail: _BoundedOutputTail,
+    stderr_tail: _BoundedOutputTail,
+) -> UncertainSupervisionError:
+    return UncertainSupervisionError(
+        subprocess.CompletedProcess(
+            argv,
+            returncode,
+            stdout_tail.value(),
+            stderr_tail.value(),
+        )
     )
 
 
@@ -239,36 +281,74 @@ class _BoundedOutputTail:
         return value
 
 
-def _drain_output(stream, tail: _BoundedOutputTail) -> None:
+def _drain_output(
+    stream,
+    tail: _BoundedOutputTail,
+    stop: threading.Event,
+    errors: list[OSError],
+) -> None:
     if stream is None:
         return
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
     try:
-        while chunk := stream.read(8192):
-            tail.append(chunk)
+        while not stop.is_set():
+            if not _pipe_ready(stream):
+                stop.wait(0.01)
+                continue
+            chunk = stream.read1(8192)
+            if not chunk:
+                break
+            tail.append(decoder.decode(chunk))
+    except OSError as error:
+        errors.append(error)
     finally:
-        stream.close()
+        tail.append(decoder.decode(b"", final=True))
+        with suppress(OSError, ValueError):
+            stream.close()
+
+
+def _pipe_ready(stream) -> bool:
+    if os.name != "nt":
+        ready, _, _ = select.select((stream,), (), (), 0.05)
+        return bool(ready)
+    import ctypes
+    import msvcrt
+
+    available = ctypes.c_ulong()
+    handle = msvcrt.get_osfhandle(stream.fileno())
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    succeeded = kernel32.PeekNamedPipe(
+        ctypes.c_void_p(handle),
+        None,
+        0,
+        None,
+        ctypes.byref(available),
+        None,
+    )
+    if succeeded:
+        return bool(available.value)
+    error = ctypes.get_last_error()
+    if error == 109:  # ERROR_BROKEN_PIPE: one final read observes EOF.
+        return True
+    raise OSError(error, "PeekNamedPipe failed")
 
 
 def _join_output_readers(
-    process: subprocess.Popen[str],
     readers: tuple[threading.Thread, threading.Thread],
-    privileged_supervision: bool,
-) -> None:
-    """Bound pipe closure and fail truthfully if descendants retain a pipe."""
+    stop: threading.Event,
+    errors: list[OSError],
+) -> bool:
+    """Return whether output closed cleanly within the synchronous guard."""
 
+    deadline = time.monotonic() + OUTPUT_PIPE_CLOSURE_GUARD_SECONDS
     for reader in readers:
-        reader.join(timeout=OUTPUT_PIPE_CLOSURE_GUARD_SECONDS)
+        reader.join(timeout=max(0, deadline - time.monotonic()))
     if not any(reader.is_alive() for reader in readers):
-        return
-    if not privileged_supervision:
-        _terminate_process_tree(process)
-        for reader in readers:
-            reader.join(timeout=OUTPUT_PIPE_CLOSURE_GUARD_SECONDS)
-        if not any(reader.is_alive() for reader in readers):
-            return
-    raise ExecutionContractError(
-        "command output pipes did not close; descendant termination could not be established"
-    )
+        return not errors
+    stop.set()
+    for reader in readers:
+        reader.join(timeout=1)
+    return False
 
 
 def _terminate_privileged_supervisor(process: subprocess.Popen[str]) -> None:
@@ -665,6 +745,36 @@ def _verified_provider_paths(
     return tuple(item.path for item in verified if item.path is not None)
 
 
+def _acceptable_current_provider(
+    state: CapabilityState,
+    target_architecture: str | None,
+) -> tuple[str, tuple[str, ...]] | None:
+    """Select fresh satisfying evidence using catalogue provider priority."""
+
+    target = (
+        normalize_architecture(target_architecture)
+        if target_architecture is not None
+        else None
+    )
+    for provider in state.providers:
+        if (
+            provider.availability is not Availability.AVAILABLE
+            or not provider.provider.satisfies_capability
+        ):
+            continue
+        verified = tuple(item for item in provider.executables if item.verified)
+        if not verified:
+            continue
+        if target is not None and any(
+            normalize_architecture(item.architecture) != target for item in verified
+        ):
+            continue
+        paths = tuple(item.path for item in verified if item.path is not None)
+        if paths:
+            return provider.provider.provider_id, paths
+    return None
+
+
 def _observed_verified_provider_paths(
     action: ProviderAction,
     state: CapabilityState,
@@ -699,6 +809,7 @@ def _action_report(
     commands: tuple[CommandReport, ...] = (),
     final_verified_paths: tuple[str, ...] = (),
     detail: str = "",
+    satisfied_by_provider_id: str | None = None,
 ) -> ActionReport:
     return ActionReport(
         action.capability_id,
@@ -712,6 +823,7 @@ def _action_report(
         action.target_architecture,
         action.displaces_verified_paths,
         action.translated_manager_fallback_authorized,
+        satisfied_by_provider_id,
     )
 
 
@@ -862,14 +974,18 @@ def _execute_provider_plan(
             return _failed_report(
                 plan, context, reports, mutation_may_have_started=False
             )
-        existing_paths = _verified_provider_paths(action, before)
-        if existing_paths:
+        existing_provider = _acceptable_current_provider(
+            before, action.target_architecture
+        )
+        if existing_provider:
+            existing_provider_id, existing_paths = existing_provider
             reports.append(
                 _action_report(
                     action,
                     ActionOutcome.ALREADY_SATISFIED,
                     final_verified_paths=existing_paths,
-                    detail="planned provider already verifies; no command executed",
+                    detail="a current satisfying provider already verifies; no command executed",
+                    satisfied_by_provider_id=existing_provider_id,
                 )
             )
             continue
@@ -975,6 +1091,28 @@ def _execute_provider_plan(
                     )
                 else:
                     result = runner(argv, runner_timeout)
+            except UncertainSupervisionError as error:
+                commands.append(_command_report(argv, error.result))
+                reports.append(
+                    _action_report(
+                        action,
+                        ActionOutcome.SUPERVISOR_FAILED,
+                        tuple(commands),
+                        detail=(
+                            "the synchronous supervisor exited, but inherited output "
+                            "remained open; descendant or package-related activity may "
+                            "still be running, Agent Tools could not establish quiescence, "
+                            "and provider/package state is uncertain"
+                        ),
+                    )
+                )
+                return _failed_report(
+                    plan,
+                    context,
+                    reports,
+                    mutation_may_have_started=True,
+                    uncertain_external_state=True,
+                )
             except subprocess.TimeoutExpired as error:
                 commands.append(
                     CommandReport(
@@ -1147,6 +1285,7 @@ def _failed_report(
     reports: list[ActionReport],
     *,
     mutation_may_have_started: bool,
+    uncertain_external_state: bool = False,
 ) -> PlanExecutionReport:
     reports.extend(
         _action_report(
@@ -1159,7 +1298,14 @@ def _failed_report(
     earlier_action_changed_state = any(
         report.outcome is ActionOutcome.SUCCEEDED for report in reports
     )
-    if mutation_may_have_started or earlier_action_changed_state:
+    if uncertain_external_state:
+        recovery_guidance = (
+            "synchronous supervision ended but relevant descendant or package activity may still be running",
+            "Agent Tools could not establish quiescence; provider/package state is uncertain",
+            "do not retry automatically or immediately, and do not attempt rollback or removal",
+            "retry only after an operator independently establishes relevant activity has quiesced and generates a fresh plan from current state",
+        )
+    elif mutation_may_have_started or earlier_action_changed_state:
         recovery_guidance = (
             "the package manager may have left partial host state",
             "inspect the reported command output, restore provider availability if needed, "
