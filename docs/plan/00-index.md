@@ -2,7 +2,7 @@
 
 - Last reconciled: 2026-08-31
 - Current milestone: M3 — tested update and capability lifecycle
-- Current state: M2 complete; M3 implementation is in progress through read-only provider planning
+- Current state: M2 complete; M3 has completed read-only provider planning and its architecture-adjudication governance prerequisite; explicit provider mutation is next
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
 - Target lifecycle: tested upgrade, pin, rollback, safe provider mutation, and removal
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
@@ -15,11 +15,11 @@
 | M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
 | M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
-| M3 | Tested update and capability lifecycle | in-progress | 3/9 | 6.5–11 days | 3.5–8.25 days |
+| M3 | Tested update and capability lifecycle | in-progress | 3/9 | 6.5–11 days | 3–7.25 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **3.5–8.25 person-days remaining**.
+Estimated implementation effort through M3: **3–7.25 person-days remaining**.
 The selector and pre-seeded-workstation evidence slices complete the first
 joint M3 gate; read-only provider planning supplies the prerequisite for the
 still-open mutation lifecycle gate. Native discovery channels and the
@@ -55,9 +55,11 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
   catalogue-owned WinGet, apt, dnf, pacman, and Homebrew command adapters from
   immutable verified package-manager evidence; already-satisfied requests
   produce zero actions.
-- [Issue #77](https://github.com/smartnuf/agent-tools/issues/77) adds delegated
-  architecture adjudication and an architectural closure sweep after #50; it
-  is the governance prerequisite for autonomous mutation work in #51.
+- [PR #78](https://github.com/smartnuf/agent-tools/pull/78) implements
+  [issue #77](https://github.com/smartnuf/agent-tools/issues/77) by installing
+  delegated architecture adjudication and an architectural closure sweep after
+  #50, preserving human authority for product-policy choices before autonomous
+  mutation work in #51.
 
 M1 is complete and its factual record is frozen except for corrections. M1.5
 completed on 2026-08-29; M2 completed on 2026-08-30 with the first stable PyPI
@@ -67,12 +69,13 @@ excluded.
 
 ## Recommended next work
 
-Add delegated architecture adjudication and the architectural closure-sweep
-protocol in [issue #77](https://github.com/smartnuf/agent-tools/issues/77) (M,
-**0.5–1 day**). This governance prerequisite follows #50 and must complete
-before autonomous work begins on the mutating provider executor in #51.
+Implement the explicitly authorized mutation executor and complete change
+reporting in [issue #51](https://github.com/smartnuf/agent-tools/issues/51) (L,
+**1–2 days**). Issue #77 supplies its governance prerequisite: architectural
+contract completion can continue through independent adjudication and a
+closure sweep, while product-policy choices still halt for human authority.
 [Issue #26](https://github.com/smartnuf/agent-tools/issues/26) records the
-complete ordered M3 dependency chain as `#50 → #77 → #51`.
+ordered M3 dependency chain beginning `#50 → #77 → #51`.
 
 ## Known risks and assumptions
 

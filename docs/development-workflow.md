@@ -240,6 +240,61 @@ Reviewer severity is an input, not a rigid algorithm.
 “Out of scope” cannot defer a change necessary to make the PR's behaviour safe,
 correct, or consistent with its acceptance criterion.
 
+#### Architecture adjudication
+
+Architectural reasoning is not itself a halt condition. When a finding touches
+an architectural seam, classify its **decision family** before deciding whether
+authority is missing:
+
+| Class | Meaning | Authority and disposition |
+|---|---|---|
+| Architectural clarification / contract completion | Makes an accepted invariant explicit or closes a hole required to preserve it. Materially different outcomes are excluded by existing authority. | Continue autonomously after evidence-backed adjudication. Update an existing ADR only when its normative text is incomplete. |
+| Bounded architectural evolution | Selects an internal, reversible structure while preserving accepted product, safety, compatibility, persistence, and roadmap contracts. | Continue only after independent adjudication confirms the boundary and records the alternatives excluded by existing constraints. |
+| Architectural policy / product decision | Changes or chooses what the product promises, supports, mutates, exposes, prioritizes, persists, requires, or removes. | Complete the bounded closure sweep, then halt for human authority and, when accepted, record the new or revised durable decision. |
+
+The adjudicator must be independent of the implementing context: use a
+separate read-only agent/context or a human reviewer that has not proposed the
+implementation. If no independent adjudicator is available, contract
+completion may proceed only when accepted text determines one conservative
+result without a material design choice; bounded evolution and product policy
+halt for human adjudication. The adjudicator does not edit the branch.
+
+Adjudication derives authority from current repository and GitHub evidence,
+never session memory. Its PR-local record must identify:
+
+- the exact head and base examined, the finding, and its decision family;
+- the acceptance criterion, accepted ADRs, standing safety rules, public or
+  persistent interfaces, tests, and platform evidence that govern the result;
+- the conservative invariant and why materially different outcomes are either
+  excluded or require human authority;
+- scope, non-goals, affected execution contexts, and evidence needed for the
+  correction; and
+- whether an ADR clarification, new decision, or durable follow-up is needed.
+
+Delegated adjudication cannot infer or enlarge authorization. Always reserve
+for a human any choice that sets product intent, risk posture, compatibility or
+supported-platform commitments, persistent/public contracts, privilege or
+destructive-mutation policy, material dependency/service commitments, or
+roadmap scope and priority. Existing preservation, verification, security,
+mutation-safety, exact-head, review, and merge-owner gates remain mandatory.
+
+After the first finding in a decision family, perform an **architectural
+closure sweep** before the correction wave or a human-authority halt. Inspect
+the affected seam for its adjacent consequences:
+
+- identity, ownership/provenance, and execution context;
+- lifecycle, partial failure, recovery, retry safety, and idempotence;
+- input, output, verification, and persistent/public contracts;
+- compatibility and platform/environment boundaries; and
+- user-state preservation, privilege, and authorization.
+
+Record each applicable consequence as addressed, already enforced with
+evidence, deliberately inapplicable, human-reserved, or independently tracked.
+The sweep is bounded by the acceptance criterion and does not authorize
+neighbouring product work. Feed its required tests and documentation into the
+next complete correction wave rather than waiting for review to rediscover
+them one at a time.
+
 For a fix, make a focused local commit. For a rebuttal, cite repository,
 runtime, specification, or test evidence. For a deferral, link durable follow-up
 work and explain the independence. Halt rather than assuming permission for a
@@ -260,10 +315,26 @@ validate, push once, and return to exact-head waiting.
 
 ### 8. Check convergence
 
-Declare a review-loop bound before extended autonomous work. Halt when that
-bound is reached or when successive waves reveal new architectural obligations
-rather than bounded defects. A human may deliberately authorize another wave.
-Waiting for an active current-head review is not non-convergence.
+The repository defaults are **15 correction waves** and **2 independent
+architectural decision families** per pull request. A task or pull request may
+declare different bounds only with a recorded reason. The limits are separate
+circuit breakers, not targets and not substitutes for semantic convergence
+judgment.
+
+A correction wave is one coherent, completely validated push made in response
+to review findings. Every such push consumes the correction-wave counter.
+Architecture adjudication does not reset, replace, or stop that counter. Count
+architectural decision families independently under the adjudication rules,
+not from raw comments, files, or waves: later manifestations of one adjudicated
+invariant remain in that family.
+
+Process up to each effective maximum; halt before beginning a wave or decision
+family that would exceed its bound. Halt earlier when adjudication identifies a
+human-reserved choice, safe correction materially exceeds the acceptance
+criterion or authority, review is demonstrably not converging, or another halt
+condition applies. A human may deliberately authorize another family or wave
+and must record that extension and its reason. Waiting for an active
+current-head review is not non-convergence.
 
 ### 9. Review adaptations
 
@@ -366,6 +437,9 @@ Halt and report the evidence and required decision when:
   prerequisite is unavailable;
 - completion requires an unsafe host or user-configuration mutation;
 - work contradicts an accepted decision or acceptance criterion;
+- architecture adjudication finds a human-reserved policy/product choice, or a
+  materially new data, discovery, persistence, mutation, or public-contract
+  boundary whose semantics are not determined by accepted authority;
 - a necessary correction materially expands scope or authority;
 - required validation or CI fails and cannot be corrected within scope;
 - current-head review or mergeability cannot be established reliably;
@@ -389,9 +463,26 @@ The policy was checked against recent repository history:
   completion evidence; PRs #21 and #22 correctly supplied bounded workflow
   recovery and new published-release evidence rather than preserving the stale
   claim.
-- PR #28 demonstrates focused correction waves, evidence-backed thread
-  resolution, a halt when architectural review stopped being bounded, and a
-  subsequent explicitly authorized reconciliation before current-head review.
+- PR #28 demonstrates the adjudication boundary. Desired-state backup/restore,
+  provider-plan evidence, and removal-safety symmetry completed invariants
+  already fixed by repository safety rules and ADR 0002, so a closure sweep
+  could have kept those findings in one contract-completion family. Whether
+  M1.5 promised a publicly published artifact instead changed the milestone's
+  user-visible outcome; halting for human choice between publication and a
+  narrower build-readiness promise remained required.
+- PR #76 demonstrates why architectural comments are not counted mechanically.
+  Its one-machine plan identity, WSL-local context, executable-evidence
+  consistency, native-manager suitability, and complete verification policy
+  were adjacent consequences of ADR 0002's accepted provider-selection and
+  plan-boundary invariants. Independent adjudication plus a closure sweep could
+  have authorized their bounded completion. A request to add mutation,
+  persistence, package-manager lifecycle, or a new supported-provider promise
+  would still have crossed into a human-reserved decision family.
+- PR #78 initially retained a narrow three-wave local bound. Its own review
+  demonstrated that bounded, semantically converging governance corrections
+  could exhaust that circuit breaker prematurely; explicit human authority
+  then established the repository defaults above. This was an adaptation
+  discovered during review, not part of issue #77's original authorization.
 - Issue #32's governance PR began with the M1.5 stream as merge owner. After
   that stream merged, governance incorporated the new `main`, remained
   unauthorized to merge, and had to stop merge-ready pending a newly assigned

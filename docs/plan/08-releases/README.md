@@ -79,19 +79,20 @@ Outcome: installation is not a one-off; supported upgrading, pinning, rollback, 
 | Provider mutation consumes an inspectable plan, requires a flag, reports changes, records provenance, and is shared by clone wrappers | not-started | Unit/disposable-host tests prove plan generation and executor consumption, installation flag enforcement, complete change reports, persisted record contents, and mandatory post-provision rediscovery plus final verification before selection; if provider removal is added, its separate flag and refusal rules are tested; bootstrap wrappers delegate without duplicate package mappings |
 | Desired-state and integration configuration changes are authorized, backed up, validated, reversible, preserve unrelated state, and never uninstall providers | not-started | Tests for existing configuration prove explicit authorization, recoverable backup, resulting-state validation, failure restoration, unrelated-state preservation, and no provider uninstall; integration cases cover shared/dedicated providers and Git for Windows |
 
-Estimate: **3–7.25 person-days remaining** after the #14, #49, and #50
-selection, seeded-evidence, and read-only-planning slices. The combined
-provider-mutation gate remains open until executor, provenance, and clone
-delegation evidence merges.
+Estimate: **3–7.25 person-days remaining** after the #14, #49, #50, and #77
+selection, seeded-evidence, read-only-planning, and governance slices. The
+combined provider-mutation gate remains open until executor, provenance, and
+clone delegation evidence merges.
 [Issue #26](https://github.com/smartnuf/agent-tools/issues/26)
 records the reviewed dependency order. Native/system-first selection (#14) and
 pre-seeded workstation evidence (#49) precede read-only provider planning
-(#50), explicit mutation (#51), provenance (#52), clone delegation (#53),
-desired-state safety (#54), and agent integration (#27). Issue #55 supplies
-the earlier-release upgrade, rollback, and removal evidence not already proven
-by M2. GitHub-hosted CI covers Windows, Ubuntu, and macOS on its available
-runner architectures; pure fixtures cover translated/ARM64 combinations and
-must not be presented as hosted ARM64 evidence.
+(#50), delegated architecture adjudication (#77), explicit mutation (#51),
+provenance (#52), clone delegation (#53), desired-state safety (#54), and agent
+integration (#27). Issue #55 supplies the earlier-release upgrade, rollback,
+and removal evidence not already proven by M2. GitHub-hosted CI covers Windows,
+Ubuntu, and macOS on its available runner architectures; pure fixtures cover
+translated/ARM64 combinations and must not be presented as hosted ARM64
+evidence.
 
 ## M4 — Optional discovery channels
 
