@@ -2,7 +2,7 @@
 
 - Last reconciled: 2026-08-31
 - Current milestone: M3 — tested update and capability lifecycle
-- Current state: M2 complete; M3 implementation is in progress through read-only provider planning
+- Current state: M2 complete; M3 has completed read-only provider planning and its architecture-adjudication governance prerequisite; explicit provider mutation is next
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
 - Target lifecycle: tested upgrade, pin, rollback, safe provider mutation, and removal
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time

@@ -5,6 +5,9 @@
 - Non-goals:
 - Base commit:
 - Merge owner:
+- Effective correction-wave bound: repository default / override
+- Effective architectural-family bound: repository default / override
+- Override reason, if any:
 
 ## Evidence
 

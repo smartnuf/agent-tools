@@ -315,19 +315,26 @@ validate, push once, and return to exact-head waiting.
 
 ### 8. Check convergence
 
-Declare separate numeric bounds for correction waves and independent
-architectural decision families before extended autonomous work. A bound that
-does not name its unit is a correction-wave bound; architecture adjudication
-does not reset, replace, or stop that counter. Process up to each declared
-maximum; halt before beginning a wave or decision family that would exceed its
-bound. Count architectural decision families independently from raw comments,
-files, and waves: a later finding that is another manifestation of an
-adjudicated invariant remains in that family, but every pushed correction wave
-still consumes the wave bound. Also halt when adjudication identifies a
-human-reserved choice or the closure sweep shows that safe correction
-materially exceeds the acceptance criterion. A human may deliberately
-authorize another family or wave. Waiting for an active current-head review is
-not non-convergence.
+The repository defaults are **15 correction waves** and **2 independent
+architectural decision families** per pull request. A task or pull request may
+declare different bounds only with a recorded reason. The limits are separate
+circuit breakers, not targets and not substitutes for semantic convergence
+judgment.
+
+A correction wave is one coherent, completely validated push made in response
+to review findings. Every such push consumes the correction-wave counter.
+Architecture adjudication does not reset, replace, or stop that counter. Count
+architectural decision families independently under the adjudication rules,
+not from raw comments, files, or waves: later manifestations of one adjudicated
+invariant remain in that family.
+
+Process up to each effective maximum; halt before beginning a wave or decision
+family that would exceed its bound. Halt earlier when adjudication identifies a
+human-reserved choice, safe correction materially exceeds the acceptance
+criterion or authority, review is demonstrably not converging, or another halt
+condition applies. A human may deliberately authorize another family or wave
+and must record that extension and its reason. Waiting for an active
+current-head review is not non-convergence.
 
 ### 9. Review adaptations
 
@@ -471,6 +478,11 @@ The policy was checked against recent repository history:
   have authorized their bounded completion. A request to add mutation,
   persistence, package-manager lifecycle, or a new supported-provider promise
   would still have crossed into a human-reserved decision family.
+- PR #78 initially retained a narrow three-wave local bound. Its own review
+  demonstrated that bounded, semantically converging governance corrections
+  could exhaust that circuit breaker prematurely; explicit human authority
+  then established the repository defaults above. This was an adaptation
+  discovered during review, not part of issue #77's original authorization.
 - Issue #32's governance PR began with the M1.5 stream as merge owner. After
   that stream merged, governance incorporated the new `main`, remained
   unauthorized to merge, and had to stop merge-ready pending a newly assigned
