@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import posixpath
 import tempfile
 import threading
 import uuid
@@ -90,10 +91,10 @@ def managed_state_path(
             / "agent-tools"
             / "managed-state.json"
         )
-    configured_root = Path(env["XDG_STATE_HOME"]) if env.get("XDG_STATE_HOME") else None
+    configured_value = env.get("XDG_STATE_HOME")
     root = (
-        configured_root
-        if configured_root is not None and configured_root.is_absolute()
+        Path(configured_value)
+        if configured_value is not None and posixpath.isabs(configured_value)
         else home / ".local" / "state"
     )
     return root / "agent-tools" / "managed-state.json"
