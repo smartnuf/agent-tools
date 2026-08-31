@@ -150,10 +150,13 @@ The runner drains stdout and stderr concurrently while retaining at most one
 MiB of tail evidence per stream. Continuous installer output therefore cannot
 make memory use grow for the full command timeout, while the report preserves
 the most recent diagnostics and explicitly marks discarded earlier output.
-GNU timeout status 124 is positive timeout evidence. Status 137 or a direct
-SIGKILL return is reported only as an ambiguous forced kill—an administrator,
-the OOM killer, or timeout escalation can produce it—so it does not set the
-report's `timed_out` flag or claim the TERM grace expired.
+GNU timeout status 124 is ambiguous because GNU timeout also propagates a
+reviewed command's own status 124; it is therefore a command failure without a
+`timed_out` claim unless the outer Python guard supplies independent deadline
+evidence. Status 137 or a direct SIGKILL return is likewise reported only as an
+ambiguous forced kill—an administrator, the OOM killer, or timeout escalation
+can produce it—so it does not set the report's `timed_out` flag or claim the
+TERM grace expired.
 
 The executor stops on the first timeout, nonzero exit, unavailable manager, or
 missing privilege. Failures before any command starts report no attempted
