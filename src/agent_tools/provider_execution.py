@@ -383,8 +383,14 @@ def _join_output_readers(
     """Return whether output closed cleanly within the synchronous guard."""
 
     deadline = time.monotonic() + OUTPUT_PIPE_CLOSURE_GUARD_SECONDS
-    for reader in readers:
-        reader.join(timeout=max(0, deadline - time.monotonic()))
+    try:
+        for reader in readers:
+            reader.join(timeout=max(0, deadline - time.monotonic()))
+    except BaseException:
+        stop.set()
+        for reader in readers:
+            reader.join(timeout=1)
+        return False
     if not any(reader.is_alive() for reader in readers):
         return not errors
     stop.set()
@@ -790,7 +796,10 @@ def _verified_provider_paths(
         )
     ):
         return ()
-    return tuple(item.path for item in verified if item.path is not None)
+    paths = tuple(item.path for item in verified if item.path is not None)
+    if not paths or any(not _path_is_absolute(path, state.machine) for path in paths):
+        return ()
+    return paths
 
 
 def _acceptable_current_provider(
@@ -889,6 +898,11 @@ def _omitted_request_failure(
         except KeyError:
             return f"unknown requested capability: {capability_id}"
         state = detector(capability, context)
+        if state.capability != capability:
+            return (
+                "omitted capability detector returned evidence for a different "
+                f"capability: {capability_id}"
+            )
         try:
             validate_capability_state(state, expected_context=context)
         except PlanningError as error:
@@ -1006,6 +1020,10 @@ def _execute_provider_plan(
         with _refreshed_environment(action, environment_refresher):
             before = detector(capability, context)
         try:
+            if before.capability != capability:
+                raise PlanningError(
+                    "detector returned evidence for a different capability"
+                )
             validate_capability_state(before, expected_context=context)
         except PlanningError as error:
             if not reports:
@@ -1274,6 +1292,10 @@ def _execute_provider_plan(
             after = detector(capability, context)
         observed_paths: tuple[str, ...] = ()
         try:
+            if after.capability != capability:
+                raise PlanningError(
+                    "detector returned evidence for a different capability"
+                )
             validate_capability_state(after, expected_context=context)
         except PlanningError as error:
             final_paths = ()

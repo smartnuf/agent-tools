@@ -99,6 +99,15 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         self.assertIn("unknown requested capability", report.recovery_guidance[0])
 
+        wrong = self.state(capabilities.POPPLER, available=True)
+        report = provider_execution.execute_provider_plan(
+            plan,
+            current_context=lambda: self.machine,
+            detector=lambda capability, machine: wrong,
+        )
+        self.assertEqual(report.outcome, provider_execution.PlanOutcome.PREFLIGHT_FAILED)
+        self.assertIn("different capability", report.recovery_guidance[0])
+
     def test_mixed_plan_revalidates_requests_omitted_from_actions(self):
         ghostscript = self.state(capabilities.GHOSTSCRIPT)
         poppler_available = self.state(capabilities.POPPLER, available=True)
@@ -757,6 +766,62 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertIsNone(
             provider_execution._acceptable_current_provider(relative, "arm64")
         )
+
+    def test_relative_post_install_identity_cannot_report_success(self):
+        plan = self.plan()
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        relative = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            self.machine,
+            locator=lambda probe, context: "./gs" if probe.name == "gs" else None,
+            version_reader=lambda probe, path: "1.0",
+            architecture_reader=lambda probe, path: "x86_64",
+        )
+        report = self.execute(
+            plan,
+            detector=self.detector_sequence(absent, relative),
+            runner=lambda argv, timeout: subprocess.CompletedProcess(argv, 0, "", ""),
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.VERIFICATION_FAILED,
+        )
+
+    def test_detector_cannot_substitute_another_capability_pre_or_post_action(self):
+        plan = self.plan()
+        ghostscript_absent = self.state(capabilities.GHOSTSCRIPT)
+        poppler = self.state(capabilities.POPPLER, available=True)
+        runner = Mock(side_effect=AssertionError("must not run"))
+        with self.assertRaisesRegex(
+            provider_execution.ExecutionContractError, "different capability"
+        ):
+            self.execute(plan, detector=lambda capability, context: poppler, runner=runner)
+        runner.assert_not_called()
+
+        report = self.execute(
+            plan,
+            detector=self.detector_sequence(ghostscript_absent, poppler),
+            runner=lambda argv, timeout: subprocess.CompletedProcess(argv, 0, "", ""),
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.VERIFICATION_FAILED,
+        )
+        self.assertIn("different capability", report.actions[0].detail)
+
+    def test_reader_join_interruption_detaches_as_uncertain(self):
+        first = Mock()
+        second = Mock()
+        first.join.side_effect = (KeyboardInterrupt(), None)
+        second.join.return_value = None
+        first.is_alive.return_value = True
+        second.is_alive.return_value = True
+        stop = threading.Event()
+        clean = provider_execution._join_output_readers(
+            (first, second), stop, []
+        )
+        self.assertFalse(clean)
+        self.assertTrue(stop.is_set())
 
     def test_native_replacement_uses_any_fresh_native_provider_but_not_translated(self):
         machine = capabilities.MachineState("Darwin", "arm64")
