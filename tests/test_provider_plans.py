@@ -507,6 +507,25 @@ class ProviderPlanTests(unittest.TestCase):
         )
         self.assertEqual(plan.actions, ())
 
+    def test_native_override_rejects_relative_native_provider_reuse(self):
+        machine = capabilities.MachineState("Linux", "x86_64")
+        state = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, machine: "./bash",
+            version_reader=lambda probe, path: "GNU bash 5.2",
+            architecture_reader=lambda probe, path: "x86_64",
+        )
+        with self.assertRaisesRegex(
+            provider_plans.PlanningError, "native-provider reuse requires absolute"
+        ):
+            provider_plans.generate_provider_plan(
+                (state,),
+                ("bash",),
+                package_managers=(self.manager("apt"),),
+                native_provisioning=("bash",),
+            )
+
     def test_plan_rejects_system_and_homebrew_bash_at_same_identity(self):
         machine = capabilities.MachineState("Darwin", "arm64")
         state = capabilities.detect_capability(

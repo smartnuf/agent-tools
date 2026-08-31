@@ -393,12 +393,8 @@ def generate_provider_plan(
                 if provider_state.availability is Availability.AVAILABLE
                 and provider_state.provider.satisfies_capability
             )
-            native_provider_exists = any(
+            native_providers = tuple(
                 verified
-                and all(
-                    normalize_architecture(item.architecture) == host_architecture
-                    for item in verified
-                )
                 for provider_state in available_providers
                 if (
                     verified := tuple(
@@ -407,9 +403,25 @@ def generate_provider_plan(
                         if item.verified
                     )
                 )
+                and all(
+                    normalize_architecture(item.architecture) == host_architecture
+                    for item in verified
+                )
             )
-            if native_provider_exists:
+            if any(
+                all(
+                    item.path is not None
+                    and _manager_path_is_absolute(item.path, context)
+                    for item in verified
+                )
+                for verified in native_providers
+            ):
                 continue
+            if native_providers:
+                raise PlanningError(
+                    "native-provider reuse requires absolute verified provider paths: "
+                    f"{capability_id}"
+                )
             selected_provider = state.selected_provider
             if selected_provider is None:
                 raise PlanningError(
