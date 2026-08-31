@@ -146,6 +146,11 @@ generates a fresh plan from current state. Invisible detached work is not
 speculatively detected; normal completion with normally closed output remains
 governed by manager exit evidence and complete rediscovery.
 
+An interruption during the post-exit pipe-closure guard follows that same
+uncertain path: polling readers are stopped and local handles closed in bounded
+time, but Agent Tools does not retroactively claim ownership of or broadly kill
+work after the supervised leader has exited.
+
 The runner drains stdout and stderr concurrently while retaining at most one
 MiB of tail evidence per stream. Continuous installer output therefore cannot
 make memory use grow for the full command timeout, while the report preserves
@@ -169,7 +174,11 @@ probe set, its `ANY`/`ALL` policy, and any native target architecture.
 Package-manager success
 without that final evidence is a reported failure. Individually verified paths
 remain visible in that failure report even when an `ALL` condition or native
-architecture target is not satisfied. Reusing the same plan after any freshly
+architecture target is not satisfied. Final success requires absolute verified
+identities just as the pre-action skip does. Every detector result must also
+name the exact built-in capability requested at that omitted, pre-action, or
+post-action seam; valid evidence for a different capability fails closed rather
+than being substituted. Reusing the same plan after any freshly
 detected catalogue-satisfying provider verifies performs no further command.
 Ordinary actions accept the highest-priority satisfying provider in the
 complete fresh capability state. Native-replacement actions accept any fresh
