@@ -316,7 +316,7 @@ class ProviderExecutionTests(unittest.TestCase):
     def test_elevated_supervisor_argv_is_noninteractive_and_reports_statuses(self):
         absent = self.state(capabilities.GHOSTSCRIPT)
         for returncode, expected in (
-            (124, provider_execution.ActionOutcome.TIMED_OUT),
+            (124, provider_execution.ActionOutcome.COMMAND_FAILED),
             (137, provider_execution.ActionOutcome.FORCED_KILL),
             (-9, provider_execution.ActionOutcome.FORCED_KILL),
             (125, provider_execution.ActionOutcome.SUPERVISOR_FAILED),
@@ -358,12 +358,42 @@ class ProviderExecutionTests(unittest.TestCase):
                 self.assertEqual(action.commands[0].stderr, "raw-err")
                 self.assertEqual(
                     action.commands[0].timed_out,
-                    returncode == 124,
+                    False,
                 )
-                if returncode in {137, -9}:
+                if returncode in {124, 137, -9}:
                     self.assertIn(
-                        "not independently established",
+                        (
+                            "cannot distinguish"
+                            if returncode == 124
+                            else "not independently established"
+                        ),
                         action.detail,
+                    )
+
+    def test_native_replacement_rejects_unknown_or_unsupported_target(self):
+        plan = self.plan()
+        for architecture in ("unknown", "mips64"):
+            with self.subTest(architecture=architecture):
+                action = replace(
+                    plan.actions[0],
+                    target_architecture=architecture,
+                    displaces_verified_paths=("/old/provider",),
+                )
+                invalid = replace(
+                    plan,
+                    context=replace(plan.context, architecture=architecture),
+                    actions=(action,),
+                )
+                with self.assertRaisesRegex(
+                    provider_execution.ExecutionContractError,
+                    "unknown or unsupported",
+                ):
+                    provider_execution.execute_provider_plan(
+                        invalid,
+                        allow_provider_mutation=True,
+                        current_context=lambda: replace(
+                            self.machine, architecture=architecture
+                        ),
                     )
 
     def test_later_supervisor_start_failure_preserves_prior_mutation_guidance(self):

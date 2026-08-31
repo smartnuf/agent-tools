@@ -52,6 +52,7 @@ ELEVATED_TERM_TO_KILL_GRACE_SECONDS = 5
 ELEVATED_SUPERVISOR_GUARD_SECONDS = 10
 OUTPUT_PIPE_CLOSURE_GUARD_SECONDS = 1
 POSIX_SIGKILL_RETURNCODE = -9
+SUPPORTED_NATIVE_ARCHITECTURES = frozenset({"x86", "x86_64", "arm", "arm64"})
 _ENVIRONMENT_LOCK = threading.RLock()
 _EXECUTION_LOCK = threading.RLock()
 
@@ -661,10 +662,16 @@ def _validate_action(action: ProviderAction, context: MachineState) -> None:
         or action.shared_package is not provider.shared_package
     ):
         raise ExecutionContractError("action verification does not match the catalogue")
-    if action.target_architecture is not None and normalize_architecture(
-        action.target_architecture
-    ) != normalize_architecture(context.architecture):
-        raise ExecutionContractError("action target architecture is not native to the plan")
+    if action.target_architecture is not None:
+        target_architecture = normalize_architecture(action.target_architecture)
+        if target_architecture not in SUPPORTED_NATIVE_ARCHITECTURES:
+            raise ExecutionContractError(
+                "native replacement target architecture is unknown or unsupported"
+            )
+        if target_architecture != normalize_architecture(context.architecture):
+            raise ExecutionContractError(
+                "action target architecture is not native to the plan"
+            )
     if bool(action.displaces_verified_paths) != (action.target_architecture is not None):
         raise ExecutionContractError("native replacement evidence is incomplete")
     if any(
@@ -1160,14 +1167,6 @@ def _execute_provider_plan(
                     mutation_may_have_started=earlier_command_completed,
                 )
             command_report = _command_report(argv, result)
-            if elevated_linux and result.returncode == 124:
-                command_report = CommandReport(
-                    command_report.argv,
-                    command_report.returncode,
-                    command_report.stdout,
-                    command_report.stderr,
-                    timed_out=True,
-                )
             commands.append(command_report)
             if elevated_linux and result.returncode in {
                 124,
@@ -1178,7 +1177,7 @@ def _execute_provider_plan(
                 127,
             }:
                 supervised_outcomes = {
-                    124: ActionOutcome.TIMED_OUT,
+                    124: ActionOutcome.COMMAND_FAILED,
                     137: ActionOutcome.FORCED_KILL,
                     POSIX_SIGKILL_RETURNCODE: ActionOutcome.FORCED_KILL,
                     125: ActionOutcome.SUPERVISOR_FAILED,
@@ -1187,7 +1186,10 @@ def _execute_provider_plan(
                 }
                 outcome = supervised_outcomes[result.returncode]
                 details = {
-                    124: "privileged command reached its timeout and terminated",
+                    124: (
+                        "GNU timeout returned status 124, which cannot distinguish "
+                        "deadline expiry from the reviewed command's own status 124"
+                    ),
                     137: "command or supervisor exited after SIGKILL; timeout expiry is not independently established",
                     POSIX_SIGKILL_RETURNCODE: (
                         "command or supervisor exited after SIGKILL; timeout "
