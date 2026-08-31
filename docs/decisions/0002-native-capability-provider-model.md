@@ -112,7 +112,11 @@ providers local to a process running inside WSL are valid in that WSL context,
 while a WSL provider discovered from the Windows host remains a separate
 environment and does not satisfy the Windows-host request. Each planned action
 preserves both its verification probes and their `ALL`/`ANY` composition policy
-so an executor need not reconstruct the reviewed post-action condition.
+so an executor need not reconstruct the reviewed post-action condition. The
+plan also records whether each package-manager action requires system
+privilege; apt, dnf, and pacman actions require it, while Homebrew and WinGet
+actions do not inherit that Linux elevation policy. The executor, rather than
+the catalogue command, will apply the recorded privilege policy.
 
 `platform.machine()` describes the running Python context and is not, by
 itself, sufficient evidence of host architecture when that Python may be
@@ -241,9 +245,21 @@ Initial providers are:
   use the executable PATH, Git's own installation location, package-manager or
   registry evidence, and documented install locations; every selected
   executable must pass a Bash version/execution probe.
-- **System Bash:** normal host Bash on supported Linux and macOS systems.
+- **System Bash:** normal local Bash on supported Linux (including a process
+  running inside WSL) and the Apple-provided Bash on macOS. When explicitly
+  requested and absent, Linux may plan the native `bash` package through apt,
+  dnf, or pacman.
+- **Homebrew Bash:** a distinct macOS provider that may be planned as the
+  Homebrew `bash` package only when Homebrew is already an available manager.
+  It neither relabels nor replaces a compatible Apple-provided Bash and does
+  not authorize installing Homebrew.
 - **WSL Bash:** report separately as a WSL/Linux-environment provider. Do not
   satisfy a Windows-hosted Bash request with WSL implicitly.
+
+Bash remains optional and provisioning requires an explicit Bash capability
+request with no suitable existing provider. Agent Tools installation,
+bootstrap, and default diagnostics do not provision Bash or depend on this
+optional plan.
 
 MSYS2 is a possible later Windows-hosted provider. Cygwin is deferred until
 evidence justifies its compatibility and maintenance cost. Installing Git Bash
