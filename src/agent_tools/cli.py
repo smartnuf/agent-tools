@@ -153,7 +153,7 @@ def _print_capability_status(state: CapabilityState) -> None:
         print(f"    provider: {spec.label}")
         effective_environment = (
             state.machine.execution_environment
-            if spec.provided_environment == "host"
+            if spec.provided_environment == "host" and spec.supports(state.machine)
             else spec.provided_environment
         )
         print(f"    environment: {effective_environment}")

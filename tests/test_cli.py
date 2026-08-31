@@ -282,6 +282,12 @@ class CliTests(unittest.TestCase):
                     "    environment: wsl",
                     status_output,
                 )
+        self.assertIn(
+            "  homebrew-bash: unsupported\n"
+            "    provider: Homebrew Bash\n"
+            "    environment: host",
+            status_output,
+        )
 
     def test_distribution_version_tries_all_owning_distributions(self) -> None:
         with (
