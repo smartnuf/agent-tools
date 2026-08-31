@@ -419,14 +419,34 @@ def locate_executable(probe: ExecutableProbe, machine: MachineState) -> str | No
             return shutil.which(probe.name)
         if machine.platform == "Darwin":
             system_bash = Path("/bin/bash")
-            return str(system_bash) if system_bash.is_file() else None
+            return system_bash.as_posix() if system_bash.is_file() else None
         return None
     if probe.locator_strategy == "homebrew-bash":
         if machine.platform != "Darwin":
             return None
         brew = shutil.which("brew")
-        candidate = Path(brew).with_name(probe.name) if brew else None
-        return str(candidate) if candidate is not None and candidate.is_file() else None
+        candidates: list[tuple[Path, str]] = []
+        if brew:
+            path_candidate = Path(brew).with_name(probe.name)
+            candidates.append((path_candidate, str(path_candidate)))
+        prefixes = (
+            (Path("/opt/homebrew/bin"), Path("/usr/local/bin"))
+            if machine.architecture in {"arm64", "aarch64"}
+            else (Path("/usr/local/bin"), Path("/opt/homebrew/bin"))
+        )
+        candidates.extend(
+            (prefix / probe.name, (prefix / probe.name).as_posix())
+            for prefix in prefixes
+        )
+        seen: set[str] = set()
+        for candidate, result in candidates:
+            key = result
+            if key in seen:
+                continue
+            seen.add(key)
+            if candidate.is_file():
+                return result
+        return None
     if probe.locator_strategy == "wsl-bash":
         return _wsl_path() if machine.platform == "Windows" else None
     raise ValueError(f"unknown executable locator strategy: {probe.locator_strategy}")
@@ -498,10 +518,35 @@ def detect_provider(
         _detect_executable(probe, machine, locator, version_reader, architecture_reader)
         for probe in provider.probes
     )
+    availability = provider_availability(provider, machine, executables)
+    return ProviderState(provider, availability, executables)
+
+
+def provider_availability(
+    provider: ProviderSpec,
+    machine: MachineState,
+    executables: tuple[ExecutableState, ...],
+) -> Availability:
+    """Derive one provider's availability from support and probe evidence."""
+
+    if not provider.supports(machine):
+        return Availability.UNSUPPORTED
     verified = tuple(item.verified for item in executables)
     available = all(verified) if provider.probe_policy is ProbePolicy.ALL else any(verified)
-    availability = Availability.AVAILABLE if available else Availability.ABSENT
-    return ProviderState(provider, availability, executables)
+    return Availability.AVAILABLE if available else Availability.ABSENT
+
+
+def capability_availability(providers: tuple[ProviderState, ...]) -> Availability:
+    """Derive aggregate availability from satisfying provider states."""
+
+    satisfying = tuple(
+        provider for provider in providers if provider.provider.satisfies_capability
+    )
+    if any(provider.availability is Availability.AVAILABLE for provider in satisfying):
+        return Availability.AVAILABLE
+    if any(provider.availability is Availability.ABSENT for provider in satisfying):
+        return Availability.ABSENT
+    return Availability.UNSUPPORTED
 
 
 def _detect_executable(
@@ -547,13 +592,7 @@ def detect_capability(
         )
         for provider in capability.providers
     )
-    satisfying = tuple(provider for provider in providers if provider.provider.satisfies_capability)
-    if any(provider.availability is Availability.AVAILABLE for provider in satisfying):
-        availability = Availability.AVAILABLE
-    elif any(provider.availability is Availability.ABSENT for provider in satisfying):
-        availability = Availability.ABSENT
-    else:
-        availability = Availability.UNSUPPORTED
+    availability = capability_availability(providers)
     return CapabilityState(capability, machine, availability, providers)
 
 

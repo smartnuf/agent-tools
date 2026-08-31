@@ -382,6 +382,87 @@ class CapabilityTests(unittest.TestCase):
         )
         self.assertEqual(state.selected_provider.executables[0].architecture, "aarch64")
 
+    def test_homebrew_bash_locator_uses_standard_prefixes_outside_path(self) -> None:
+        probe = next(
+            provider.probes[0]
+            for provider in capabilities.BASH.providers
+            if provider.provider_id == "homebrew-bash"
+        )
+        cases = (
+            ("arm64", "/opt/homebrew/bin/bash"),
+            ("x86_64", "/usr/local/bin/bash"),
+        )
+        for architecture, expected in cases:
+            with (
+                self.subTest(architecture=architecture),
+                patch.object(capabilities.shutil, "which", return_value=None),
+                patch.object(
+                    capabilities.Path,
+                    "is_file",
+                    autospec=True,
+                    side_effect=lambda path, expected=expected: path.as_posix() == expected,
+                ),
+            ):
+                self.assertEqual(
+                    capabilities.locate_executable(
+                        probe,
+                        capabilities.MachineState("Darwin", architecture),
+                    ),
+                    expected,
+                )
+
+    def test_homebrew_bash_remains_distinct_and_requires_verification(self) -> None:
+        machine = capabilities.MachineState("Darwin", "arm64")
+        with (
+            patch.object(capabilities.shutil, "which", return_value=None),
+            patch.object(
+                capabilities.Path,
+                "is_file",
+                autospec=True,
+                side_effect=lambda path: path.as_posix() in {
+                    "/bin/bash",
+                    "/opt/homebrew/bin/bash",
+                },
+            ),
+        ):
+            unverified = capabilities.detect_capability(
+                capabilities.BASH,
+                machine,
+                version_reader=lambda probe, path: (
+                    "Apple Bash 3.2" if path == "/bin/bash" else None
+                ),
+            )
+            verified = capabilities.detect_capability(
+                capabilities.BASH,
+                machine,
+                version_reader=lambda probe, path: (
+                    "Apple Bash 3.2"
+                    if path == "/bin/bash"
+                    else "GNU Bash 5.2"
+                ),
+                architecture_reader=lambda probe, path: "arm64",
+            )
+        providers = {item.provider.provider_id: item for item in unverified.providers}
+        self.assertEqual(
+            providers["homebrew-bash"].availability,
+            capabilities.Availability.ABSENT,
+        )
+        self.assertEqual(
+            providers["system-bash"].executables[0].path,
+            "/bin/bash",
+        )
+        verified_providers = {
+            item.provider.provider_id: item for item in verified.providers
+        }
+        self.assertEqual(
+            verified_providers["homebrew-bash"].availability,
+            capabilities.Availability.AVAILABLE,
+        )
+        self.assertEqual(
+            verified_providers["homebrew-bash"].executables[0].path,
+            "/opt/homebrew/bin/bash",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
