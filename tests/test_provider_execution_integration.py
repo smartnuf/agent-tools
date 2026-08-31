@@ -164,6 +164,30 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
             )
         )
 
+    @unittest.skipIf(os.name == "nt", "POSIX safe cleanup fixture")
+    def test_failed_privileged_supervisor_termination_becomes_uncertain(self):
+        def terminate_then_fail(process):
+            provider_execution._terminate_process_tree(process)
+            raise provider_execution.ExecutionContractError(
+                "privileged supervisor termination could not be established"
+            )
+
+        with mock.patch.object(
+            provider_execution,
+            "_terminate_privileged_supervisor",
+            side_effect=terminate_then_fail,
+        ):
+            with self.assertRaises(
+                provider_execution.UncertainSupervisionError
+            ) as raised:
+                provider_execution._run(
+                    (sys.executable, "-c", "import time;time.sleep(30)"),
+                    0.1,
+                    privileged_supervision=True,
+                )
+        self.assertIn("termination could not be established", raised.exception.detail)
+        self.assertIsNotNone(raised.exception.result.returncode)
+
     @unittest.skipIf(os.name == "nt", "POSIX signal fixture")
     def test_interrupt_terminates_descendant_process_before_propagating(self):
         with TemporaryDirectory() as directory:

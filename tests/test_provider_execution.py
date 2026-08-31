@@ -312,6 +312,12 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         self.assertTrue(action.commands[0].timed_out)
         self.assertEqual(action.commands[0].stdout, "partial")
+        self.assertTrue(
+            any("do not retry" in item for item in report.recovery_guidance)
+        )
+        self.assertTrue(
+            any("quiesced" in item for item in report.recovery_guidance)
+        )
 
     def test_elevated_supervisor_argv_is_noninteractive_and_reports_statuses(self):
         absent = self.state(capabilities.GHOSTSCRIPT)
@@ -733,6 +739,24 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(action.satisfied_by_provider_id, "system-bash")
         self.assertEqual(action.final_verified_paths, ("/bin/bash",))
         runner.assert_not_called()
+
+    def test_fresh_provider_skip_rejects_relative_identity(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        relative = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, context: (
+                "./bash" if probe.locator_strategy == "system-bash" else None
+            ),
+            version_reader=lambda probe, path: "GNU bash 5.2",
+            architecture_reader=lambda probe, path: "arm64",
+        )
+        self.assertIsNone(
+            provider_execution._acceptable_current_provider(relative, None)
+        )
+        self.assertIsNone(
+            provider_execution._acceptable_current_provider(relative, "arm64")
+        )
 
     def test_native_replacement_uses_any_fresh_native_provider_but_not_translated(self):
         machine = capabilities.MachineState("Darwin", "arm64")

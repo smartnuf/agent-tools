@@ -64,11 +64,18 @@ class ExecutionContractError(RuntimeError):
 class UncertainSupervisionError(ExecutionContractError):
     """Raised when observable post-exit evidence prevents a quiescence claim."""
 
-    def __init__(self, result: subprocess.CompletedProcess[str]) -> None:
-        super().__init__(
-            "the synchronous supervisor exited but output remained inherited"
-        )
+    def __init__(
+        self,
+        result: subprocess.CompletedProcess[str],
+        detail: str = (
+            "the synchronous supervisor exited, but inherited output remained open; "
+            "descendant or package-related activity may still be running, Agent Tools "
+            "could not establish quiescence, and provider/package state is uncertain"
+        ),
+    ) -> None:
+        super().__init__(detail)
         self.result = result
+        self.detail = detail
 
 
 class PlanOutcome(str, Enum):
@@ -202,10 +209,25 @@ def _run(
     try:
         process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        if privileged_supervision:
-            _terminate_privileged_supervisor(process)
-        else:
-            _terminate_process_tree(process)
+        try:
+            if privileged_supervision:
+                _terminate_privileged_supervisor(process)
+            else:
+                _terminate_process_tree(process)
+        except ExecutionContractError:
+            _join_output_readers(readers, stop_readers, reader_errors)
+            raise _uncertain_output_error(
+                argv,
+                process.returncode,
+                stdout_tail,
+                stderr_tail,
+                detail=(
+                    "privileged supervisor termination could not be established; "
+                    "privileged package-related activity may still be running, Agent "
+                    "Tools could not establish quiescence, and provider/package state "
+                    "is uncertain"
+                ),
+            ) from None
         if not _join_output_readers(readers, stop_readers, reader_errors):
             raise _uncertain_output_error(
                 argv, process.returncode, stdout_tail, stderr_tail
@@ -217,10 +239,25 @@ def _run(
             stderr=stderr_tail.value(),
         ) from None
     except BaseException:
-        if privileged_supervision:
-            _terminate_privileged_supervisor(process)
-        else:
-            _terminate_process_tree(process)
+        try:
+            if privileged_supervision:
+                _terminate_privileged_supervisor(process)
+            else:
+                _terminate_process_tree(process)
+        except ExecutionContractError:
+            _join_output_readers(readers, stop_readers, reader_errors)
+            raise _uncertain_output_error(
+                argv,
+                process.returncode,
+                stdout_tail,
+                stderr_tail,
+                detail=(
+                    "privileged supervisor termination could not be established after "
+                    "interruption; privileged package-related activity may still be "
+                    "running, Agent Tools could not establish quiescence, and provider/"
+                    "package state is uncertain"
+                ),
+            ) from None
         if not _join_output_readers(readers, stop_readers, reader_errors):
             raise _uncertain_output_error(
                 argv, process.returncode, stdout_tail, stderr_tail
@@ -243,14 +280,18 @@ def _uncertain_output_error(
     returncode: int | None,
     stdout_tail: _BoundedOutputTail,
     stderr_tail: _BoundedOutputTail,
+    detail: str | None = None,
 ) -> UncertainSupervisionError:
-    return UncertainSupervisionError(
-        subprocess.CompletedProcess(
+    result = subprocess.CompletedProcess(
             argv,
             returncode,
             stdout_tail.value(),
             stderr_tail.value(),
         )
+    return (
+        UncertainSupervisionError(result, detail)
+        if detail is not None
+        else UncertainSupervisionError(result)
     )
 
 
@@ -777,7 +818,7 @@ def _acceptable_current_provider(
         ):
             continue
         paths = tuple(item.path for item in verified if item.path is not None)
-        if paths:
+        if paths and all(_path_is_absolute(path, state.machine) for path in paths):
             return provider.provider.provider_id, paths
     return None
 
@@ -1105,12 +1146,7 @@ def _execute_provider_plan(
                         action,
                         ActionOutcome.SUPERVISOR_FAILED,
                         tuple(commands),
-                        detail=(
-                            "the synchronous supervisor exited, but inherited output "
-                            "remained open; descendant or package-related activity may "
-                            "still be running, Agent Tools could not establish quiescence, "
-                            "and provider/package state is uncertain"
-                        ),
+                        detail=error.detail,
                     )
                 )
                 return _failed_report(
@@ -1147,7 +1183,11 @@ def _execute_provider_plan(
                     )
                 )
                 return _failed_report(
-                    plan, context, reports, mutation_may_have_started=True
+                    plan,
+                    context,
+                    reports,
+                    mutation_may_have_started=True,
+                    uncertain_external_state=elevated_linux,
                 )
             except OSError as error:
                 earlier_command_completed = bool(commands)
