@@ -16,7 +16,7 @@ from .capabilities import (
     MachineState,
     get_capability,
 )
-from .python_selection import normalize_architecture
+from .python_selection import NativeStatus, normalize_architecture
 
 
 class PlanningError(RuntimeError):
@@ -31,6 +31,31 @@ class ExecutionPrivilege(str, Enum):
 
 
 @dataclass(frozen=True)
+class PackageManagerState:
+    """Verified primary observations for one package-manager executable."""
+
+    manager: str
+    executable_path: str
+    execution_environment: str
+    architecture: str | None = None
+
+    def native_status(self, context: MachineState) -> NativeStatus:
+        known_architectures = {"x86_64", "x86", "arm64", "arm"}
+        manager_architecture = normalize_architecture(self.architecture)
+        context_architecture = normalize_architecture(context.architecture)
+        if (
+            manager_architecture not in known_architectures
+            or context_architecture not in known_architectures
+        ):
+            return NativeStatus.UNKNOWN
+        return (
+            NativeStatus.NATIVE
+            if manager_architecture == context_architecture
+            else NativeStatus.TRANSLATED
+        )
+
+
+@dataclass(frozen=True)
 class VerificationRequirement:
     probes: tuple[ExecutableProbe, ...]
     policy: ProbePolicy
@@ -40,7 +65,7 @@ class VerificationRequirement:
 class ProviderAction:
     capability_id: str
     provider_id: str
-    manager: str
+    manager_state: PackageManagerState
     installation_unit: str
     reason: str
     verification: VerificationRequirement
@@ -49,6 +74,10 @@ class ProviderAction:
     shared_package: bool
     displaces_verified_paths: tuple[str, ...] = ()
     target_architecture: str | None = None
+
+    @property
+    def manager(self) -> str:
+        return self.manager_state.manager
 
 
 @dataclass(frozen=True)
@@ -63,12 +92,23 @@ class ProviderPlan:
 
 
 def adapter_commands(
-    manager: str, unit: str, *, target_architecture: str | None = None
+    manager: str,
+    unit: str,
+    *,
+    executable_path: str | None = None,
+    target_architecture: str | None = None,
 ) -> tuple[tuple[str, ...], ...]:
     """Render inspectable argv without executing it."""
 
+    executable = executable_path or {
+        "winget": "winget",
+        "apt": "apt-get",
+        "dnf": "dnf",
+        "pacman": "pacman",
+        "brew": "brew",
+    }.get(manager, manager)
     winget = (
-        "winget", "install", "--id", unit, "-e",
+        executable, "install", "--id", unit, "-e",
         "--accept-package-agreements", "--accept-source-agreements",
     )
     if target_architecture is not None and manager == "winget":
@@ -82,10 +122,10 @@ def adapter_commands(
         winget += ("--architecture", winget_architecture)
     adapters = {
         "winget": (winget,),
-        "apt": (("apt-get", "update"), ("apt-get", "install", "-y", unit)),
-        "dnf": (("dnf", "install", "-y", unit),),
-        "pacman": (("pacman", "-S", "--needed", "--noconfirm", unit),),
-        "brew": (("brew", "install", unit),),
+        "apt": ((executable, "update"), (executable, "install", "-y", unit)),
+        "dnf": ((executable, "install", "-y", unit),),
+        "pacman": ((executable, "-S", "--needed", "--noconfirm", unit),),
+        "brew": ((executable, "install", unit),),
     }
     try:
         return adapters[manager]
@@ -111,31 +151,53 @@ def adapter_execution_privilege(manager: str) -> ExecutionPrivilege:
 
 def _option(
     provider: ProviderSpec,
-    platform: str,
-    architecture: str,
-    available_managers: frozenset[str],
-) -> ProviderPackage | None:
-    return next(
-        (
-            package
-            for package in provider.packages
-            if platform in package.platforms
-            and package.manager in available_managers
-            and (
-                not package.architectures
-                or normalize_architecture(architecture) in package.architectures
-            )
-        ),
-        None,
-    )
+    context: MachineState,
+    package_managers: tuple[PackageManagerState, ...],
+    translated_fallbacks: frozenset[PackageManagerState],
+) -> tuple[ProviderPackage, PackageManagerState, NativeStatus] | None:
+    for package in provider.packages:
+        if context.platform not in package.platforms or (
+            package.architectures
+            and normalize_architecture(context.architecture) not in package.architectures
+        ):
+            continue
+        candidates = []
+        for manager_state in package_managers:
+            if (
+                manager_state.manager != package.manager
+                or manager_state.execution_environment != context.execution_environment
+            ):
+                continue
+            native_status = manager_state.native_status(context)
+            if package.manager == "brew":
+                if native_status is NativeStatus.NATIVE:
+                    rank = 0
+                elif (
+                    native_status is NativeStatus.TRANSLATED
+                    and manager_state in translated_fallbacks
+                ):
+                    rank = 1
+                else:
+                    continue
+            else:
+                # These managers select or explicitly receive the target package
+                # architecture; their own executable architecture is not package
+                # suitability evidence.
+                rank = 0
+            candidates.append((rank, manager_state.executable_path, manager_state, native_status))
+        if candidates:
+            _, _, manager_state, native_status = min(candidates)
+            return package, manager_state, native_status
+    return None
 
 
 def generate_provider_plan(
     states: Iterable[CapabilityState],
     requested_capabilities: Iterable[str],
     *,
-    available_managers: Iterable[str],
+    package_managers: Iterable[PackageManagerState],
     native_provisioning: Iterable[str] = (),
+    translated_manager_fallbacks: Iterable[PackageManagerState] = (),
 ) -> ProviderPlan:
     """Plan missing requested providers from verified state without mutation."""
 
@@ -161,7 +223,40 @@ def generate_provider_plan(
     if len(contexts) > 1:
         raise PlanningError("requested capability states span multiple execution contexts")
     context = next(iter(contexts), None)
-    managers = frozenset(available_managers)
+    manager_states = tuple(dict.fromkeys(package_managers))
+    supported_managers = {"winget", "apt", "dnf", "pacman", "brew"}
+    for manager_state in manager_states:
+        if manager_state.manager not in supported_managers:
+            raise PlanningError(f"unsupported package manager: {manager_state.manager}")
+        if not manager_state.executable_path.strip():
+            raise PlanningError(
+                f"package manager has no verified executable path: {manager_state.manager}"
+            )
+    by_identity: dict[tuple[str, str, str], PackageManagerState] = {}
+    for manager_state in manager_states:
+        identity = (
+            manager_state.manager,
+            manager_state.executable_path,
+            manager_state.execution_environment,
+        )
+        existing = by_identity.get(identity)
+        if existing is not None and normalize_architecture(
+            existing.architecture
+        ) != normalize_architecture(manager_state.architecture):
+            raise PlanningError(
+                f"conflicting package-manager architecture evidence: {manager_state.manager}"
+            )
+        by_identity[identity] = manager_state
+    translated_fallbacks = frozenset(translated_manager_fallbacks)
+    unknown_fallbacks = translated_fallbacks.difference(manager_states)
+    if unknown_fallbacks:
+        raise PlanningError("translated package-manager fallback was not detected")
+    if context is not None:
+        for fallback in translated_fallbacks:
+            if fallback.manager != "brew" or fallback.native_status(context) is not NativeStatus.TRANSLATED:
+                raise PlanningError(
+                    "translated package-manager fallback is not verified translated Homebrew"
+                )
     native_overrides = frozenset(native_provisioning)
     unknown_overrides = native_overrides.difference(requested)
     if unknown_overrides:
@@ -218,34 +313,38 @@ def generate_provider_plan(
             displaced = tuple(item.path for item in verified if item.path is not None)
         if state.availability is Availability.UNSUPPORTED:
             raise PlanningError(f"capability is unsupported: {capability_id}")
-        selected: tuple[ProviderSpec, ProviderPackage] | None = None
+        selected: tuple[
+            ProviderSpec, ProviderPackage, PackageManagerState, NativeStatus
+        ] | None = None
         for provider_state in state.providers:
             provider = provider_state.provider
             if not provider.satisfies_capability or not provider.supports(state.machine):
                 continue
-            package = _option(
-                provider, state.machine.platform, state.machine.architecture, managers
-            )
-            if package is not None:
-                selected = (provider, package)
+            option = _option(provider, context, manager_states, translated_fallbacks)
+            if option is not None:
+                package, manager_state, manager_native_status = option
+                selected = (provider, package, manager_state, manager_native_status)
                 break
         if selected is None:
             raise PlanningError(
                 f"no supported provider plan for {capability_id} using: "
-                + (", ".join(sorted(managers)) or "no package manager")
+                + (", ".join(sorted(item.manager for item in manager_states)) or "no package manager")
             )
-        provider, package = selected
+        provider, package, manager_state, manager_native_status = selected
+        reason = (
+            "explicit native-provisioning override replaces translated provider"
+            if displaced
+            else "no compatible provider verified"
+        )
+        if manager_native_status is NativeStatus.TRANSLATED:
+            reason += "; explicit translated package-manager fallback"
         actions.append(
             ProviderAction(
                 capability_id=capability_id,
                 provider_id=provider.provider_id,
-                manager=package.manager,
+                manager_state=manager_state,
                 installation_unit=package.installation_unit,
-                reason=(
-                    "explicit native-provisioning override replaces translated provider"
-                    if displaced
-                    else "no compatible provider verified"
-                ),
+                reason=reason,
                 verification=VerificationRequirement(
                     provider.probes,
                     provider.probe_policy,
@@ -254,6 +353,7 @@ def generate_provider_plan(
                 commands=adapter_commands(
                     package.manager,
                     package.installation_unit,
+                    executable_path=manager_state.executable_path,
                     target_architecture=(
                         host_architecture
                         if displaced

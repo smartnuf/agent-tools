@@ -5,6 +5,20 @@ from agent_tools import provider_plans
 
 
 class ProviderPlanTests(unittest.TestCase):
+    def manager(self, manager, *, environment="host", architecture=None):
+        executables = {
+            "winget": "C:/Windows/System32/winget.exe",
+            "apt": "/usr/bin/apt-get",
+            "dnf": "/usr/bin/dnf",
+            "pacman": "/usr/bin/pacman",
+            "brew": "/opt/homebrew/bin/brew",
+        }
+        if architecture is None and manager == "brew":
+            architecture = "arm64"
+        return provider_plans.PackageManagerState(
+            manager, executables[manager], environment, architecture
+        )
+
     def state(self, capability, platform="Linux", *, available=False):
         machine = capabilities.MachineState(platform, "x86_64")
         return capabilities.detect_capability(
@@ -17,7 +31,7 @@ class ProviderPlanTests(unittest.TestCase):
     def test_all_satisfied_plan_has_zero_actions(self):
         states = (self.state(capabilities.POPPLER, available=True), self.state(capabilities.GHOSTSCRIPT, available=True))
         plan = provider_plans.generate_provider_plan(
-            states, ("poppler", "ghostscript"), available_managers=("apt",)
+            states, ("poppler", "ghostscript"), package_managers=(self.manager("apt"),)
         )
         self.assertEqual(plan.actions, ())
         self.assertFalse(plan.changes_host)
@@ -26,11 +40,13 @@ class ProviderPlanTests(unittest.TestCase):
     def test_linux_plan_is_deterministic_and_inspectable(self):
         states = (self.state(capabilities.POPPLER), self.state(capabilities.GHOSTSCRIPT))
         plan = provider_plans.generate_provider_plan(
-            states, ("ghostscript", "poppler", "ghostscript"), available_managers=("apt", "dnf")
+            states,
+            ("ghostscript", "poppler", "ghostscript"),
+            package_managers=(self.manager("apt"), self.manager("dnf")),
         )
         self.assertEqual(plan.requested_capabilities, ("ghostscript", "poppler"))
         self.assertEqual(tuple(action.installation_unit for action in plan.actions), ("ghostscript", "poppler-utils"))
-        self.assertEqual(plan.actions[0].commands, (("apt-get", "update"), ("apt-get", "install", "-y", "ghostscript")))
+        self.assertEqual(plan.actions[0].commands, (("/usr/bin/apt-get", "update"), ("/usr/bin/apt-get", "install", "-y", "ghostscript")))
         self.assertTrue(all(action.shared_package for action in plan.actions))
         self.assertEqual(
             plan.actions[0].verification,
@@ -80,10 +96,12 @@ class ProviderPlanTests(unittest.TestCase):
     def test_windows_git_bash_uses_shared_git_package(self):
         state = self.state(capabilities.BASH, "Windows")
         plan = provider_plans.generate_provider_plan(
-            (state,), ("bash",), available_managers=("winget",)
+            (state,), ("bash",), package_managers=(self.manager("winget"),)
         )
         action = plan.actions[0]
         self.assertEqual((action.provider_id, action.installation_unit), ("git-bash", "Git.Git"))
+        self.assertEqual(action.manager_state, self.manager("winget"))
+        self.assertEqual(action.commands[0][0], "C:/Windows/System32/winget.exe")
         self.assertTrue(action.shared_package)
         self.assertEqual(
             action.execution_privilege, provider_plans.ExecutionPrivilege.CURRENT_USER
@@ -97,7 +115,9 @@ class ProviderPlanTests(unittest.TestCase):
                     capabilities.BASH, machine, locator=lambda probe, machine: None
                 )
                 plan = provider_plans.generate_provider_plan(
-                    (state,), ("bash",), available_managers=(manager,)
+                    (state,),
+                    ("bash",),
+                    package_managers=(self.manager(manager, environment=environment),),
                 )
                 with self.subTest(manager=manager, environment=environment):
                     self.assertEqual(plan.context, machine)
@@ -105,6 +125,9 @@ class ProviderPlanTests(unittest.TestCase):
                     action = plan.actions[0]
                     self.assertEqual(action.provider_id, "system-bash")
                     self.assertEqual(action.installation_unit, "bash")
+                    self.assertEqual(
+                        action.manager_state.execution_environment, environment
+                    )
                     self.assertEqual(
                         action.execution_privilege,
                         provider_plans.ExecutionPrivilege.SYSTEM,
@@ -121,7 +144,7 @@ class ProviderPlanTests(unittest.TestCase):
             version_reader=lambda probe, path: "GNU bash 3.2",
         )
         plan = provider_plans.generate_provider_plan(
-            (state,), ("bash",), available_managers=("brew",)
+            (state,), ("bash",), package_managers=(self.manager("brew"),)
         )
         self.assertEqual(state.selected_provider.provider.provider_id, "system-bash")
         self.assertEqual(plan.actions, ())
@@ -132,14 +155,97 @@ class ProviderPlanTests(unittest.TestCase):
             capabilities.BASH, machine, locator=lambda probe, machine: None
         )
         plan = provider_plans.generate_provider_plan(
-            (state,), ("bash",), available_managers=("brew",)
+            (state,), ("bash",), package_managers=(self.manager("brew"),)
         )
         action = plan.actions[0]
         self.assertEqual(action.provider_id, "homebrew-bash")
         self.assertEqual(action.installation_unit, "bash")
+        self.assertEqual(action.manager_state, self.manager("brew"))
+        self.assertEqual(action.commands, (("/opt/homebrew/bin/brew", "install", "bash"),))
+        self.assertEqual(
+            action.manager_state.native_status(machine),
+            provider_plans.NativeStatus.NATIVE,
+        )
         self.assertEqual(
             action.execution_privilege, provider_plans.ExecutionPrivilege.CURRENT_USER
         )
+
+    def test_translated_homebrew_requires_exact_visible_authorization(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH, machine, locator=lambda probe, machine: None
+        )
+        translated = provider_plans.PackageManagerState(
+            "brew", "/usr/local/bin/brew", "host", "x86_64"
+        )
+        with self.assertRaisesRegex(provider_plans.PlanningError, "no supported provider plan"):
+            provider_plans.generate_provider_plan(
+                (state,), ("bash",), package_managers=(translated,)
+            )
+        plan = provider_plans.generate_provider_plan(
+            (state,),
+            ("bash",),
+            package_managers=(translated,),
+            translated_manager_fallbacks=(translated,),
+        )
+        action = plan.actions[0]
+        self.assertEqual(action.manager_state, translated)
+        self.assertIn("explicit translated package-manager fallback", action.reason)
+
+        native = self.manager("brew")
+        preferred = provider_plans.generate_provider_plan(
+            (state,),
+            ("bash",),
+            package_managers=(translated, native),
+            translated_manager_fallbacks=(translated,),
+        )
+        self.assertEqual(preferred.actions[0].manager_state, native)
+        self.assertNotIn("translated package-manager", preferred.actions[0].reason)
+
+    def test_unknown_homebrew_architecture_fails_closed(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH, machine, locator=lambda probe, machine: None
+        )
+        for architecture in (None, "unknown", "unrecognized"):
+            manager = provider_plans.PackageManagerState(
+                "brew", "/opt/homebrew/bin/brew", "host", architecture
+            )
+            with self.subTest(architecture=architecture), self.assertRaisesRegex(
+                provider_plans.PlanningError, "no supported provider plan"
+            ):
+                provider_plans.generate_provider_plan(
+                    (state,), ("bash",), package_managers=(manager,)
+                )
+
+    def test_package_manager_must_be_local_to_plan_context(self):
+        machine = capabilities.MachineState("Linux", "x86_64", "wsl")
+        state = capabilities.detect_capability(
+            capabilities.BASH, machine, locator=lambda probe, machine: None
+        )
+        host_apt = self.manager("apt", environment="host")
+        with self.assertRaisesRegex(provider_plans.PlanningError, "no supported provider plan"):
+            provider_plans.generate_provider_plan(
+                (state,), ("bash",), package_managers=(host_apt,)
+            )
+
+    def test_package_manager_evidence_validation_fails_closed(self):
+        state = self.state(capabilities.POPPLER)
+        missing_path = provider_plans.PackageManagerState("apt", "", "host")
+        with self.assertRaisesRegex(provider_plans.PlanningError, "verified executable path"):
+            provider_plans.generate_provider_plan(
+                (state,), ("poppler",), package_managers=(missing_path,)
+            )
+        first = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+        conflicting = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "x86_64"
+        )
+        with self.assertRaisesRegex(provider_plans.PlanningError, "conflicting"):
+            provider_plans.generate_provider_plan(
+                (state,), ("poppler",), package_managers=(first, conflicting)
+            )
 
     def test_macos_missing_bash_does_not_bootstrap_homebrew(self):
         machine = capabilities.MachineState("Darwin", "arm64")
@@ -148,18 +254,18 @@ class ProviderPlanTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(provider_plans.PlanningError, "no supported provider plan"):
             provider_plans.generate_provider_plan(
-                (state,), ("bash",), available_managers=()
+                (state,), ("bash",), package_managers=()
             )
 
     def test_unsupported_unknown_and_unplannable_requests_fail(self):
         unsupported = self.state(capabilities.POPPLER, "Plan9")
         absent = self.state(capabilities.POPPLER)
         with self.assertRaisesRegex(provider_plans.PlanningError, "unsupported"):
-            provider_plans.generate_provider_plan((unsupported,), ("poppler",), available_managers=("apt",))
+            provider_plans.generate_provider_plan((unsupported,), ("poppler",), package_managers=(self.manager("apt"),))
         with self.assertRaisesRegex(provider_plans.PlanningError, "no detected state"):
-            provider_plans.generate_provider_plan((), ("poppler",), available_managers=("apt",))
+            provider_plans.generate_provider_plan((), ("poppler",), package_managers=(self.manager("apt"),))
         with self.assertRaisesRegex(provider_plans.PlanningError, "no supported provider plan"):
-            provider_plans.generate_provider_plan((absent,), ("poppler",), available_managers=())
+            provider_plans.generate_provider_plan((absent,), ("poppler",), package_managers=())
 
     def test_unknown_adapter_fails_without_execution(self):
         with self.assertRaisesRegex(provider_plans.PlanningError, "unsupported package manager"):
@@ -179,7 +285,7 @@ class ProviderPlanTests(unittest.TestCase):
         plan = provider_plans.generate_provider_plan(
             (state,),
             ("bash",),
-            available_managers=("winget",),
+            package_managers=(self.manager("winget"),),
             native_provisioning=("bash",),
         )
         self.assertEqual(plan.actions[0].displaces_verified_paths, ("C:/Git/bin/bash.exe",))
@@ -191,11 +297,11 @@ class ProviderPlanTests(unittest.TestCase):
         native = self.state(capabilities.BASH, "Windows", available=True)
         with self.assertRaisesRegex(provider_plans.PlanningError, "not a verified translated"):
             provider_plans.generate_provider_plan(
-                (native,), ("bash",), available_managers=("winget",), native_provisioning=("bash",)
+                (native,), ("bash",), package_managers=(self.manager("winget"),), native_provisioning=("bash",)
             )
         with self.assertRaisesRegex(provider_plans.PlanningError, "was not requested"):
             provider_plans.generate_provider_plan(
-                (native,), ("bash",), available_managers=("winget",), native_provisioning=("poppler",)
+                (native,), ("bash",), package_managers=(self.manager("winget"),), native_provisioning=("poppler",)
             )
 
     def test_native_override_rejects_unknown_host_architecture(self):
@@ -209,7 +315,7 @@ class ProviderPlanTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(provider_plans.PlanningError, "known host architecture"):
             provider_plans.generate_provider_plan(
-                (state,), ("bash",), available_managers=("winget",), native_provisioning=("bash",)
+                (state,), ("bash",), package_managers=(self.manager("winget"),), native_provisioning=("bash",)
             )
 
     def test_native_override_rejects_unknown_provider_architecture(self):
@@ -230,7 +336,7 @@ class ProviderPlanTests(unittest.TestCase):
                 provider_plans.generate_provider_plan(
                     (state,),
                     ("bash",),
-                    available_managers=("winget",),
+                    package_managers=(self.manager("winget"),),
                     native_provisioning=("bash",),
                 )
 
@@ -238,7 +344,7 @@ class ProviderPlanTests(unittest.TestCase):
         state = self.state(capabilities.POPPLER)
         with self.assertRaisesRegex(provider_plans.PlanningError, "duplicate detected"):
             provider_plans.generate_provider_plan(
-                (state, state), ("poppler",), available_managers=("apt",)
+                (state, state), ("poppler",), package_managers=(self.manager("apt"),)
             )
 
     def test_requested_states_must_share_one_complete_execution_context(self):
@@ -256,7 +362,9 @@ class ProviderPlanTests(unittest.TestCase):
                 provider_plans.PlanningError, "multiple execution contexts"
             ):
                 provider_plans.generate_provider_plan(
-                    (baseline, other), ("poppler", "ghostscript"), available_managers=("apt", "brew")
+                    (baseline, other),
+                    ("poppler", "ghostscript"),
+                    package_managers=(self.manager("apt"), self.manager("brew")),
                 )
 
     def test_equivalent_architecture_aliases_share_canonical_context(self):
@@ -273,7 +381,7 @@ class ProviderPlanTests(unittest.TestCase):
         plan = provider_plans.generate_provider_plan(
             (poppler, ghostscript),
             ("poppler", "ghostscript"),
-            available_managers=("winget",),
+            package_managers=(self.manager("winget"),),
         )
         self.assertEqual(
             plan.context, capabilities.MachineState("Windows", "x86_64", "host")
@@ -283,7 +391,7 @@ class ProviderPlanTests(unittest.TestCase):
         requested = self.state(capabilities.POPPLER)
         irrelevant = self.state(capabilities.GHOSTSCRIPT, "Darwin")
         plan = provider_plans.generate_provider_plan(
-            (requested, irrelevant, irrelevant), ("poppler",), available_managers=("apt",)
+            (requested, irrelevant, irrelevant), ("poppler",), package_managers=(self.manager("apt"),)
         )
         self.assertEqual(plan.context, requested.machine)
 
@@ -307,7 +415,7 @@ class ProviderPlanTests(unittest.TestCase):
         plan = provider_plans.generate_provider_plan(
             (state,),
             ("bash",),
-            available_managers=("apt",),
+            package_managers=(self.manager("apt"),),
             native_provisioning=("bash",),
         )
         action = plan.actions[0]
@@ -315,7 +423,7 @@ class ProviderPlanTests(unittest.TestCase):
         self.assertEqual(action.manager, "apt")
         self.assertEqual(
             action.commands,
-            (("apt-get", "update"), ("apt-get", "install", "-y", "bash")),
+            (("/usr/bin/apt-get", "update"), ("/usr/bin/apt-get", "install", "-y", "bash")),
         )
 
     def test_caller_owned_catalogue_metadata_is_rejected(self):
@@ -344,7 +452,7 @@ class ProviderPlanTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(provider_plans.PlanningError, "unknown built-in"):
             provider_plans.generate_provider_plan(
-                (state,), ("custom",), available_managers=("apt",)
+                (state,), ("custom",), package_managers=(self.manager("apt"),)
             )
 
 
