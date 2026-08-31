@@ -263,6 +263,19 @@ class ProviderPlanTests(unittest.TestCase):
                 (state,), ("poppler",), package_managers=(first, conflicting)
             )
 
+        windows_first = provider_plans.PackageManagerState(
+            "winget", "C:\\Windows\\System32\\winget.exe", "host", "arm64"
+        )
+        windows_conflicting = provider_plans.PackageManagerState(
+            "winget", "c:/windows/system32/winget.exe", "host", "x86_64"
+        )
+        with self.assertRaisesRegex(provider_plans.PlanningError, "conflicting"):
+            provider_plans.generate_provider_plan(
+                (windows,),
+                ("poppler",),
+                package_managers=(windows_first, windows_conflicting),
+            )
+
     def test_equivalent_manager_architecture_aliases_are_deduplicated(self):
         machine = capabilities.MachineState("Darwin", "arm64")
         state = capabilities.detect_capability(
@@ -371,6 +384,25 @@ class ProviderPlanTests(unittest.TestCase):
                     package_managers=(self.manager("winget"),),
                     native_provisioning=("bash",),
                 )
+
+    def test_native_override_rejects_relative_displaced_provider_path(self):
+        machine = capabilities.MachineState("Windows", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, machine: (
+                ".\\bash.exe" if probe.locator_strategy == "git-bash" else None
+            ),
+            version_reader=lambda probe, path: "GNU bash 5.2",
+            architecture_reader=lambda probe, path: "x86_64",
+        )
+        with self.assertRaisesRegex(provider_plans.PlanningError, "absolute verified"):
+            provider_plans.generate_provider_plan(
+                (state,),
+                ("bash",),
+                package_managers=(self.manager("winget"),),
+                native_provisioning=("bash",),
+            )
 
     def test_native_override_rejects_translated_homebrew_fallback(self):
         machine = capabilities.MachineState("Darwin", "arm64")

@@ -411,6 +411,34 @@ class CapabilityTests(unittest.TestCase):
                     expected,
                 )
 
+    def test_homebrew_bash_locator_prefers_native_prefix_over_path_brew(self) -> None:
+        probe = next(
+            provider.probes[0]
+            for provider in capabilities.BASH.providers
+            if provider.provider_id == "homebrew-bash"
+        )
+        with (
+            patch.object(
+                capabilities.shutil,
+                "which",
+                return_value="/usr/local/bin/brew",
+            ),
+            patch.object(
+                capabilities.Path,
+                "is_file",
+                autospec=True,
+                side_effect=lambda path: path.as_posix()
+                in {"/opt/homebrew/bin/bash", "/usr/local/bin/bash"},
+            ),
+        ):
+            self.assertEqual(
+                capabilities.locate_executable(
+                    probe,
+                    capabilities.MachineState("Darwin", "arm64"),
+                ),
+                "/opt/homebrew/bin/bash",
+            )
+
     def test_homebrew_bash_remains_distinct_and_requires_verification(self) -> None:
         machine = capabilities.MachineState("Darwin", "arm64")
         with (

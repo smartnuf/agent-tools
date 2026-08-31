@@ -190,7 +190,14 @@ def _option(
                 # architecture; their own executable architecture is not package
                 # suitability evidence.
                 rank = 0
-            candidates.append((rank, manager_state.executable_path, manager_state, native_status))
+            candidates.append(
+                (
+                    rank,
+                    _manager_path_key(manager_state.executable_path, context),
+                    manager_state,
+                    native_status,
+                )
+            )
         if candidates:
             _, _, manager_state, native_status = min(candidates)
             return package, manager_state, native_status
@@ -199,15 +206,24 @@ def _option(
 
 def _manager_evidence_key(
     state: PackageManagerState,
+    context: MachineState | None,
 ) -> tuple[str, str, str, str]:
     """Return alias-canonical identity for one manager observation."""
 
     return (
         state.manager,
-        state.executable_path,
+        _manager_path_key(state.executable_path, context),
         state.execution_environment,
         normalize_architecture(state.architecture),
     )
+
+
+def _manager_path_key(path: str, context: MachineState | None) -> str:
+    """Return a stable executable identity under the plan platform's rules."""
+
+    if context is not None and context.platform == "Windows":
+        return str(PureWindowsPath(path)).casefold()
+    return str(PurePosixPath(path))
 
 
 def _manager_path_is_absolute(path: str, context: MachineState | None) -> bool:
@@ -292,7 +308,7 @@ def generate_provider_plan(
     for manager_state in supplied_manager_states:
         identity = (
             manager_state.manager,
-            manager_state.executable_path,
+            _manager_path_key(manager_state.executable_path, context),
             manager_state.execution_environment,
         )
         existing = by_identity.get(identity)
@@ -307,11 +323,13 @@ def generate_provider_plan(
         tuple[str, str, str, str], PackageManagerState
     ] = {}
     for manager_state in supplied_manager_states:
-        canonical_managers.setdefault(_manager_evidence_key(manager_state), manager_state)
+        canonical_managers.setdefault(
+            _manager_evidence_key(manager_state, context), manager_state
+        )
     manager_states = tuple(canonical_managers.values())
     translated_fallbacks_list: list[PackageManagerState] = []
     for fallback in translated_manager_fallbacks:
-        detected = canonical_managers.get(_manager_evidence_key(fallback))
+        detected = canonical_managers.get(_manager_evidence_key(fallback, context))
         if detected is None:
             raise PlanningError("translated package-manager fallback was not detected")
         translated_fallbacks_list.append(detected)
@@ -379,6 +397,14 @@ def generate_provider_plan(
             ):
                 raise PlanningError(
                     f"native-provisioning override is not a verified translated provider: {capability_id}"
+                )
+            if any(
+                item.path is None or not _manager_path_is_absolute(item.path, context)
+                for item in verified
+            ):
+                raise PlanningError(
+                    "native-provisioning override requires absolute verified provider paths: "
+                    f"{capability_id}"
                 )
             displaced = tuple(item.path for item in verified if item.path is not None)
         if state.availability is Availability.UNSUPPORTED:

@@ -424,19 +424,20 @@ def locate_executable(probe: ExecutableProbe, machine: MachineState) -> str | No
     if probe.locator_strategy == "homebrew-bash":
         if machine.platform != "Darwin":
             return None
-        brew = shutil.which("brew")
-        candidates: list[tuple[Path, str]] = []
-        if brew:
-            path_candidate = Path(brew).with_name(probe.name)
-            candidates.append((path_candidate, str(path_candidate)))
         prefixes = (
             (Path("/opt/homebrew/bin"), Path("/usr/local/bin"))
             if machine.architecture in {"arm64", "aarch64"}
             else (Path("/usr/local/bin"), Path("/opt/homebrew/bin"))
         )
-        candidates.extend(
-            (prefix / probe.name, (prefix / probe.name).as_posix())
-            for prefix in prefixes
+        brew = shutil.which("brew")
+        candidates = [
+            (prefixes[0] / probe.name, (prefixes[0] / probe.name).as_posix())
+        ]
+        if brew:
+            path_candidate = Path(brew).with_name(probe.name)
+            candidates.append((path_candidate, path_candidate.as_posix()))
+        candidates.append(
+            (prefixes[1] / probe.name, (prefixes[1] / probe.name).as_posix())
         )
         seen: set[str] = set()
         for candidate, result in candidates:
