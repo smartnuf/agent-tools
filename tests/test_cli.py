@@ -180,7 +180,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("poppler", text)
         self.assertIn("ghostscript", text)
         self.assertIn("bash", text)
-        self.assertIn("git-bash, system-bash, wsl-bash", text)
+        self.assertIn("git-bash, system-bash, homebrew-bash, wsl-bash", text)
 
     def test_tools_status_reports_windows_git_bash(self) -> None:
         def locate(
@@ -266,12 +266,22 @@ class CliTests(unittest.TestCase):
             doctor_output = output.getvalue()
             output.seek(0)
             output.truncate(0)
-            self.assertEqual(cli.tools_status("bash"), 0)
+            self.assertEqual(cli.tools_status(), 0)
             status_output = output.getvalue()
         self.assertNotIn("Poppler      unsupported", doctor_output)
         self.assertNotIn("Ghostscript  unsupported", doctor_output)
-        self.assertIn("bash: available", status_output)
-        self.assertIn("system-bash: available", status_output)
+        for provider_id, label in (
+            ("host-poppler", "host Poppler"),
+            ("host-ghostscript", "host Ghostscript"),
+            ("system-bash", "system Bash"),
+        ):
+            with self.subTest(provider_id=provider_id):
+                self.assertIn(
+                    f"  {provider_id}: available\n"
+                    f"    provider: {label}\n"
+                    "    environment: wsl",
+                    status_output,
+                )
 
     def test_distribution_version_tries_all_owning_distributions(self) -> None:
         with (

@@ -38,12 +38,12 @@ class CapabilityTests(unittest.TestCase):
         self.assertFalse(capabilities.BASH.required_by_default)
         self.assertEqual(
             tuple(provider.provider_id for provider in capabilities.BASH.providers),
-            ("git-bash", "system-bash", "wsl-bash"),
+            ("git-bash", "system-bash", "homebrew-bash", "wsl-bash"),
         )
         self.assertEqual(capabilities.BASH.providers[0].provided_environment, "windows-host")
-        self.assertEqual(capabilities.BASH.providers[2].provided_environment, "wsl")
-        self.assertEqual(capabilities.BASH.providers[2].label, "default WSL Bash")
-        self.assertFalse(capabilities.BASH.providers[2].satisfies_capability)
+        self.assertEqual(capabilities.BASH.providers[3].provided_environment, "wsl")
+        self.assertEqual(capabilities.BASH.providers[3].label, "default WSL Bash")
+        self.assertFalse(capabilities.BASH.providers[3].satisfies_capability)
 
     def test_windows_git_bash_is_preferred_and_reports_architecture(self) -> None:
         machine = capabilities.MachineState("Windows", "ARM64")

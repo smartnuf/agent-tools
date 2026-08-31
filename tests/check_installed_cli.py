@@ -72,7 +72,7 @@ def run(executable: Path, expected_version: str, require_native: bool) -> None:
     if require_native:
         assert "All checks passed." in doctor.stdout
     assert "bash" in tools_list.stdout
-    assert "git-bash, system-bash, wsl-bash" in tools_list.stdout
+    assert "git-bash, system-bash, homebrew-bash, wsl-bash" in tools_list.stdout
     assert bash_status.returncode == 0, bash_status.stderr or bash_status.stdout
     assert "bash: available (optional)" in bash_status.stdout
     expected_provider = "git-bash" if platform.system() == "Windows" else "system-bash"

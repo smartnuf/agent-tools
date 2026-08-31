@@ -267,9 +267,33 @@ BASH = CapabilitySpec(
                 ),
             ),
             probe_policy=ProbePolicy.ANY,
+            packages=(
+                ProviderPackage("apt", "bash", frozenset({"Linux"})),
+                ProviderPackage("dnf", "bash", frozenset({"Linux"})),
+                ProviderPackage("pacman", "bash", frozenset({"Linux"})),
+            ),
             supported_contexts=frozenset(
                 {("Linux", "host"), ("Linux", "wsl"), ("Darwin", "host")}
             ),
+        ),
+        ProviderSpec(
+            provider_id="homebrew-bash",
+            label="Homebrew Bash",
+            platforms=frozenset({"Darwin"}),
+            execution_environments=frozenset({"host"}),
+            probes=(
+                ExecutableProbe(
+                    "bash",
+                    ("--version",),
+                    "homebrew-bash",
+                    architecture_args=("-c", "uname -m"),
+                ),
+            ),
+            probe_policy=ProbePolicy.ANY,
+            packages=(
+                ProviderPackage("brew", "bash", frozenset({"Darwin"})),
+            ),
+            supported_contexts=frozenset({("Darwin", "host")}),
         ),
         ProviderSpec(
             provider_id="wsl-bash",
@@ -391,7 +415,18 @@ def locate_executable(probe: ExecutableProbe, machine: MachineState) -> str | No
     if probe.locator_strategy == "git-bash":
         return _git_bash_path() if machine.platform == "Windows" else None
     if probe.locator_strategy == "system-bash":
-        return shutil.which(probe.name) if machine.platform in {"Linux", "Darwin"} else None
+        if machine.platform == "Linux":
+            return shutil.which(probe.name)
+        if machine.platform == "Darwin":
+            system_bash = Path("/bin/bash")
+            return str(system_bash) if system_bash.is_file() else None
+        return None
+    if probe.locator_strategy == "homebrew-bash":
+        if machine.platform != "Darwin":
+            return None
+        brew = shutil.which("brew")
+        candidate = Path(brew).with_name(probe.name) if brew else None
+        return str(candidate) if candidate is not None and candidate.is_file() else None
     if probe.locator_strategy == "wsl-bash":
         return _wsl_path() if machine.platform == "Windows" else None
     raise ValueError(f"unknown executable locator strategy: {probe.locator_strategy}")
