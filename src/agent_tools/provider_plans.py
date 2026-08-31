@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Iterable
 
 from .capabilities import (
@@ -22,6 +23,13 @@ class PlanningError(RuntimeError):
     """Raised when verified state cannot produce a safe provider plan."""
 
 
+class ExecutionPrivilege(str, Enum):
+    """Privilege level required to execute an already reviewed action."""
+
+    CURRENT_USER = "current-user"
+    SYSTEM = "system"
+
+
 @dataclass(frozen=True)
 class VerificationRequirement:
     probes: tuple[ExecutableProbe, ...]
@@ -36,6 +44,7 @@ class ProviderAction:
     installation_unit: str
     reason: str
     verification: VerificationRequirement
+    execution_privilege: ExecutionPrivilege
     commands: tuple[tuple[str, ...], ...]
     shared_package: bool
     displaces_verified_paths: tuple[str, ...] = ()
@@ -80,6 +89,22 @@ def adapter_commands(
     }
     try:
         return adapters[manager]
+    except KeyError as error:
+        raise PlanningError(f"unsupported package manager: {manager}") from error
+
+
+def adapter_execution_privilege(manager: str) -> ExecutionPrivilege:
+    """Return immutable execution policy for a supported package manager."""
+
+    policies = {
+        "winget": ExecutionPrivilege.CURRENT_USER,
+        "apt": ExecutionPrivilege.SYSTEM,
+        "dnf": ExecutionPrivilege.SYSTEM,
+        "pacman": ExecutionPrivilege.SYSTEM,
+        "brew": ExecutionPrivilege.CURRENT_USER,
+    }
+    try:
+        return policies[manager]
     except KeyError as error:
         raise PlanningError(f"unsupported package manager: {manager}") from error
 
@@ -218,6 +243,7 @@ def generate_provider_plan(
                     provider.probes,
                     provider.probe_policy,
                 ),
+                execution_privilege=adapter_execution_privilege(package.manager),
                 commands=adapter_commands(
                     package.manager,
                     package.installation_unit,

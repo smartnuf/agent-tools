@@ -63,6 +63,20 @@ class ProviderPlanTests(unittest.TestCase):
             with self.subTest(manager=manager):
                 self.assertEqual(provider_plans.adapter_commands(manager, "unit")[0][:len(prefix)], prefix)
 
+    def test_package_manager_privilege_is_explicit(self):
+        expected = {
+            "apt": provider_plans.ExecutionPrivilege.SYSTEM,
+            "dnf": provider_plans.ExecutionPrivilege.SYSTEM,
+            "pacman": provider_plans.ExecutionPrivilege.SYSTEM,
+            "brew": provider_plans.ExecutionPrivilege.CURRENT_USER,
+            "winget": provider_plans.ExecutionPrivilege.CURRENT_USER,
+        }
+        for manager, privilege in expected.items():
+            with self.subTest(manager=manager):
+                self.assertEqual(
+                    provider_plans.adapter_execution_privilege(manager), privilege
+                )
+
     def test_windows_git_bash_uses_shared_git_package(self):
         state = self.state(capabilities.BASH, "Windows")
         plan = provider_plans.generate_provider_plan(
@@ -71,6 +85,71 @@ class ProviderPlanTests(unittest.TestCase):
         action = plan.actions[0]
         self.assertEqual((action.provider_id, action.installation_unit), ("git-bash", "Git.Git"))
         self.assertTrue(action.shared_package)
+        self.assertEqual(
+            action.execution_privilege, provider_plans.ExecutionPrivilege.CURRENT_USER
+        )
+
+    def test_linux_bash_is_explicitly_provisionable_on_host_and_wsl(self):
+        for manager in ("apt", "dnf", "pacman"):
+            for environment in ("host", "wsl"):
+                machine = capabilities.MachineState("Linux", "x86_64", environment)
+                state = capabilities.detect_capability(
+                    capabilities.BASH, machine, locator=lambda probe, machine: None
+                )
+                plan = provider_plans.generate_provider_plan(
+                    (state,), ("bash",), available_managers=(manager,)
+                )
+                with self.subTest(manager=manager, environment=environment):
+                    self.assertEqual(plan.context, machine)
+                    self.assertEqual(len(plan.actions), 1)
+                    action = plan.actions[0]
+                    self.assertEqual(action.provider_id, "system-bash")
+                    self.assertEqual(action.installation_unit, "bash")
+                    self.assertEqual(
+                        action.execution_privilege,
+                        provider_plans.ExecutionPrivilege.SYSTEM,
+                    )
+
+    def test_macos_prefers_existing_system_bash_without_mutation(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, machine: (
+                "/bin/bash" if probe.locator_strategy == "system-bash" else None
+            ),
+            version_reader=lambda probe, path: "GNU bash 3.2",
+        )
+        plan = provider_plans.generate_provider_plan(
+            (state,), ("bash",), available_managers=("brew",)
+        )
+        self.assertEqual(state.selected_provider.provider.provider_id, "system-bash")
+        self.assertEqual(plan.actions, ())
+
+    def test_macos_missing_bash_uses_distinct_unprivileged_homebrew_provider(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH, machine, locator=lambda probe, machine: None
+        )
+        plan = provider_plans.generate_provider_plan(
+            (state,), ("bash",), available_managers=("brew",)
+        )
+        action = plan.actions[0]
+        self.assertEqual(action.provider_id, "homebrew-bash")
+        self.assertEqual(action.installation_unit, "bash")
+        self.assertEqual(
+            action.execution_privilege, provider_plans.ExecutionPrivilege.CURRENT_USER
+        )
+
+    def test_macos_missing_bash_does_not_bootstrap_homebrew(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH, machine, locator=lambda probe, machine: None
+        )
+        with self.assertRaisesRegex(provider_plans.PlanningError, "no supported provider plan"):
+            provider_plans.generate_provider_plan(
+                (state,), ("bash",), available_managers=()
+            )
 
     def test_unsupported_unknown_and_unplannable_requests_fail(self):
         unsupported = self.state(capabilities.POPPLER, "Plan9")
