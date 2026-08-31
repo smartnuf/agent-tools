@@ -26,6 +26,7 @@ from .provider_execution import (
     _provider_execution_transaction,
 )
 from .provider_plans import ProviderPlan
+from .python_selection import normalize_architecture
 
 
 SCHEMA_VERSION = 1
@@ -148,7 +149,7 @@ def load_document(path: Path) -> dict[str, Any]:
         isinstance(item, dict) for item in records
     ):
         raise ManagedStateError("managed-state records must be a JSON array of objects")
-    record_ids: set[str] = set()
+    record_ids: set[uuid.UUID] = set()
     for index, record in enumerate(records):
         required = {
             "id": str,
@@ -168,12 +169,12 @@ def load_document(path: Path) -> dict[str, Any]:
         if any(not isinstance(record.get(name), kind) for name, kind in required.items()):
             raise ManagedStateError(f"managed-state record {index} does not match schema v1")
         try:
-            uuid.UUID(record["id"])
+            record_id = uuid.UUID(record["id"])
         except (ValueError, AttributeError) as error:
             raise ManagedStateError(f"managed-state record {index} has an invalid id") from error
-        if record["id"] in record_ids:
+        if record_id in record_ids:
             raise ManagedStateError(f"managed-state record {index} has a duplicate id")
-        record_ids.add(record["id"])
+        record_ids.add(record_id)
         for timestamp_name in ("requested_at", "completed_at", "recorded_at"):
             try:
                 parsed = datetime.fromisoformat(record[timestamp_name].replace("Z", "+00:00"))
@@ -270,6 +271,25 @@ def load_document(path: Path) -> dict[str, Any]:
             for command in commands
         ):
             raise ManagedStateError(f"managed-state record {index} has invalid requested action")
+        target_architecture = requested.get("target_architecture")
+        displaced_paths = requested["displaces_verified_paths"]
+        native_target = normalize_architecture(target_architecture)
+        context_architecture = normalize_architecture(context["architecture"])
+        if (
+            requested["kind"] == "install"
+            and (target_architecture is not None or displaced_paths)
+        ) or (
+            requested["kind"] == "native-replacement"
+            and (
+                target_architecture is None
+                or not displaced_paths
+                or native_target == "unknown"
+                or native_target != context_architecture
+            )
+        ):
+            raise ManagedStateError(
+                f"managed-state record {index} has inconsistent native-replacement semantics"
+            )
         if not (
             isinstance(verification.get("outcome"), str)
             and verification["outcome"]

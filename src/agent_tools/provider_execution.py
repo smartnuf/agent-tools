@@ -1107,9 +1107,20 @@ def _execute_provider_plan(
     privilege_preflight: PrivilegePreflight,
     environment_refresher: EnvironmentRefresher,
 ) -> PlanExecutionReport:
-    context = _validate_plan(plan, current_context())
+    try:
+        context = _validate_plan(plan, current_context())
+    except KeyboardInterrupt as error:
+        raise ProviderPlanInterrupted(
+            _preflight_interrupted_report(plan, plan.context)
+        ) from error
     if not plan.actions:
-        if failure := _omitted_request_failure(plan, context, detector):
+        try:
+            failure = _omitted_request_failure(plan, context, detector)
+        except KeyboardInterrupt as error:
+            raise ProviderPlanInterrupted(
+                _preflight_interrupted_report(plan, context)
+            ) from error
+        if failure:
             return PlanExecutionReport(
                 context,
                 plan.requested_capabilities,
@@ -1139,7 +1150,13 @@ def _execute_provider_plan(
             ("rerun with explicit provider-mutation authorization",),
         )
 
-    if failure := _omitted_request_failure(plan, context, detector):
+    try:
+        failure = _omitted_request_failure(plan, context, detector)
+    except KeyboardInterrupt as error:
+        raise ProviderPlanInterrupted(
+            _preflight_interrupted_report(plan, context)
+        ) from error
+    if failure:
         return PlanExecutionReport(
             context,
             plan.requested_capabilities,
@@ -1589,6 +1606,28 @@ def _execute_provider_plan(
         plan.requested_capabilities,
         PlanOutcome.SUCCEEDED,
         tuple(reports),
+    )
+
+
+def _preflight_interrupted_report(
+    plan: ProviderPlan, context: MachineState | None
+) -> PlanExecutionReport:
+    return PlanExecutionReport(
+        context,
+        plan.requested_capabilities,
+        PlanOutcome.PREFLIGHT_FAILED,
+        tuple(
+            _action_report(
+                action,
+                ActionOutcome.NOT_ATTEMPTED,
+                detail="interrupted before any provider command started",
+            )
+            for action in plan.actions
+        ),
+        (
+            "no provider command started; this interruption did not mutate provider state",
+            "generate fresh current state before a later mutation attempt",
+        ),
     )
 
 

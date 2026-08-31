@@ -230,6 +230,23 @@ class ManagedStateTests(unittest.TestCase):
             with self.assertRaisesRegex(managed_state.ManagedStateError, "duplicate"):
                 managed_state.load_document(path)
 
+    def test_semantically_duplicate_uuid_ids_are_rejected(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            document = managed_state.load_document(path)
+            duplicate = json.loads(json.dumps(document["records"][0]))
+            duplicate["id"] = "{" + duplicate["id"].upper() + "}"
+            document["records"].append(duplicate)
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(managed_state.ManagedStateError, "duplicate id"):
+                managed_state.load_document(path)
+
     def test_container_discriminators_are_managed_schema_errors(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
@@ -676,6 +693,28 @@ class ManagedStateTests(unittest.TestCase):
             record = managed_state.load_document(path)["records"][0]
             self.assertEqual(record["verification"]["outcome"], "interrupted")
 
+    def test_executor_preflight_interrupt_is_not_recorded_as_mutation(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            with self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised:
+                managed_state.execute_provider_plan(
+                    self.plan,
+                    state_path=path,
+                    allow_provider_mutation=True,
+                    current_context=lambda: (_ for _ in ()).throw(KeyboardInterrupt()),
+                )
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.NOT_REQUIRED,
+            )
+            self.assertTrue(
+                all(
+                    action.outcome is provider_execution.ActionOutcome.NOT_ATTEMPTED
+                    for action in raised.exception.report.actions
+                )
+            )
+            self.assertFalse(path.exists())
+
     def test_raw_post_command_interrupt_is_conservatively_persisted(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
@@ -808,6 +847,28 @@ class ManagedStateTests(unittest.TestCase):
             self.assertEqual(requested["kind"], "native-replacement")
             self.assertEqual(requested["target_architecture"], "x86_64")
             self.assertEqual(requested["displaces_verified_paths"], ["/translated/gs"])
+
+            for field, value in (
+                ("kind", "install"),
+                ("target_architecture", None),
+                ("target_architecture", "arm64"),
+                ("displaces_verified_paths", []),
+            ):
+                with self.subTest(field=field, value=value):
+                    document = managed_state.load_document(path)
+                    document["records"][0]["requested_action"][field] = value
+                    path.write_text(json.dumps(document), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError, "native-replacement"
+                    ):
+                        managed_state.load_document(path)
+                    path.unlink()
+                    managed_state.execute_provider_plan(
+                        plan,
+                        state_path=path,
+                        executor=Mock(return_value=report),
+                        allow_provider_mutation=True,
+                    )
 
 
 if __name__ == "__main__":
