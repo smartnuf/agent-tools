@@ -131,7 +131,10 @@ the actual supervised argv, raw return code, and bounded stdout/stderr tails
 (marked when earlier output was truncated), and distinguish
 ordinary command failure, timeout expiry, ambiguous forced kill, supervisor
 failure, command-start failure, and privilege unavailability to the extent GNU
-timeout's exit contract permits. An outer Python guard that expires after the
+timeout's exit contract permits. Statuses 125, 126, and 127 are not proof of a
+supervisor-only or pre-start failure because GNU timeout can propagate the
+reviewed command's same status; they preserve possible-mutation evidence and
+block automatic or immediate retry. An outer Python guard that expires after the
 command timeout plus grace is an uncertain supervision failure, not a clean
 timeout. Agent Tools does not modify sudoers, PATH, profiles, system packages,
 or user configuration to establish this contract.
@@ -177,6 +180,14 @@ evidence. Status 137 or a direct SIGKILL return is likewise reported only as an
 ambiguous forced kill—an administrator, the OOM killer, or timeout escalation
 can produce it—so it does not set the report's `timed_out` flag or claim the
 TERM grace expired.
+
+All non-process output state is allocated before process creation. Once a
+process exists, output-reader construction and startup are inside the same
+cleanup boundary as waiting: failure terminates and reaps through the
+appropriate same-privilege or privileged-supervisor path, closes and joins any
+local reader resources in bounded time, preserves available process/output
+evidence, and reports that mutation may have started. Failure to establish
+termination retains the uncertain-supervision, no-immediate-retry contract.
 
 The executor stops on the first timeout, nonzero exit, unavailable manager, or
 missing privilege. Failures before any command starts report no attempted
