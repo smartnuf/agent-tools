@@ -44,6 +44,7 @@ from .python_selection import NativeStatus, normalize_architecture
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 300
 ELEVATED_TERM_TO_KILL_GRACE_SECONDS = 5
 ELEVATED_SUPERVISOR_GUARD_SECONDS = 10
+POSIX_SIGKILL_RETURNCODE = -9
 _ENVIRONMENT_LOCK = threading.RLock()
 _EXECUTION_LOCK = threading.RLock()
 
@@ -847,7 +848,7 @@ def _execute_provider_plan(
             if elevated_linux and result.returncode in {
                 124,
                 137,
-                -signal.SIGKILL,
+                POSIX_SIGKILL_RETURNCODE,
             }:
                 command_report = CommandReport(
                     command_report.argv,
@@ -860,7 +861,7 @@ def _execute_provider_plan(
             if elevated_linux and result.returncode in {
                 124,
                 137,
-                -signal.SIGKILL,
+                POSIX_SIGKILL_RETURNCODE,
                 125,
                 126,
                 127,
@@ -868,7 +869,7 @@ def _execute_provider_plan(
                 supervised_outcomes = {
                     124: ActionOutcome.TIMED_OUT,
                     137: ActionOutcome.FORCED_KILL,
-                    -signal.SIGKILL: ActionOutcome.FORCED_KILL,
+                    POSIX_SIGKILL_RETURNCODE: ActionOutcome.FORCED_KILL,
                     125: ActionOutcome.SUPERVISOR_FAILED,
                     126: ActionOutcome.COMMAND_START_FAILED,
                     127: ActionOutcome.COMMAND_START_FAILED,
@@ -877,7 +878,7 @@ def _execute_provider_plan(
                 details = {
                     124: "privileged command reached its timeout and terminated",
                     137: "privileged command required KILL after the TERM grace interval",
-                    -signal.SIGKILL: (
+                    POSIX_SIGKILL_RETURNCODE: (
                         "privileged command required KILL after the TERM grace "
                         "interval"
                     ),
@@ -900,7 +901,7 @@ def _execute_provider_plan(
                     mutation_may_have_started=result.returncode in {
                         124,
                         137,
-                        -signal.SIGKILL,
+                        POSIX_SIGKILL_RETURNCODE,
                     },
                 )
             if result.returncode != 0:
