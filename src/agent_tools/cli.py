@@ -151,7 +151,12 @@ def _print_capability_status(state: CapabilityState) -> None:
         spec = provider.provider
         print(f"  {spec.provider_id}: {provider.availability.value}")
         print(f"    provider: {spec.label}")
-        print(f"    environment: {spec.provided_environment}")
+        effective_environment = (
+            state.machine.execution_environment
+            if spec.provided_environment == "host" and spec.supports(state.machine)
+            else spec.provided_environment
+        )
+        print(f"    environment: {effective_environment}")
         if not spec.satisfies_capability:
             print("    note: separate environment; does not satisfy the host capability")
         for executable in provider.executables:

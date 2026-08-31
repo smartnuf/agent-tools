@@ -180,7 +180,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("poppler", text)
         self.assertIn("ghostscript", text)
         self.assertIn("bash", text)
-        self.assertIn("git-bash, system-bash, wsl-bash", text)
+        self.assertIn("git-bash, system-bash, homebrew-bash, wsl-bash", text)
 
     def test_tools_status_reports_windows_git_bash(self) -> None:
         def locate(
@@ -251,6 +251,43 @@ class CliTests(unittest.TestCase):
         with redirect_stderr(StringIO()) as error:
             self.assertEqual(cli.tools_status("unknown"), 2)
         self.assertIn("unknown capability: unknown", error.getvalue())
+
+    def test_doctor_and_tools_status_do_not_report_linux_wsl_as_unsupported(self) -> None:
+        machine = capabilities.MachineState("Linux", "x86_64", "wsl")
+        with (
+            patch.object(capabilities, "current_machine", return_value=machine),
+            patch.object(cli, "_distribution_version", return_value="1.2.3"),
+            patch.object(cli.importlib, "import_module"),
+            patch.object(capabilities, "locate_executable", side_effect=lambda probe, machine: f"/usr/bin/{probe.name}"),
+            patch.object(capabilities, "read_executable_version", return_value="1.0"),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(cli.doctor(), 0)
+            doctor_output = output.getvalue()
+            output.seek(0)
+            output.truncate(0)
+            self.assertEqual(cli.tools_status(), 0)
+            status_output = output.getvalue()
+        self.assertNotIn("Poppler      unsupported", doctor_output)
+        self.assertNotIn("Ghostscript  unsupported", doctor_output)
+        for provider_id, label in (
+            ("host-poppler", "host Poppler"),
+            ("host-ghostscript", "host Ghostscript"),
+            ("system-bash", "system Bash"),
+        ):
+            with self.subTest(provider_id=provider_id):
+                self.assertIn(
+                    f"  {provider_id}: available\n"
+                    f"    provider: {label}\n"
+                    "    environment: wsl",
+                    status_output,
+                )
+        self.assertIn(
+            "  homebrew-bash: unsupported\n"
+            "    provider: Homebrew Bash\n"
+            "    environment: host",
+            status_output,
+        )
 
     def test_distribution_version_tries_all_owning_distributions(self) -> None:
         with (
