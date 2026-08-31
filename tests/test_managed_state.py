@@ -1,4 +1,5 @@
 import json
+import subprocess
 import threading
 import unittest
 from dataclasses import replace
@@ -613,6 +614,38 @@ class ManagedStateTests(unittest.TestCase):
             record = managed_state.load_document(path)["records"][0]
             self.assertEqual(record["verification"]["outcome"], "command-failed")
             self.assertFalse(record["ownership"])
+
+    def test_post_command_verification_exception_is_persisted(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            absent = capabilities.detect_capability(
+                capabilities.GHOSTSCRIPT,
+                self.machine,
+                locator=lambda probe, machine: None,
+            )
+            detector = Mock(side_effect=(absent, RuntimeError("verification broke")))
+            result = managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                allow_provider_mutation=True,
+                current_context=lambda: self.machine,
+                detector=detector,
+                manager_verifier=lambda state, machine: True,
+                privilege_resolver=lambda action: "/usr/bin/sudo",
+                supervisor_resolver=lambda action: "/usr/bin/timeout",
+                privilege_preflight=lambda argv: True,
+                runner=lambda argv, timeout: subprocess.CompletedProcess(
+                    argv, 0, "installed", ""
+                ),
+            )
+            self.assertEqual(
+                result.execution.actions[0].outcome,
+                provider_execution.ActionOutcome.VERIFICATION_FAILED,
+            )
+            self.assertEqual(result.persistence, managed_state.PersistenceOutcome.SUCCEEDED)
+            record = managed_state.load_document(path)["records"][0]
+            self.assertEqual(record["verification"]["outcome"], "verification-failed")
+            self.assertEqual(record["command_evidence"][0]["stdout"], "installed")
 
     def test_interrupted_attempt_is_persisted_before_interrupt_propagates(self) -> None:
         with TemporaryDirectory() as directory:

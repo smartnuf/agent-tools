@@ -95,6 +95,60 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         self.assertEqual(report.actions[0].commands[0].stdout, "partial output")
 
+    def test_post_command_verification_exception_returns_partial_evidence(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        detector = Mock(side_effect=(absent, RuntimeError("verification broke")))
+        report = self.execute(
+            self.plan(),
+            detector=detector,
+            runner=lambda argv, timeout: subprocess.CompletedProcess(
+                argv, 0, "installed", ""
+            ),
+        )
+        self.assertEqual(report.outcome, provider_execution.PlanOutcome.PARTIAL_FAILURE)
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.VERIFICATION_FAILED,
+        )
+        self.assertEqual(report.actions[0].commands[0].returncode, 0)
+        self.assertEqual(report.actions[0].commands[0].stdout, "installed")
+        self.assertIn("RuntimeError: verification broke", report.actions[0].detail)
+
+    def test_later_precheck_interrupt_preserves_completed_action_only(self):
+        ghostscript_absent = self.state(capabilities.GHOSTSCRIPT)
+        ghostscript_available = self.state(
+            capabilities.GHOSTSCRIPT, available=True
+        )
+        poppler_absent = self.state(capabilities.POPPLER)
+        plan = provider_plans.generate_provider_plan(
+            (ghostscript_absent, poppler_absent),
+            ("ghostscript", "poppler"),
+            package_managers=(self.manager,),
+        )
+        detector = Mock(
+            side_effect=(
+                ghostscript_absent,
+                ghostscript_available,
+                KeyboardInterrupt(),
+            )
+        )
+        with self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised:
+            self.execute(
+                plan,
+                detector=detector,
+                runner=lambda argv, timeout: subprocess.CompletedProcess(
+                    argv, 0, "installed", ""
+                ),
+            )
+        report = raised.exception.report
+        self.assertEqual(report.actions[0].outcome, provider_execution.ActionOutcome.SUCCEEDED)
+        self.assertEqual(report.actions[0].commands[0].stdout, "installed")
+        self.assertEqual(
+            report.actions[1].outcome,
+            provider_execution.ActionOutcome.NOT_ATTEMPTED,
+        )
+        self.assertEqual(report.actions[1].commands, ())
+
     def test_zero_action_plan_revalidates_unknown_and_stale_requests(self):
         available = self.state(capabilities.GHOSTSCRIPT, available=True)
         plan = provider_plans.generate_provider_plan(

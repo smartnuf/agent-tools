@@ -1161,14 +1161,32 @@ def _execute_provider_plan(
     reports: list[ActionReport] = []
     for action in plan.actions:
         capability = get_capability(action.capability_id)
-        with _refreshed_environment(action, environment_refresher):
-            before = detector(capability, context)
         try:
+            with _refreshed_environment(action, environment_refresher):
+                before = detector(capability, context)
             if before.capability != capability:
                 raise PlanningError(
                     "detector returned evidence for a different capability"
                 )
             validate_capability_state(before, expected_context=context)
+        except KeyboardInterrupt as error:
+            reports.append(
+                _action_report(
+                    action,
+                    ActionOutcome.NOT_ATTEMPTED,
+                    detail="interrupted during pre-action detection; no command started for this action",
+                )
+            )
+            raise ProviderPlanInterrupted(
+                _failed_report(
+                    plan,
+                    context,
+                    reports,
+                    mutation_may_have_started=any(
+                        report.commands for report in reports
+                    ),
+                )
+            ) from error
         except PlanningError as error:
             if not reports:
                 raise ExecutionContractError(
@@ -1182,7 +1200,29 @@ def _execute_provider_plan(
                 )
             )
             return _failed_report(
-                plan, context, reports, mutation_may_have_started=False
+                plan,
+                context,
+                reports,
+                mutation_may_have_started=any(report.commands for report in reports),
+            )
+        except Exception as error:
+            if not any(report.commands for report in reports):
+                raise ExecutionContractError(
+                    "pre-action detection failed before any provider command: "
+                    f"{type(error).__name__}: {error}"
+                ) from error
+            reports.append(
+                _action_report(
+                    action,
+                    ActionOutcome.PREFLIGHT_FAILED,
+                    detail=(
+                        "pre-action detection failed after an earlier action may have "
+                        f"mutated state: {type(error).__name__}: {error}"
+                    ),
+                )
+            )
+            return _failed_report(
+                plan, context, reports, mutation_may_have_started=True
             )
         existing_provider = _acceptable_current_provider(
             before, action.target_architecture
@@ -1471,18 +1511,50 @@ def _execute_provider_plan(
                     plan, context, reports, mutation_may_have_started=True
                 )
 
-        with _refreshed_environment(action, environment_refresher):
-            after = detector(capability, context)
         observed_paths: tuple[str, ...] = ()
         try:
+            with _refreshed_environment(action, environment_refresher):
+                after = detector(capability, context)
             if after.capability != capability:
                 raise PlanningError(
                     "detector returned evidence for a different capability"
                 )
             validate_capability_state(after, expected_context=context)
+        except KeyboardInterrupt as error:
+            reports.append(
+                _action_report(
+                    action,
+                    ActionOutcome.INTERRUPTED,
+                    tuple(commands),
+                    detail=(
+                        "interrupted during post-action verification after the "
+                        "package-manager command completed"
+                    ),
+                )
+            )
+            raise ProviderPlanInterrupted(
+                _failed_report(
+                    plan, context, reports, mutation_may_have_started=True
+                )
+            ) from error
         except PlanningError as error:
             final_paths = ()
             verification_detail = f"post-action detection is not authoritative: {error}"
+        except Exception as error:
+            reports.append(
+                _action_report(
+                    action,
+                    ActionOutcome.VERIFICATION_FAILED,
+                    tuple(commands),
+                    detail=(
+                        "post-action verification failed after the package-manager "
+                        f"command completed: {type(error).__name__}: {error}"
+                    ),
+                )
+            )
+            return _failed_report(
+                plan, context, reports, mutation_may_have_started=True
+            )
         else:
             observed_paths = _observed_verified_provider_paths(action, after)
             final_paths = _verified_provider_paths(action, after)
