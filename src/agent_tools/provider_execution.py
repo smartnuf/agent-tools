@@ -63,6 +63,7 @@ class ActionOutcome(str, Enum):
     SUCCEEDED = "succeeded"
     MANAGER_UNAVAILABLE = "manager-unavailable"
     PRIVILEGE_UNAVAILABLE = "privilege-unavailable"
+    PREFLIGHT_FAILED = "preflight-failed"
     COMMAND_FAILED = "command-failed"
     TIMED_OUT = "timed-out"
     VERIFICATION_FAILED = "verification-failed"
@@ -287,6 +288,17 @@ def _temporary_environment(updates: Mapping[str, str]):
                     os.environ.pop(name, None)
                 else:
                     os.environ[name] = value
+
+
+@contextmanager
+def _refreshed_environment(
+    action: ProviderAction, refresher: EnvironmentRefresher
+):
+    """Compute and apply a temporary refresh under one process-wide lock."""
+
+    with _ENVIRONMENT_LOCK:
+        with _temporary_environment(refresher(action)):
+            yield
 
 
 def _validate_action(action: ProviderAction, context: MachineState) -> None:
@@ -515,14 +527,25 @@ def execute_provider_plan(
     reports: list[ActionReport] = []
     for action in plan.actions:
         capability = get_capability(action.capability_id)
-        with _temporary_environment(environment_refresher(action)):
+        with _refreshed_environment(action, environment_refresher):
             before = detector(capability, context)
         try:
             validate_capability_state(before, expected_context=context)
         except PlanningError as error:
-            raise ExecutionContractError(
-                f"pre-action detection is not authoritative: {error}"
-            ) from error
+            if not reports:
+                raise ExecutionContractError(
+                    f"pre-action detection is not authoritative: {error}"
+                ) from error
+            reports.append(
+                _action_report(
+                    action,
+                    ActionOutcome.PREFLIGHT_FAILED,
+                    detail=f"pre-action detection is not authoritative: {error}",
+                )
+            )
+            return _failed_report(
+                plan, context, reports, mutation_may_have_started=False
+            )
         existing_paths = _verified_provider_paths(action, before)
         if existing_paths:
             reports.append(
@@ -615,7 +638,7 @@ def execute_provider_plan(
                     plan, context, reports, mutation_may_have_started=True
                 )
 
-        with _temporary_environment(environment_refresher(action)):
+        with _refreshed_environment(action, environment_refresher):
             after = detector(capability, context)
         observed_paths: tuple[str, ...] = ()
         try:

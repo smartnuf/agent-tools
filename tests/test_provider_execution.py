@@ -128,6 +128,38 @@ class ProviderExecutionTests(unittest.TestCase):
             )
         runner.assert_not_called()
 
+    def test_later_contradictory_preflight_preserves_prior_mutation_report(self):
+        states = (
+            self.state(capabilities.GHOSTSCRIPT),
+            self.state(capabilities.POPPLER),
+        )
+        plan = provider_plans.generate_provider_plan(
+            states,
+            ("ghostscript", "poppler"),
+            package_managers=(self.manager,),
+        )
+        first_available = self.state(capabilities.GHOSTSCRIPT, available=True)
+        contradictory = replace(
+            states[1], availability=capabilities.Availability.AVAILABLE
+        )
+        report = self.execute(
+            plan,
+            detector=self.detector_sequence(
+                states[0], first_available, contradictory
+            ),
+            runner=lambda argv, timeout: subprocess.CompletedProcess(
+                argv, 0, "installed", ""
+            ),
+        )
+        self.assertEqual(
+            tuple(action.outcome for action in report.actions),
+            (
+                provider_execution.ActionOutcome.SUCCEEDED,
+                provider_execution.ActionOutcome.PREFLIGHT_FAILED,
+            ),
+        )
+        self.assertIn("partial host state", report.recovery_guidance[0])
+
     def test_success_executes_with_privilege_then_rediscovers_provider(self):
         plan = self.plan()
         absent = self.state(capabilities.GHOSTSCRIPT)
@@ -420,6 +452,49 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertFalse(second_thread.is_alive())
         self.assertTrue(second_entered.is_set())
         self.assertEqual(observed, [("first", "/first"), ("second", "/second")])
+        self.assertEqual(os.environ.get("PATH"), original)
+
+    def test_refresh_mapping_is_computed_inside_serialized_region(self):
+        original = os.environ.get("PATH")
+        first_entered = threading.Event()
+        release_first = threading.Event()
+        second_refreshed = threading.Event()
+        observed = []
+
+        def first_refresher(action):
+            return {"PATH": "/first"}
+
+        def second_refresher(action):
+            observed.append(("refresh", os.environ.get("PATH")))
+            second_refreshed.set()
+            return {"PATH": "/second"}
+
+        def first():
+            with provider_execution._refreshed_environment(
+                self.plan().actions[0], first_refresher
+            ):
+                first_entered.set()
+                release_first.wait(2)
+
+        def second():
+            first_entered.wait(2)
+            with provider_execution._refreshed_environment(
+                self.plan().actions[0], second_refresher
+            ):
+                observed.append(("applied", os.environ.get("PATH")))
+
+        first_thread = threading.Thread(target=first)
+        second_thread = threading.Thread(target=second)
+        first_thread.start()
+        second_thread.start()
+        self.assertTrue(first_entered.wait(2))
+        self.assertFalse(second_refreshed.wait(0.1))
+        release_first.set()
+        first_thread.join(2)
+        second_thread.join(2)
+        self.assertFalse(first_thread.is_alive())
+        self.assertFalse(second_thread.is_alive())
+        self.assertEqual(observed, [("refresh", original), ("applied", "/second")])
         self.assertEqual(os.environ.get("PATH"), original)
 
     def test_native_replacement_requires_target_architecture_after_mutation(self):
