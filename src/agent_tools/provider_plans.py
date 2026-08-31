@@ -150,7 +150,14 @@ def generate_provider_plan(
             raise PlanningError(f"duplicate detected capability state: {capability_id}")
         by_id[capability_id] = state
     requested_states = tuple(by_id[item] for item in requested if item in by_id)
-    contexts = {state.machine for state in requested_states}
+    contexts = {
+        MachineState(
+            state.machine.platform,
+            normalize_architecture(state.machine.architecture),
+            state.machine.execution_environment,
+        )
+        for state in requested_states
+    }
     if len(contexts) > 1:
         raise PlanningError("requested capability states span multiple execution contexts")
     context = next(iter(contexts), None)

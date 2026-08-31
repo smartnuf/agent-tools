@@ -259,6 +259,26 @@ class ProviderPlanTests(unittest.TestCase):
                     (baseline, other), ("poppler", "ghostscript"), available_managers=("apt", "brew")
                 )
 
+    def test_equivalent_architecture_aliases_share_canonical_context(self):
+        poppler = capabilities.detect_capability(
+            capabilities.POPPLER,
+            capabilities.MachineState("Windows", "AMD64", "host"),
+            locator=lambda probe, machine: None,
+        )
+        ghostscript = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            capabilities.MachineState("Windows", "x86_64", "host"),
+            locator=lambda probe, machine: None,
+        )
+        plan = provider_plans.generate_provider_plan(
+            (poppler, ghostscript),
+            ("poppler", "ghostscript"),
+            available_managers=("winget",),
+        )
+        self.assertEqual(
+            plan.context, capabilities.MachineState("Windows", "x86_64", "host")
+        )
+
     def test_irrelevant_observations_do_not_change_plan_context(self):
         requested = self.state(capabilities.POPPLER)
         irrelevant = self.state(capabilities.GHOSTSCRIPT, "Darwin")
