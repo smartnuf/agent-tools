@@ -348,6 +348,39 @@ class ProviderExecutionTests(unittest.TestCase):
             any("quiesced" in item for item in report.recovery_guidance)
         )
 
+    def test_reader_initialization_failure_reports_possible_mutation(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+
+        def fail_after_start(argv, timeout):
+            raise provider_execution.CommandInitializationError(
+                subprocess.CompletedProcess(argv, -9, "partial-out", "partial-err"),
+                "output reader initialization failed after the command may have started; "
+                "the process was terminated and reaped",
+            )
+
+        report = self.execute(
+            self.plan(),
+            detector=self.detector_sequence(absent),
+            runner=fail_after_start,
+        )
+        action = report.actions[0]
+        self.assertEqual(
+            action.outcome,
+            provider_execution.ActionOutcome.COMMAND_START_FAILED,
+        )
+        self.assertEqual(action.commands[0].returncode, -9)
+        self.assertEqual(action.commands[0].stdout, "partial-out")
+        self.assertEqual(action.commands[0].stderr, "partial-err")
+        self.assertTrue(
+            any("partial host state" in item for item in report.recovery_guidance)
+        )
+        self.assertTrue(
+            any(
+                "do not retry automatically or immediately" in item
+                for item in report.recovery_guidance
+            )
+        )
+
     def test_elevated_supervisor_argv_is_noninteractive_and_reports_statuses(self):
         absent = self.state(capabilities.GHOSTSCRIPT)
         for returncode, expected in (
@@ -403,6 +436,20 @@ class ProviderExecutionTests(unittest.TestCase):
                             else "not independently established"
                         ),
                         action.detail,
+                    )
+                if returncode in {125, 126, 127}:
+                    self.assertIn("cannot distinguish", action.detail)
+                    self.assertFalse(
+                        any(
+                            "no provider command started" in item
+                            for item in report.recovery_guidance
+                        )
+                    )
+                    self.assertTrue(
+                        any(
+                            "do not retry automatically or immediately" in item
+                            for item in report.recovery_guidance
+                        )
                     )
 
     def test_native_replacement_rejects_unknown_target(self):

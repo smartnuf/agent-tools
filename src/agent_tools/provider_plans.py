@@ -540,7 +540,17 @@ def generate_provider_plan(
             raise PlanningError(f"capability has no detected state: {capability_id}") from error
         validate_capability_state(state, expected_context=context)
         displaced: tuple[str, ...] = ()
-        if state.availability is Availability.AVAILABLE and capability_id not in native_overrides:
+        acceptable_current_provider = any(
+            acceptable_provider_executables(
+                provider_state,
+                lambda item: (
+                    item.path is not None
+                    and _manager_path_is_absolute(item.path, context)
+                ),
+            )
+            for provider_state in state.providers
+        )
+        if acceptable_current_provider and capability_id not in native_overrides:
             continue
         if capability_id in native_overrides:
             host_architecture = normalize_architecture(state.machine.architecture)

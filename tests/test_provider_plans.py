@@ -38,6 +38,23 @@ class ProviderPlanTests(unittest.TestCase):
         self.assertFalse(plan.changes_host)
         self.assertEqual(plan.context, states[0].machine)
 
+    def test_relative_provider_identity_does_not_omit_install_action(self):
+        machine = capabilities.MachineState("Linux", "x86_64")
+        relative = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            machine,
+            locator=lambda probe, context: "./gs" if probe.name == "gs" else None,
+            version_reader=lambda probe, path: "1.0",
+        )
+        plan = provider_plans.generate_provider_plan(
+            (relative,),
+            ("ghostscript",),
+            package_managers=(self.manager("apt"),),
+        )
+        self.assertEqual(len(plan.actions), 1)
+        self.assertEqual(plan.actions[0].provider_id, "host-ghostscript")
+        self.assertEqual(plan.actions[0].installation_unit, "ghostscript")
+
     def test_linux_plan_is_deterministic_and_inspectable(self):
         states = (self.state(capabilities.POPPLER), self.state(capabilities.GHOSTSCRIPT))
         plan = provider_plans.generate_provider_plan(

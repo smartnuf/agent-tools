@@ -79,6 +79,19 @@ class UncertainSupervisionError(ExecutionContractError):
         self.detail = detail
 
 
+class CommandInitializationError(ExecutionContractError):
+    """Raised after a command starts but local output setup fails cleanly."""
+
+    def __init__(
+        self,
+        result: subprocess.CompletedProcess[str],
+        detail: str,
+    ) -> None:
+        super().__init__(detail)
+        self.result = result
+        self.detail = detail
+
+
 class PlanOutcome(str, Enum):
     NO_CHANGES = "no-changes"
     REFUSED = "refused"
@@ -181,32 +194,33 @@ def _run(
         process_options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
     else:
         process_options = {"start_new_session": True}
+    stdout_tail = _BoundedOutputTail(MAX_CAPTURED_OUTPUT_CHARS)
+    stderr_tail = _BoundedOutputTail(MAX_CAPTURED_OUTPUT_CHARS)
+    stop_readers = threading.Event()
+    reader_errors: list[OSError] = []
     process = subprocess.Popen(
         argv,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         **process_options,
     )
-    stdout_tail = _BoundedOutputTail(MAX_CAPTURED_OUTPUT_CHARS)
-    stderr_tail = _BoundedOutputTail(MAX_CAPTURED_OUTPUT_CHARS)
-    stop_readers = threading.Event()
-    reader_errors: list[OSError] = []
-    readers = (
-        threading.Thread(
-            target=_drain_output,
-            args=(process.stdout, stdout_tail, stop_readers, reader_errors),
-            daemon=True,
-            name="provider-output-stdout",
-        ),
-        threading.Thread(
-            target=_drain_output,
-            args=(process.stderr, stderr_tail, stop_readers, reader_errors),
-            daemon=True,
-            name="provider-output-stderr",
-        ),
-    )
-    for reader in readers:
-        reader.start()
+    readers: tuple[threading.Thread, ...]
+    try:
+        readers = _start_output_readers(
+            process, stdout_tail, stderr_tail, stop_readers, reader_errors
+        )
+    except BaseException as error:
+        _cleanup_reader_initialization_failure(
+            process,
+            argv,
+            privileged_supervision,
+            stdout_tail,
+            stderr_tail,
+            stop_readers,
+            reader_errors,
+            error,
+        )
+        raise AssertionError("reader initialization cleanup must raise")
     try:
         process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -274,6 +288,102 @@ def _run(
         stdout_tail.value(),
         stderr_tail.value(),
     )
+
+
+def _start_output_readers(
+    process: subprocess.Popen[str],
+    stdout_tail: _BoundedOutputTail,
+    stderr_tail: _BoundedOutputTail,
+    stop: threading.Event,
+    errors: list[OSError],
+) -> tuple[threading.Thread, ...]:
+    readers: list[threading.Thread] = []
+    for stream, tail, name in (
+        (process.stdout, stdout_tail, "provider-output-stdout"),
+        (process.stderr, stderr_tail, "provider-output-stderr"),
+    ):
+        reader = None
+        try:
+            reader = threading.Thread(
+                target=_drain_output,
+                args=(stream, tail, stop, errors),
+                daemon=True,
+                name=name,
+            )
+            reader.start()
+        except BaseException as error:
+            started_readers = tuple(readers)
+            if reader is not None and reader.ident is not None:
+                started_readers += (reader,)
+            raise _OutputReaderInitializationError(
+                started_readers, error
+            ) from error
+        readers.append(reader)
+    return tuple(readers)
+
+
+class _OutputReaderInitializationError(RuntimeError):
+    def __init__(
+        self,
+        started_readers: tuple[threading.Thread, ...],
+        error: BaseException,
+    ) -> None:
+        super().__init__(str(error))
+        self.started_readers = started_readers
+
+
+def _cleanup_reader_initialization_failure(
+    process: subprocess.Popen[str],
+    argv: tuple[str, ...],
+    privileged_supervision: bool,
+    stdout_tail: _BoundedOutputTail,
+    stderr_tail: _BoundedOutputTail,
+    stop: threading.Event,
+    errors: list[OSError],
+    error: BaseException,
+) -> None:
+    started_readers = (
+        error.started_readers
+        if isinstance(error, _OutputReaderInitializationError)
+        else ()
+    )
+    termination_failed = False
+    try:
+        if privileged_supervision:
+            _terminate_privileged_supervisor(process)
+        else:
+            _terminate_process_tree(process)
+    except ExecutionContractError:
+        termination_failed = True
+    stop.set()
+    readers_clean = _join_output_readers(started_readers, stop, errors)
+    for stream in (process.stdout, process.stderr):
+        with suppress(OSError, ValueError):
+            if stream is not None:
+                stream.close()
+    detail = (
+        "output reader initialization failed after the command may have started"
+    )
+    if termination_failed or not readers_clean:
+        raise _uncertain_output_error(
+            argv,
+            process.returncode,
+            stdout_tail,
+            stderr_tail,
+            detail=(
+                f"{detail}; termination or local reader cleanup could not establish "
+                "quiescence, and provider/package state is uncertain"
+            ),
+        ) from error
+    raise CommandInitializationError(
+        subprocess.CompletedProcess(
+            argv,
+            process.returncode,
+            stdout_tail.value(),
+            stderr_tail.value(),
+        ),
+        f"{detail}; the process was terminated and reaped, but it may have mutated state before cleanup",
+    ) from error
 
 
 def _uncertain_output_error(
@@ -377,7 +487,7 @@ def _pipe_ready(stream) -> bool:
 
 
 def _join_output_readers(
-    readers: tuple[threading.Thread, threading.Thread],
+    readers: tuple[threading.Thread, ...],
     stop: threading.Event,
     errors: list[OSError],
 ) -> bool:
@@ -1173,6 +1283,22 @@ def _execute_provider_plan(
                     mutation_may_have_started=True,
                     uncertain_external_state=True,
                 )
+            except CommandInitializationError as error:
+                commands.append(_command_report(argv, error.result))
+                reports.append(
+                    _action_report(
+                        action,
+                        ActionOutcome.COMMAND_START_FAILED,
+                        tuple(commands),
+                        detail=error.detail,
+                    )
+                )
+                return _failed_report(
+                    plan,
+                    context,
+                    reports,
+                    mutation_may_have_started=True,
+                )
             except subprocess.TimeoutExpired as error:
                 commands.append(
                     CommandReport(
@@ -1252,9 +1378,18 @@ def _execute_provider_plan(
                         "command or supervisor exited after SIGKILL; timeout "
                         "expiry is not independently established"
                     ),
-                    125: "GNU timeout supervisor failed",
-                    126: "GNU timeout could not start the reviewed command",
-                    127: "GNU timeout could not resolve the reviewed command",
+                    125: (
+                        "GNU timeout returned status 125, which cannot distinguish "
+                        "supervisor failure from the reviewed command's own status 125"
+                    ),
+                    126: (
+                        "GNU timeout returned status 126, which cannot distinguish "
+                        "command-start failure from the reviewed command's own status 126"
+                    ),
+                    127: (
+                        "GNU timeout returned status 127, which cannot distinguish "
+                        "command resolution failure from the reviewed command's own status 127"
+                    ),
                 }
                 reports.append(
                     _action_report(
@@ -1268,11 +1403,7 @@ def _execute_provider_plan(
                     plan,
                     context,
                     reports,
-                    mutation_may_have_started=(
-                        len(commands) > 1
-                        or result.returncode
-                        in {124, 137, POSIX_SIGKILL_RETURNCODE}
-                    ),
+                    mutation_may_have_started=True,
                 )
             if result.returncode != 0:
                 reports.append(
@@ -1371,9 +1502,10 @@ def _failed_report(
     elif mutation_may_have_started or earlier_action_changed_state:
         recovery_guidance = (
             "the package manager may have left partial host state",
-            "inspect the reported command output, restore provider availability if needed, "
-            "then regenerate a plan and retry; repeated package-manager operations are expected "
-            "to be idempotent",
+            "do not retry automatically or immediately; inspect the reported command output "
+            "and current package-manager/provider state first",
+            "restore provider availability if needed, then generate a fresh plan before retry; "
+            "repeated package-manager operations are expected to be idempotent",
         )
     else:
         recovery_guidance = (

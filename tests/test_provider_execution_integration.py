@@ -164,6 +164,148 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
             )
         )
 
+    @unittest.skipIf(os.name == "nt", "POSIX disposable process fixture")
+    def test_reader_start_failures_terminate_process_and_leave_no_reader(self):
+        for failed_start in (1, 2):
+            with self.subTest(failed_start=failed_start):
+                created = []
+                real_popen = subprocess.Popen
+                real_start = threading.Thread.start
+                starts = 0
+
+                def record_process(*args, **kwargs):
+                    process = real_popen(*args, **kwargs)
+                    created.append(process)
+                    return process
+
+                def start_or_fail(thread):
+                    nonlocal starts
+                    starts += 1
+                    if starts == failed_start:
+                        raise RuntimeError("injected reader start failure")
+                    return real_start(thread)
+
+                with mock.patch.object(
+                    provider_execution.subprocess, "Popen", side_effect=record_process
+                ), mock.patch.object(
+                    provider_execution.threading.Thread,
+                    "start",
+                    autospec=True,
+                    side_effect=start_or_fail,
+                ):
+                    with self.assertRaises(
+                        provider_execution.CommandInitializationError
+                    ) as raised:
+                        provider_execution._run(
+                            (sys.executable, "-c", "import time;time.sleep(30)"),
+                            10,
+                        )
+                self.assertEqual(len(created), 1)
+                self.assertIsNotNone(created[0].poll())
+                self.assertIsNotNone(raised.exception.result.returncode)
+                self.assertIn("may have started", raised.exception.detail)
+                self.assertFalse(
+                    any(
+                        thread.is_alive()
+                        and thread.name.startswith("provider-output-")
+                        for thread in threading.enumerate()
+                    )
+                )
+
+    @unittest.skipIf(os.name == "nt", "POSIX disposable process fixture")
+    def test_second_reader_construction_failure_cleans_started_reader_and_process(self):
+        real_thread = threading.Thread
+        constructions = 0
+
+        def construct_or_fail(*args, **kwargs):
+            nonlocal constructions
+            constructions += 1
+            if constructions == 2:
+                raise RuntimeError("injected reader construction failure")
+            return real_thread(*args, **kwargs)
+
+        with mock.patch.object(
+            provider_execution.threading,
+            "Thread",
+            side_effect=construct_or_fail,
+        ):
+            with self.assertRaises(provider_execution.CommandInitializationError):
+                provider_execution._run(
+                    (sys.executable, "-c", "import time;time.sleep(30)"),
+                    10,
+                )
+        self.assertFalse(
+            any(
+                thread.is_alive() and thread.name.startswith("provider-output-")
+                for thread in threading.enumerate()
+            )
+        )
+
+    @unittest.skipIf(os.name == "nt", "POSIX disposable supervisor fixture")
+    def test_reader_start_failure_uses_privileged_supervisor_cleanup(self):
+        real_start = threading.Thread.start
+        starts = 0
+
+        def fail_second(thread):
+            nonlocal starts
+            starts += 1
+            if starts == 2:
+                raise RuntimeError("injected reader start failure")
+            return real_start(thread)
+
+        with mock.patch.object(
+            provider_execution.threading.Thread,
+            "start",
+            autospec=True,
+            side_effect=fail_second,
+        ), mock.patch.object(
+            provider_execution,
+            "_terminate_privileged_supervisor",
+            side_effect=provider_execution._terminate_process_tree,
+        ) as terminate:
+            with self.assertRaises(provider_execution.CommandInitializationError):
+                provider_execution._run(
+                    (sys.executable, "-c", "import time;time.sleep(30)"),
+                    10,
+                    privileged_supervision=True,
+                )
+        terminate.assert_called_once()
+        self.assertFalse(
+            any(
+                thread.is_alive() and thread.name.startswith("provider-output-")
+                for thread in threading.enumerate()
+            )
+        )
+
+    @unittest.skipIf(os.name == "nt", "POSIX disposable supervisor fixture")
+    def test_reader_start_and_termination_failure_is_uncertain(self):
+        def terminate_then_fail(process):
+            provider_execution._terminate_process_tree(process)
+            raise provider_execution.ExecutionContractError(
+                "termination could not be established"
+            )
+
+        with mock.patch.object(
+            provider_execution.threading.Thread,
+            "start",
+            autospec=True,
+            side_effect=RuntimeError("injected reader start failure"),
+        ), mock.patch.object(
+            provider_execution,
+            "_terminate_privileged_supervisor",
+            side_effect=terminate_then_fail,
+        ):
+            with self.assertRaises(
+                provider_execution.UncertainSupervisionError
+            ) as raised:
+                provider_execution._run(
+                    (sys.executable, "-c", "import time;time.sleep(30)"),
+                    10,
+                    privileged_supervision=True,
+                )
+        self.assertIn("could not establish quiescence", raised.exception.detail)
+        self.assertIsNotNone(raised.exception.result.returncode)
+
     @unittest.skipIf(os.name == "nt", "POSIX safe cleanup fixture")
     def test_failed_privileged_supervisor_termination_becomes_uncertain(self):
         def terminate_then_fail(process):
