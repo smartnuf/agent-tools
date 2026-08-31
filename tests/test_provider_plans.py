@@ -277,6 +277,42 @@ class ProviderPlanTests(unittest.TestCase):
                 package_managers=(windows_first, windows_conflicting),
             )
 
+        dot_segment_conflicts = (
+            (
+                state,
+                provider_plans.PackageManagerState(
+                    "brew", "/opt/homebrew/bin/../bin/brew", "host", "arm64"
+                ),
+                provider_plans.PackageManagerState(
+                    "brew", "/opt/homebrew/bin/brew", "host", "x86_64"
+                ),
+            ),
+            (
+                windows,
+                provider_plans.PackageManagerState(
+                    "winget",
+                    "C:\\Windows\\Temp\\..\\System32\\winget.exe",
+                    "host",
+                    "arm64",
+                ),
+                provider_plans.PackageManagerState(
+                    "winget",
+                    "c:/windows/system32/winget.exe",
+                    "host",
+                    "x86_64",
+                ),
+            ),
+        )
+        for capability_state, first_path, second_path in dot_segment_conflicts:
+            with self.subTest(platform=capability_state.machine.platform), self.assertRaisesRegex(
+                provider_plans.PlanningError, "conflicting"
+            ):
+                provider_plans.generate_provider_plan(
+                    (capability_state,),
+                    ("poppler",),
+                    package_managers=(first_path, second_path),
+                )
+
     def test_equivalent_manager_architecture_aliases_are_deduplicated(self):
         machine = capabilities.MachineState("Darwin", "arm64")
         state = capabilities.detect_capability(

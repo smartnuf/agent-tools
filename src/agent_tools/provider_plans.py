@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ntpath
+import posixpath
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import PurePosixPath, PureWindowsPath
@@ -224,8 +226,8 @@ def _manager_path_key(path: str, context: MachineState | None) -> str:
     """Return a stable executable identity under the plan platform's rules."""
 
     if context is not None and context.platform == "Windows":
-        return str(PureWindowsPath(path)).casefold()
-    return str(PurePosixPath(path))
+        return ntpath.normpath(path).casefold()
+    return posixpath.normpath(path)
 
 
 def _manager_path_is_absolute(path: str, context: MachineState | None) -> bool:
