@@ -54,6 +54,7 @@ class PackageManagerState:
     execution_environment: str
     architecture: str | None = None
     resolved_executable_path: str | None = None
+    installation_root: str | None = None
 
     def native_status(self, context: MachineState) -> NativeStatus:
         known_architectures = {"x86_64", "x86", "arm64", "arm"}
@@ -91,6 +92,7 @@ class ProviderAction:
     shared_package: bool
     displaces_verified_paths: tuple[str, ...] = ()
     target_architecture: str | None = None
+    environment_path_entries: tuple[str, ...] = ()
 
     @property
     def manager(self) -> str:
@@ -178,6 +180,28 @@ def adapter_environment_refresh(manager: str) -> EnvironmentRefresh:
     raise PlanningError(f"unsupported package manager: {manager}")
 
 
+def adapter_environment_path_entries(
+    state: PackageManagerState,
+    context: MachineState,
+) -> tuple[str, ...] | None:
+    """Return reviewed executable-search paths, or None when evidence is insufficient."""
+
+    if state.manager != "brew":
+        return ()
+    root = state.installation_root
+    if root is None:
+        executable = PurePosixPath(
+            state.resolved_executable_path or state.executable_path
+        )
+        if executable.name != "brew" or executable.parent.name != "bin":
+            return None
+        root = str(executable.parent.parent)
+    formula_bin = posixpath.join(posixpath.normpath(root), "bin")
+    if not _manager_path_is_absolute(formula_bin, context):
+        return None
+    return (formula_bin,)
+
+
 def _option(
     provider: ProviderSpec,
     context: MachineState,
@@ -198,6 +222,8 @@ def _option(
                 manager_state.manager != package.manager
                 or manager_state.execution_environment != context.execution_environment
             ):
+                continue
+            if adapter_environment_path_entries(manager_state, context) is None:
                 continue
             native_status = manager_state.native_status(context)
             if package.manager == "brew":
@@ -295,6 +321,16 @@ def _canonicalize_manager_states(
             if explicit_resolved_paths
             else None
         )
+        installation_roots = {
+            posixpath.normpath(item.installation_root)
+            for item in observations
+            if item.installation_root is not None
+        }
+        if len(installation_roots) > 1:
+            raise PlanningError(
+                "conflicting package-manager installation-root evidence: "
+                f"{observations[0].manager}"
+            )
         canonical.append(
             PackageManagerState(
                 manager=selected.manager,
@@ -302,6 +338,7 @@ def _canonicalize_manager_states(
                 execution_environment=selected.execution_environment,
                 architecture=next(iter(known_architectures), None),
                 resolved_executable_path=resolved_path,
+                installation_root=next(iter(installation_roots), None),
             )
         )
     return tuple(canonical)
@@ -447,6 +484,15 @@ def generate_provider_plan(
         ):
             raise PlanningError(
                 "package manager resolved executable path is not absolute: "
+                f"{manager_state.manager}"
+            )
+        if manager_state.installation_root is not None and (
+            manager_state.manager != "brew"
+            or not manager_state.installation_root.strip()
+            or not _manager_path_is_absolute(manager_state.installation_root, context)
+        ):
+            raise PlanningError(
+                "package-manager installation root is invalid: "
                 f"{manager_state.manager}"
             )
     manager_states = _canonicalize_manager_states(
@@ -625,6 +671,9 @@ def generate_provider_plan(
                     host_architecture
                     if displaced
                     else None
+                ),
+                environment_path_entries=(
+                    adapter_environment_path_entries(manager_state, context) or ()
                 ),
             )
         )

@@ -90,14 +90,20 @@ package-manager executable identity, required privilege path, and whether the
 planned provider already satisfies the request. A nonempty plan refuses unless
 the dedicated non-interactive provider-mutation authorization is present.
 
-Commands run sequentially with explicit timeouts and captured outcomes. The
-executor stops on the first timeout, nonzero exit, unavailable manager, or
-missing privilege and reports that package-manager state may be partial; it
-does not attempt provider removal or an unsafe rollback. After an apparent
-success it applies only the plan's temporary process-environment refresh,
-rediscovers the exact planned provider, and verifies the complete probe and
-`ANY`/`ALL` policy plus any native target architecture. Package-manager success
-without that final evidence is a reported failure. Reusing the same plan after
+Commands run sequentially in isolated process trees with explicit timeouts and
+captured outcomes; a timeout terminates and reaps that tree before returning.
+The executor stops on the first timeout, nonzero exit, unavailable manager, or
+missing privilege. Failures before any command starts report no attempted
+mutation; after a command starts, the report warns that package-manager state
+may be partial and does not attempt provider removal or an unsafe rollback.
+After an apparent
+success it applies only the plan's temporary process-environment refresh before
+both the repeat-safety check and final rediscovery, then verifies the complete
+probe set, its `ANY`/`ALL` policy, and any native target architecture.
+Package-manager success
+without that final evidence is a reported failure. Individually verified paths
+remain visible in that failure report even when an `ALL` condition or native
+architecture target is not satisfied. Reusing the same plan after
 the provider verifies performs no further command. Managed-state persistence
 remains a separate subsequent contract.
 
@@ -136,8 +142,8 @@ privilege; apt, dnf, and pacman actions require it, while Homebrew and WinGet
 actions do not inherit that Linux elevation policy. The executor, rather than
 the catalogue command, will apply the recorded privilege policy. An action
 also records any environment refresh required before its verification probes;
-WinGet actions refresh the process `PATH`; Homebrew actions make the verified
-manager's `bin` directory available for rediscovery; the built-in Linux
+WinGet actions refresh the process `PATH`; Homebrew actions make the exact
+reviewed formula `bin` directory available for rediscovery; the built-in Linux
 managers require no equivalent refresh.
 
 Package-manager availability is verified evidence, not a bare manager name.
@@ -145,6 +151,10 @@ The immutable planning input records the built-in manager identity, verified
 executable path, local execution environment, and executable architecture when
 observable. When the executable path is an alias or symlink, discovery also
 records its verified resolved executable path as the canonical identity.
+When that identity does not unambiguously have `<root>/bin/brew` form,
+Homebrew planning also requires verified installation-root evidence and carries
+the derived formula `bin` path in the action; missing or contradictory root
+evidence fails closed.
 Complementary observations for that identity merge known architecture into
 missing architecture evidence; differing known architectures fail closed.
 Platform comes from the plan's single machine context rather than

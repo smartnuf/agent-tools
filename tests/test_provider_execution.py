@@ -1,5 +1,6 @@
 import os
 import subprocess
+import threading
 import unittest
 from dataclasses import replace
 from unittest.mock import Mock
@@ -167,6 +168,31 @@ class ProviderExecutionTests(unittest.TestCase):
             provider_execution.ActionOutcome.VERIFICATION_FAILED,
         )
         self.assertIn("partial host state", report.recovery_guidance[0])
+
+    def test_partial_all_probe_paths_survive_verification_failure(self):
+        plan = self.plan(capabilities.POPPLER)
+        absent = self.state(capabilities.POPPLER)
+        partial = capabilities.detect_capability(
+            capabilities.POPPLER,
+            self.machine,
+            locator=lambda probe, context: (
+                "/tools/pdfinfo" if probe.name == "pdfinfo" else None
+            ),
+            version_reader=lambda probe, path: "1.0",
+        )
+        report = self.execute(
+            plan,
+            detector=self.detector_sequence(absent, partial),
+            runner=lambda argv, timeout: subprocess.CompletedProcess(argv, 0, "", ""),
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.VERIFICATION_FAILED,
+        )
+        self.assertEqual(
+            report.actions[0].final_verified_paths,
+            ("/tools/pdfinfo",),
+        )
 
     def test_timeout_is_bounded_and_reported(self):
         plan = self.plan()
@@ -362,6 +388,40 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(report.outcome, provider_execution.PlanOutcome.SUCCEEDED)
         self.assertEqual(os.environ.get("PATH"), original)
 
+    def test_temporary_environment_refreshes_are_serialized(self):
+        original = os.environ.get("PATH")
+        first_entered = threading.Event()
+        release_first = threading.Event()
+        second_entered = threading.Event()
+        observed = []
+
+        def first():
+            with provider_execution._temporary_environment({"PATH": "/first"}):
+                first_entered.set()
+                release_first.wait(2)
+                observed.append(("first", os.environ.get("PATH")))
+
+        def second():
+            first_entered.wait(2)
+            with provider_execution._temporary_environment({"PATH": "/second"}):
+                second_entered.set()
+                observed.append(("second", os.environ.get("PATH")))
+
+        first_thread = threading.Thread(target=first)
+        second_thread = threading.Thread(target=second)
+        first_thread.start()
+        second_thread.start()
+        self.assertTrue(first_entered.wait(2))
+        self.assertFalse(second_entered.wait(0.1))
+        release_first.set()
+        first_thread.join(2)
+        second_thread.join(2)
+        self.assertFalse(first_thread.is_alive())
+        self.assertFalse(second_thread.is_alive())
+        self.assertTrue(second_entered.is_set())
+        self.assertEqual(observed, [("first", "/first"), ("second", "/second")])
+        self.assertEqual(os.environ.get("PATH"), original)
+
     def test_native_replacement_requires_target_architecture_after_mutation(self):
         machine = capabilities.MachineState("Windows", "arm64")
         manager = provider_plans.PackageManagerState(
@@ -402,6 +462,10 @@ class ProviderExecutionTests(unittest.TestCase):
             provider_execution.ActionOutcome.VERIFICATION_FAILED,
         )
         self.assertEqual(report.actions[0].target_architecture, "arm64")
+        self.assertEqual(
+            report.actions[0].final_verified_paths,
+            ("C:/Git/bin/bash.exe",),
+        )
         self.assertEqual(
             report.actions[0].displaces_verified_paths,
             plan.actions[0].displaces_verified_paths,

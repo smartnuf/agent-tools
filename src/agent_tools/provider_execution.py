@@ -8,6 +8,7 @@ import posixpath
 import signal
 import shutil
 import subprocess
+import threading
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ from .provider_plans import (
     ProviderPlan,
     adapter_commands,
     adapter_environment_refresh,
+    adapter_environment_path_entries,
     adapter_execution_privilege,
     PlanningError,
     validate_capability_state,
@@ -40,6 +42,7 @@ from .python_selection import normalize_architecture
 
 
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 300
+_ENVIRONMENT_LOCK = threading.RLock()
 
 
 class ExecutionContractError(RuntimeError):
@@ -215,7 +218,9 @@ def _verify_manager(state: PackageManagerState, machine: MachineState) -> bool:
     except OSError:
         return False
     expected = state.resolved_executable_path or state.executable_path
-    return _path_key(resolved, machine) == _path_key(expected, machine)
+    if _path_key(resolved, machine) != _path_key(expected, machine):
+        return False
+    return state.installation_root is None or Path(state.installation_root).is_dir()
 
 
 def _resolve_privilege(action: ProviderAction) -> str | None:
@@ -257,9 +262,13 @@ def _refresh_environment(action: ProviderAction) -> Mapping[str, str]:
     if action.environment_refresh is EnvironmentRefresh.PATH:
         return {"PATH": _windows_persisted_path()}
     if action.environment_refresh is EnvironmentRefresh.MANAGER_BIN:
-        manager_bin = str(Path(action.manager_state.executable_path).parent)
+        if not action.environment_path_entries:
+            raise ExecutionContractError(
+                "manager-bin refresh has no reviewed executable-search path"
+            )
         current = os.environ.get("PATH", "")
-        return {"PATH": manager_bin + (os.pathsep + current if current else "")}
+        prefix = os.pathsep.join(action.environment_path_entries)
+        return {"PATH": prefix + (os.pathsep + current if current else "")}
     raise ExecutionContractError(
         f"unsupported environment refresh: {action.environment_refresh}"
     )
@@ -267,16 +276,17 @@ def _refresh_environment(action: ProviderAction) -> Mapping[str, str]:
 
 @contextmanager
 def _temporary_environment(updates: Mapping[str, str]):
-    previous = {name: os.environ.get(name) for name in updates}
-    os.environ.update(updates)
-    try:
-        yield
-    finally:
-        for name, value in previous.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
+    with _ENVIRONMENT_LOCK:
+        previous = {name: os.environ.get(name) for name in updates}
+        os.environ.update(updates)
+        try:
+            yield
+        finally:
+            for name, value in previous.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
 
 
 def _validate_action(action: ProviderAction, context: MachineState) -> None:
@@ -331,6 +341,20 @@ def _validate_action(action: ProviderAction, context: MachineState) -> None:
         raise ExecutionContractError("action privilege does not match the reviewed adapter")
     if action.environment_refresh is not adapter_environment_refresh(action.manager):
         raise ExecutionContractError("action refresh does not match the reviewed adapter")
+    expected_path_entries = adapter_environment_path_entries(
+        action.manager_state, context
+    )
+    if (
+        expected_path_entries is None
+        or action.environment_path_entries != expected_path_entries
+        or any(
+            not _path_is_absolute(path, context)
+            for path in action.environment_path_entries
+        )
+    ):
+        raise ExecutionContractError(
+            "action executable-search paths do not match reviewed manager evidence"
+        )
     if (
         action.verification.probes != provider.probes
         or action.verification.policy is not provider.probe_policy
@@ -397,6 +421,23 @@ def _verified_provider_paths(
     ):
         return ()
     return tuple(item.path for item in verified if item.path is not None)
+
+
+def _observed_verified_provider_paths(
+    action: ProviderAction,
+    state: CapabilityState,
+) -> tuple[str, ...]:
+    provider = next(
+        (item for item in state.providers if item.provider.provider_id == action.provider_id),
+        None,
+    )
+    if provider is None:
+        return ()
+    return tuple(
+        item.path
+        for item in provider.executables
+        if item.verified and item.path is not None
+    )
 
 
 def _command_report(
@@ -576,12 +617,14 @@ def execute_provider_plan(
 
         with _temporary_environment(environment_refresher(action)):
             after = detector(capability, context)
+        observed_paths: tuple[str, ...] = ()
         try:
             validate_capability_state(after, expected_context=context)
         except PlanningError as error:
             final_paths = ()
             verification_detail = f"post-action detection is not authoritative: {error}"
         else:
+            observed_paths = _observed_verified_provider_paths(action, after)
             final_paths = _verified_provider_paths(action, after)
             verification_detail = (
                 "package-manager success did not produce the planned verified provider"
@@ -592,6 +635,7 @@ def execute_provider_plan(
                     action,
                     ActionOutcome.VERIFICATION_FAILED,
                     tuple(commands),
+                    observed_paths,
                     detail=verification_detail,
                 )
             )
