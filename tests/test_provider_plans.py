@@ -273,6 +273,31 @@ class ProviderPlanTests(unittest.TestCase):
         )[0]
         self.assertEqual(command[-2:], ("--architecture", "x64"))
 
+    def test_non_winget_native_replacement_does_not_use_winget_architectures(self):
+        machine = capabilities.MachineState("Linux", "ppc64le")
+        state = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, machine: (
+                "/usr/bin/bash" if probe.locator_strategy == "system-bash" else None
+            ),
+            version_reader=lambda probe, path: "GNU bash 5.2",
+            architecture_reader=lambda probe, path: "x86_64",
+        )
+        plan = provider_plans.generate_provider_plan(
+            (state,),
+            ("bash",),
+            available_managers=("apt",),
+            native_provisioning=("bash",),
+        )
+        action = plan.actions[0]
+        self.assertEqual(action.target_architecture, "ppc64le")
+        self.assertEqual(action.manager, "apt")
+        self.assertEqual(
+            action.commands,
+            (("apt-get", "update"), ("apt-get", "install", "-y", "bash")),
+        )
+
     def test_caller_owned_catalogue_metadata_is_rejected(self):
         custom = capabilities.CapabilitySpec(
             "custom",

@@ -71,7 +71,7 @@ def adapter_commands(
         "winget", "install", "--id", unit, "-e",
         "--accept-package-agreements", "--accept-source-agreements",
     )
-    if target_architecture is not None:
+    if target_architecture is not None and manager == "winget":
         winget_architectures = {"x86_64": "x64", "x86": "x86", "arm64": "arm64", "arm": "arm"}
         try:
             winget_architecture = winget_architectures[target_architecture]
