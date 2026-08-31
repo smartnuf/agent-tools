@@ -493,9 +493,9 @@ stable shell-selection interface.
   agent workstation capabilities and diagnostics when the first capability
   commands ship; document libraries remain supported capabilities, not the
   entire product identity.
-- Persistent user configuration and managed-state schemas are deferred until a
-  mutating command needs them. This avoids inventing migration and ownership
-  rules for state that has no current consumer.
+- Persistent user configuration remains deferred until it has a consumer.
+  Managed mutation provenance now has the provider executor as its consumer and
+  is governed by [ADR 0003](0003-managed-state-provenance.md).
 
 ## Rejected or deferred alternatives
 
