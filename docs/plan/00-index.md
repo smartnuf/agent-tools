@@ -15,11 +15,11 @@
 | M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
 | M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
-| M3 | Tested update and capability lifecycle | in-progress | 3/9 | 6–10 days | 3–7.25 days |
+| M3 | Tested update and capability lifecycle | in-progress | 3/9 | 6.5–11 days | 3.5–8.25 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **3–7.25 person-days remaining**.
+Estimated implementation effort through M3: **3.5–8.25 person-days remaining**.
 The selector and pre-seeded-workstation evidence slices complete the first
 joint M3 gate; read-only provider planning supplies the prerequisite for the
 still-open mutation lifecycle gate. Native discovery channels and the
@@ -55,6 +55,9 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
   catalogue-owned WinGet, apt, dnf, pacman, and Homebrew command adapters from
   immutable verified package-manager evidence; already-satisfied requests
   produce zero actions.
+- [Issue #77](https://github.com/smartnuf/agent-tools/issues/77) adds delegated
+  architecture adjudication and an architectural closure sweep after #50; it
+  is the governance prerequisite for autonomous mutation work in #51.
 
 M1 is complete and its factual record is frozen except for corrections. M1.5
 completed on 2026-08-29; M2 completed on 2026-08-30 with the first stable PyPI
@@ -64,12 +67,12 @@ excluded.
 
 ## Recommended next work
 
-Implement the explicitly authorized provider executor and complete change
-reporting in [issue #51](https://github.com/smartnuf/agent-tools/issues/51) (L,
-**1–2 days**). It must consume only the reviewed plan, require a dedicated
-mutation flag, and rediscover plus verify before reporting success.
+Add delegated architecture adjudication and the architectural closure-sweep
+protocol in [issue #77](https://github.com/smartnuf/agent-tools/issues/77) (M,
+**0.5–1 day**). This governance prerequisite follows #50 and must complete
+before autonomous work begins on the mutating provider executor in #51.
 [Issue #26](https://github.com/smartnuf/agent-tools/issues/26) records the
-complete ordered M3 dependency chain.
+complete ordered M3 dependency chain as `#50 → #77 → #51`.
 
 ## Known risks and assumptions
 
