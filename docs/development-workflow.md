@@ -315,15 +315,18 @@ validate, push once, and return to exact-head waiting.
 
 ### 8. Check convergence
 
-Declare a review-loop bound before extended autonomous work. Halt when that
-bound is reached. Count independent architectural decision families, not raw
-comments, files, or waves: a later finding that is another manifestation of an
-adjudicated invariant remains in that family and may be corrected within the
-declared bound. Halt when review exposes a new independent decision family
-beyond that bound, adjudication identifies a human-reserved choice, or the
-closure sweep shows that safe correction materially exceeds the acceptance
-criterion. A human may deliberately authorize another family or wave. Waiting
-for an active current-head review is not non-convergence.
+Declare separate numeric bounds for correction waves and independent
+architectural decision families before extended autonomous work. A bound that
+does not name its unit is a correction-wave bound; architecture adjudication
+does not reset, replace, or stop that counter. Halt when either bound is
+reached. Count architectural decision families independently from raw
+comments, files, and waves: a later finding that is another manifestation of an
+adjudicated invariant remains in that family, but every pushed correction wave
+still consumes the wave bound. Also halt when adjudication identifies a
+human-reserved choice or the closure sweep shows that safe correction
+materially exceeds the acceptance criterion. A human may deliberately
+authorize another family or wave. Waiting for an active current-head review is
+not non-convergence.
 
 ### 9. Review adaptations
 
