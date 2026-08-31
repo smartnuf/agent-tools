@@ -223,6 +223,30 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertIn("no provider command started", report.recovery_guidance[0])
         self.assertNotIn("partial host state", report.recovery_guidance[0])
 
+    def test_later_command_start_failure_reports_prior_possible_mutation(self):
+        plan = self.plan(capabilities.POPPLER)
+        absent = self.state(capabilities.POPPLER)
+        calls = 0
+
+        def fail_second_command(argv, timeout):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return subprocess.CompletedProcess(argv, 0, "updated", "")
+            raise FileNotFoundError("manager disappeared")
+
+        report = self.execute(
+            plan,
+            detector=self.detector_sequence(absent),
+            runner=fail_second_command,
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.COMMAND_FAILED,
+        )
+        self.assertEqual(len(report.actions[0].commands), 2)
+        self.assertIn("partial host state", report.recovery_guidance[0])
+
     def test_failure_reports_later_requested_action_as_not_attempted(self):
         states = (
             self.state(capabilities.GHOSTSCRIPT),

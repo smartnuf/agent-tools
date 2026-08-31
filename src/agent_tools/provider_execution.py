@@ -470,6 +470,7 @@ def execute_provider_plan(
                     plan, context, reports, mutation_may_have_started=True
                 )
             except OSError as error:
+                earlier_command_completed = bool(commands)
                 commands.append(CommandReport(argv, None, "", str(error)))
                 reports.append(
                     ActionReport(
@@ -483,7 +484,10 @@ def execute_provider_plan(
                     )
                 )
                 return _failed_report(
-                    plan, context, reports, mutation_may_have_started=False
+                    plan,
+                    context,
+                    reports,
+                    mutation_may_have_started=earlier_command_completed,
                 )
             commands.append(_command_report(argv, result))
             if result.returncode != 0:
