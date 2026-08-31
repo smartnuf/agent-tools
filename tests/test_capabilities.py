@@ -192,6 +192,112 @@ class CapabilityTests(unittest.TestCase):
         )
         self.assertEqual(provider.unavailable_probes, ("gs", "gswin64c", "gswin32c"))
 
+    def test_executable_evidence_deduplicates_and_merges_complementary_facts(self) -> None:
+        probe = capabilities.ExecutableProbe("bash", ("--version",))
+        provider = capabilities.ProviderSpec(
+            provider_id="fixture",
+            label="fixture",
+            platforms=frozenset({"Linux"}),
+            execution_environments=frozenset({"host"}),
+            probes=(probe, probe),
+            probe_policy=capabilities.ProbePolicy.ANY,
+        )
+        provider_state = capabilities.ProviderState(
+            provider,
+            capabilities.Availability.AVAILABLE,
+            (
+                capabilities.ExecutableState(probe, "/usr/bin/bash", None, "ARM64"),
+                capabilities.ExecutableState(
+                    probe, "/usr/bin/./bash", "GNU bash 5.2", "aarch64"
+                ),
+                capabilities.ExecutableState(
+                    probe, "/usr/bin/bash", "GNU bash 5.2", "arm64"
+                ),
+            ),
+        )
+        evidence = capabilities.consolidate_executable_evidence(
+            (provider_state,), capabilities.MachineState("Linux", "arm64")
+        )
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(evidence[0].identity, "/usr/bin/bash")
+        self.assertEqual(evidence[0].version, "GNU bash 5.2")
+        self.assertEqual(evidence[0].architecture, "arm64")
+
+    def test_executable_evidence_rejects_provider_version_and_architecture_conflicts(self) -> None:
+        probe = capabilities.ExecutableProbe("bash", ("--version",))
+
+        def provider_state(
+            provider_id: str, version: str, architecture: str
+        ) -> capabilities.ProviderState:
+            provider = capabilities.ProviderSpec(
+                provider_id=provider_id,
+                label=provider_id,
+                platforms=frozenset({"Linux"}),
+                execution_environments=frozenset({"host"}),
+                probes=(probe,),
+                probe_policy=capabilities.ProbePolicy.ANY,
+            )
+            return capabilities.ProviderState(
+                provider,
+                capabilities.Availability.AVAILABLE,
+                (
+                    capabilities.ExecutableState(
+                        probe, "/usr/bin/bash", version, architecture
+                    ),
+                ),
+            )
+
+        baseline = provider_state("fixture", "GNU bash 5.2", "arm64")
+        conflicts = (
+            ("provider", provider_state("other", "GNU bash 5.2", "arm64")),
+            ("version", provider_state("fixture", "GNU bash 5.1", "arm64")),
+            (
+                "architecture",
+                provider_state("fixture", "GNU bash 5.2", "x86_64"),
+            ),
+        )
+        for fact, conflicting in conflicts:
+            with self.subTest(fact=fact), self.assertRaisesRegex(
+                capabilities.ExecutableEvidenceError, f"conflicting {fact}"
+            ):
+                capabilities.consolidate_executable_evidence(
+                    (baseline, conflicting),
+                    capabilities.MachineState("Linux", "arm64"),
+                )
+
+    def test_executable_identity_normalizes_windows_paths_and_keeps_distinct_paths(self) -> None:
+        probe = capabilities.ExecutableProbe("bash.exe", ("--version",))
+        provider = capabilities.ProviderSpec(
+            provider_id="fixture",
+            label="fixture",
+            platforms=frozenset({"Windows"}),
+            execution_environments=frozenset({"host"}),
+            probes=(probe,),
+            probe_policy=capabilities.ProbePolicy.ANY,
+        )
+        executables = (
+            capabilities.ExecutableState(
+                probe, "C:\\Tools\\Bash.exe", "GNU bash 5.2", "AMD64"
+            ),
+            capabilities.ExecutableState(
+                probe, "c:/tools/bash.exe", "GNU bash 5.2", "x86_64"
+            ),
+            capabilities.ExecutableState(
+                probe, "C:/Other/bash.exe", "GNU bash 5.2", "x86_64"
+            ),
+        )
+        evidence = capabilities.consolidate_executable_evidence(
+            (
+                capabilities.ProviderState(
+                    provider, capabilities.Availability.AVAILABLE, executables
+                ),
+            ),
+            capabilities.MachineState("Windows", "x86_64"),
+        )
+        self.assertEqual(len(evidence), 2)
+        self.assertEqual(evidence[0].identity, "c:\\other\\bash.exe")
+        self.assertEqual(evidence[1].identity, "c:\\tools\\bash.exe")
+
     def test_unsupported_is_distinct_from_absent_without_running_probes(self) -> None:
         locator = Mock()
         version_reader = Mock()
@@ -417,27 +523,29 @@ class CapabilityTests(unittest.TestCase):
             for provider in capabilities.BASH.providers
             if provider.provider_id == "homebrew-bash"
         )
-        with (
-            patch.object(
-                capabilities.shutil,
-                "which",
-                return_value="/usr/local/bin/brew",
-            ),
-            patch.object(
-                capabilities.Path,
-                "is_file",
-                autospec=True,
-                side_effect=lambda path: path.as_posix()
-                in {"/opt/homebrew/bin/bash", "/usr/local/bin/bash"},
-            ),
-        ):
-            self.assertEqual(
-                capabilities.locate_executable(
-                    probe,
-                    capabilities.MachineState("Darwin", "arm64"),
+        for architecture in ("ARM64", "arm64", "aarch64"):
+            with (
+                self.subTest(architecture=architecture),
+                patch.object(
+                    capabilities.shutil,
+                    "which",
+                    return_value="/usr/local/bin/brew",
                 ),
-                "/opt/homebrew/bin/bash",
-            )
+                patch.object(
+                    capabilities.Path,
+                    "is_file",
+                    autospec=True,
+                    side_effect=lambda path: path.as_posix()
+                    in {"/opt/homebrew/bin/bash", "/usr/local/bin/bash"},
+                ),
+            ):
+                self.assertEqual(
+                    capabilities.locate_executable(
+                        probe,
+                        capabilities.MachineState("Darwin", architecture),
+                    ),
+                    "/opt/homebrew/bin/bash",
+                )
 
     def test_homebrew_bash_remains_distinct_and_requires_verification(self) -> None:
         machine = capabilities.MachineState("Darwin", "arm64")

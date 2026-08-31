@@ -10,12 +10,14 @@ from typing import Iterable
 from .capabilities import (
     Availability,
     CapabilityState,
+    ExecutableEvidenceError,
     ExecutableProbe,
     ProviderPackage,
     ProviderSpec,
     ProbePolicy,
     MachineState,
     capability_availability,
+    consolidate_executable_evidence,
     get_capability,
     provider_availability,
 )
@@ -366,6 +368,10 @@ def generate_provider_plan(
                 f"detected state does not match built-in catalogue: {capability_id}"
             )
         _validate_provider_observations(state)
+        try:
+            consolidate_executable_evidence(state.providers, state.machine)
+        except ExecutableEvidenceError as error:
+            raise PlanningError(str(error)) from error
         if state.availability is not capability_availability(state.providers):
             raise PlanningError(
                 f"detected capability availability contradicts provider states: {capability_id}"

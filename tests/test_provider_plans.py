@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 
 from agent_tools import capabilities
 from agent_tools import provider_plans
@@ -339,7 +340,18 @@ class ProviderPlanTests(unittest.TestCase):
         self.assertEqual(plan.actions[0].commands[0][-2:], ("--architecture", "arm64"))
 
     def test_native_override_rejects_native_or_unrequested_capability(self):
-        native = self.state(capabilities.BASH, "Windows", available=True)
+        machine = capabilities.MachineState("Windows", "x86_64")
+        native = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, machine: (
+                "C:/tools/bash.exe"
+                if probe.locator_strategy == "git-bash"
+                else None
+            ),
+            version_reader=lambda probe, path: "GNU bash 5.2",
+            architecture_reader=lambda probe, path: "x86_64",
+        )
         with self.assertRaisesRegex(provider_plans.PlanningError, "not a verified translated"):
             provider_plans.generate_provider_plan(
                 (native,), ("bash",), package_managers=(self.manager("winget"),), native_provisioning=("bash",)
@@ -429,6 +441,41 @@ class ProviderPlanTests(unittest.TestCase):
                 package_managers=(translated,),
                 native_provisioning=("bash",),
                 translated_manager_fallbacks=(translated,),
+            )
+
+    def test_plan_rejects_system_and_homebrew_bash_at_same_identity(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, machine: (
+                "/bin/bash"
+                if probe.locator_strategy == "system-bash"
+                else "/opt/homebrew/bin/bash"
+                if probe.locator_strategy == "homebrew-bash"
+                else None
+            ),
+            version_reader=lambda probe, path: "GNU bash 5.2",
+            architecture_reader=lambda probe, path: "arm64",
+        )
+        homebrew_index = next(
+            index
+            for index, provider in enumerate(state.providers)
+            if provider.provider.provider_id == "homebrew-bash"
+        )
+        homebrew = state.providers[homebrew_index]
+        contradictory = replace(
+            homebrew,
+            executables=(replace(homebrew.executables[0], path="/bin/bash"),),
+        )
+        providers = list(state.providers)
+        providers[homebrew_index] = contradictory
+        contradictory_state = replace(state, providers=tuple(providers))
+        with self.assertRaisesRegex(
+            provider_plans.PlanningError, "conflicting provider evidence"
+        ):
+            provider_plans.generate_provider_plan(
+                (contradictory_state,), ("bash",), package_managers=()
             )
 
     def test_duplicate_detected_states_are_ambiguous(self):

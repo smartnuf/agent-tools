@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ntpath
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -11,7 +13,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from .python_selection import current_host
+from .python_selection import current_host, normalize_architecture
 
 
 class Availability(str, Enum):
@@ -120,6 +122,22 @@ class ExecutableState:
     @property
     def verified(self) -> bool:
         return self.path is not None and self.version is not None
+
+
+class ExecutableEvidenceError(ValueError):
+    """Raised when observations contradict one executable identity."""
+
+
+@dataclass(frozen=True)
+class ExecutableEvidence:
+    """Consistent evidence consolidated for one normalized executable."""
+
+    identity: str
+    provider_id: str
+    version: str | None
+    architecture: str | None
+    execution_environment: str
+    satisfies_capability: bool
 
 
 @dataclass(frozen=True)
@@ -426,7 +444,7 @@ def locate_executable(probe: ExecutableProbe, machine: MachineState) -> str | No
             return None
         prefixes = (
             (Path("/opt/homebrew/bin"), Path("/usr/local/bin"))
-            if machine.architecture in {"arm64", "aarch64"}
+            if normalize_architecture(machine.architecture) == "arm64"
             else (Path("/usr/local/bin"), Path("/opt/homebrew/bin"))
         )
         brew = shutil.which("brew")
@@ -550,6 +568,87 @@ def capability_availability(providers: tuple[ProviderState, ...]) -> Availabilit
     return Availability.UNSUPPORTED
 
 
+def normalized_executable_identity(path: str, machine: MachineState) -> str:
+    """Normalize a locator-supplied resolved executable identity."""
+
+    if machine.platform == "Windows":
+        return ntpath.normpath(path).casefold()
+    return posixpath.normpath(path)
+
+
+def consolidate_executable_evidence(
+    providers: tuple[ProviderState, ...],
+    machine: MachineState,
+) -> tuple[ExecutableEvidence, ...]:
+    """Consolidate compatible observations and reject identity conflicts."""
+
+    by_identity: dict[str, ExecutableEvidence] = {}
+    for provider_state in providers:
+        provider = provider_state.provider
+        for executable in provider_state.executables:
+            if executable.path is None:
+                continue
+            identity = normalized_executable_identity(executable.path, machine)
+            architecture = (
+                normalize_architecture(executable.architecture)
+                if executable.architecture is not None
+                else None
+            )
+            observation = ExecutableEvidence(
+                identity=identity,
+                provider_id=provider.provider_id,
+                version=executable.version,
+                architecture=architecture,
+                execution_environment=machine.execution_environment,
+                satisfies_capability=provider.satisfies_capability,
+            )
+            existing = by_identity.get(identity)
+            if existing is None:
+                by_identity[identity] = observation
+                continue
+            fixed_facts = (
+                ("provider", existing.provider_id, observation.provider_id),
+                (
+                    "execution environment",
+                    existing.execution_environment,
+                    observation.execution_environment,
+                ),
+                (
+                    "suitability",
+                    existing.satisfies_capability,
+                    observation.satisfies_capability,
+                ),
+            )
+            optional_facts = (
+                ("version", existing.version, observation.version),
+                ("architecture", existing.architecture, observation.architecture),
+            )
+            conflict = next(
+                (name for name, left, right in fixed_facts if left != right),
+                None,
+            ) or next(
+                (
+                    name
+                    for name, left, right in optional_facts
+                    if left is not None and right is not None and left != right
+                ),
+                None,
+            )
+            if conflict is not None:
+                raise ExecutableEvidenceError(
+                    f"conflicting {conflict} evidence for executable: {identity}"
+                )
+            by_identity[identity] = ExecutableEvidence(
+                identity=identity,
+                provider_id=existing.provider_id,
+                version=existing.version or observation.version,
+                architecture=existing.architecture or observation.architecture,
+                execution_environment=existing.execution_environment,
+                satisfies_capability=existing.satisfies_capability,
+            )
+    return tuple(by_identity[key] for key in sorted(by_identity))
+
+
 def _detect_executable(
     probe: ExecutableProbe,
     machine: MachineState,
@@ -593,6 +692,7 @@ def detect_capability(
         )
         for provider in capability.providers
     )
+    consolidate_executable_evidence(providers, machine)
     availability = capability_availability(providers)
     return CapabilityState(capability, machine, availability, providers)
 
