@@ -154,6 +154,8 @@ def _option(
     context: MachineState,
     package_managers: tuple[PackageManagerState, ...],
     translated_fallbacks: frozenset[PackageManagerState],
+    *,
+    allow_translated: bool = True,
 ) -> tuple[ProviderPackage, PackageManagerState, NativeStatus] | None:
     for package in provider.packages:
         if context.platform not in package.platforms or (
@@ -173,7 +175,8 @@ def _option(
                 if native_status is NativeStatus.NATIVE:
                     rank = 0
                 elif (
-                    native_status is NativeStatus.TRANSLATED
+                    allow_translated
+                    and native_status is NativeStatus.TRANSLATED
                     and manager_state in translated_fallbacks
                 ):
                     rank = 1
@@ -189,6 +192,32 @@ def _option(
             _, _, manager_state, native_status = min(candidates)
             return package, manager_state, native_status
     return None
+
+
+def _aggregate_availability(state: CapabilityState) -> Availability:
+    """Derive capability availability from its immutable provider observations."""
+
+    satisfying = tuple(
+        item for item in state.providers if item.provider.satisfies_capability
+    )
+    if any(item.availability is Availability.AVAILABLE for item in satisfying):
+        return Availability.AVAILABLE
+    if any(item.availability is Availability.ABSENT for item in satisfying):
+        return Availability.ABSENT
+    return Availability.UNSUPPORTED
+
+
+def _manager_evidence_key(
+    state: PackageManagerState,
+) -> tuple[str, str, str, str]:
+    """Return alias-canonical identity for one manager observation."""
+
+    return (
+        state.manager,
+        state.executable_path,
+        state.execution_environment,
+        normalize_architecture(state.architecture),
+    )
 
 
 def generate_provider_plan(
@@ -223,9 +252,9 @@ def generate_provider_plan(
     if len(contexts) > 1:
         raise PlanningError("requested capability states span multiple execution contexts")
     context = next(iter(contexts), None)
-    manager_states = tuple(dict.fromkeys(package_managers))
+    supplied_manager_states = tuple(dict.fromkeys(package_managers))
     supported_managers = {"winget", "apt", "dnf", "pacman", "brew"}
-    for manager_state in manager_states:
+    for manager_state in supplied_manager_states:
         if manager_state.manager not in supported_managers:
             raise PlanningError(f"unsupported package manager: {manager_state.manager}")
         if not manager_state.executable_path.strip():
@@ -233,7 +262,7 @@ def generate_provider_plan(
                 f"package manager has no verified executable path: {manager_state.manager}"
             )
     by_identity: dict[tuple[str, str, str], PackageManagerState] = {}
-    for manager_state in manager_states:
+    for manager_state in supplied_manager_states:
         identity = (
             manager_state.manager,
             manager_state.executable_path,
@@ -247,10 +276,19 @@ def generate_provider_plan(
                 f"conflicting package-manager architecture evidence: {manager_state.manager}"
             )
         by_identity[identity] = manager_state
-    translated_fallbacks = frozenset(translated_manager_fallbacks)
-    unknown_fallbacks = translated_fallbacks.difference(manager_states)
-    if unknown_fallbacks:
-        raise PlanningError("translated package-manager fallback was not detected")
+    canonical_managers: dict[
+        tuple[str, str, str, str], PackageManagerState
+    ] = {}
+    for manager_state in supplied_manager_states:
+        canonical_managers.setdefault(_manager_evidence_key(manager_state), manager_state)
+    manager_states = tuple(canonical_managers.values())
+    translated_fallbacks_list: list[PackageManagerState] = []
+    for fallback in translated_manager_fallbacks:
+        detected = canonical_managers.get(_manager_evidence_key(fallback))
+        if detected is None:
+            raise PlanningError("translated package-manager fallback was not detected")
+        translated_fallbacks_list.append(detected)
+    translated_fallbacks = frozenset(translated_fallbacks_list)
     if context is not None:
         for fallback in translated_fallbacks:
             if fallback.manager != "brew" or fallback.native_status(context) is not NativeStatus.TRANSLATED:
@@ -281,6 +319,10 @@ def generate_provider_plan(
         ):
             raise PlanningError(
                 f"detected state does not match built-in catalogue: {capability_id}"
+            )
+        if state.availability is not _aggregate_availability(state):
+            raise PlanningError(
+                f"detected capability availability contradicts provider states: {capability_id}"
             )
         displaced: tuple[str, ...] = ()
         if state.availability is Availability.AVAILABLE and capability_id not in native_overrides:
@@ -320,7 +362,13 @@ def generate_provider_plan(
             provider = provider_state.provider
             if not provider.satisfies_capability or not provider.supports(state.machine):
                 continue
-            option = _option(provider, context, manager_states, translated_fallbacks)
+            option = _option(
+                provider,
+                context,
+                manager_states,
+                translated_fallbacks,
+                allow_translated=not displaced,
+            )
             if option is not None:
                 package, manager_state, manager_native_status = option
                 selected = (provider, package, manager_state, manager_native_status)

@@ -247,6 +247,22 @@ class ProviderPlanTests(unittest.TestCase):
                 (state,), ("poppler",), package_managers=(first, conflicting)
             )
 
+    def test_equivalent_manager_architecture_aliases_are_deduplicated(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH, machine, locator=lambda probe, machine: None
+        )
+        arm64 = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+        aarch64 = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "aarch64"
+        )
+        plan = provider_plans.generate_provider_plan(
+            (state,), ("bash",), package_managers=(arm64, aarch64)
+        )
+        self.assertEqual(plan.actions[0].manager_state, arm64)
+
     def test_macos_missing_bash_does_not_bootstrap_homebrew(self):
         machine = capabilities.MachineState("Darwin", "arm64")
         state = capabilities.detect_capability(
@@ -339,6 +355,33 @@ class ProviderPlanTests(unittest.TestCase):
                     package_managers=(self.manager("winget"),),
                     native_provisioning=("bash",),
                 )
+
+    def test_native_override_rejects_translated_homebrew_fallback(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, machine: (
+                "/usr/local/bin/bash"
+                if probe.locator_strategy == "homebrew-bash"
+                else None
+            ),
+            version_reader=lambda probe, path: "GNU bash 5.2",
+            architecture_reader=lambda probe, path: "x86_64",
+        )
+        translated = provider_plans.PackageManagerState(
+            "brew", "/usr/local/bin/brew", "host", "x86_64"
+        )
+        with self.assertRaisesRegex(
+            provider_plans.PlanningError, "no supported provider plan"
+        ):
+            provider_plans.generate_provider_plan(
+                (state,),
+                ("bash",),
+                package_managers=(translated,),
+                native_provisioning=("bash",),
+                translated_manager_fallbacks=(translated,),
+            )
 
     def test_duplicate_detected_states_are_ambiguous(self):
         state = self.state(capabilities.POPPLER)
@@ -454,6 +497,31 @@ class ProviderPlanTests(unittest.TestCase):
             provider_plans.generate_provider_plan(
                 (state,), ("custom",), package_managers=(self.manager("apt"),)
             )
+
+    def test_aggregate_capability_availability_must_match_provider_states(self):
+        available = self.state(capabilities.POPPLER, available=True)
+        absent = self.state(capabilities.POPPLER)
+        contradictions = (
+            capabilities.CapabilityState(
+                available.capability,
+                available.machine,
+                capabilities.Availability.ABSENT,
+                available.providers,
+            ),
+            capabilities.CapabilityState(
+                absent.capability,
+                absent.machine,
+                capabilities.Availability.AVAILABLE,
+                absent.providers,
+            ),
+        )
+        for state in contradictions:
+            with self.subTest(availability=state.availability), self.assertRaisesRegex(
+                provider_plans.PlanningError, "availability contradicts"
+            ):
+                provider_plans.generate_provider_plan(
+                    (state,), ("poppler",), package_managers=(self.manager("apt"),)
+                )
 
 
 if __name__ == "__main__":
