@@ -92,6 +92,33 @@ the dedicated non-interactive provider-mutation authorization is present.
 
 Commands run sequentially in isolated process trees with explicit timeouts and
 captured outcomes; a timeout terminates and reaps that tree before returning.
+On Linux, a `SYSTEM`-privilege action has a stricter execution contract. Agent
+Tools first resolves an absolute executable identity for GNU Coreutils
+`timeout`, verifies that identity with its version output, and does not install
+or configure a supervisor when none is available. A non-root process then
+checks non-interactive sudo authorization for every exact supervised command
+and executes only argument vectors equivalent to
+`sudo -n -- <verified-timeout> --signal=TERM --kill-after=5s <timeout>
+<reviewed-manager-argv...>`. A root process uses the same verified supervisor
+without sudo. GNU timeout's normal process-group behavior is required;
+`--foreground` is prohibited. The five-second TERM-to-KILL grace is small and
+bounded so a cooperative manager can clean up while a TERM-resistant descendant
+cannot outlive the transaction indefinitely.
+
+The privileged supervisor, rather than the invoking Python process, is
+authoritative for elevated Linux termination. Python process-tree termination
+remains the same-privilege mechanism on other paths, but an elevated action
+never falls back to claiming success from an unprivileged group kill. Missing
+GNU timeout, unavailable non-interactive sudo, denied exact-command policy,
+supervisor failure, and command-start failure all fail closed. Reports preserve
+the actual supervised argv, raw return code, stdout, and stderr and distinguish
+ordinary command failure, timeout expiry, TERM-to-KILL escalation, supervisor
+failure, command-start failure, and privilege unavailability to the extent GNU
+timeout's exit contract permits. An outer Python guard that expires after the
+command timeout plus grace is an uncertain supervision failure, not a clean
+timeout. Agent Tools does not modify sudoers, PATH, profiles, system packages,
+or user configuration to establish this contract.
+
 The executor stops on the first timeout, nonzero exit, unavailable manager, or
 missing privilege. Failures before any command starts report no attempted
 mutation; after a command starts, the report warns that package-manager state
@@ -106,6 +133,25 @@ remain visible in that failure report even when an `ALL` condition or native
 architecture target is not satisfied. Reusing the same plan after
 the provider verifies performs no further command. Managed-state persistence
 remains a separate subsequent contract.
+
+Execution serialization is process-local. One process-wide re-entrant lock
+encloses current-context and catalogue validation, fresh provider detection,
+manager and translated-Homebrew authorization validation, privilege/supervisor
+preflight, every command in the action, temporary environment refresh,
+post-action rediscovery, final verification, and report construction. Thus two
+threads in one Agent Tools process cannot both pass the missing-provider check
+and mutate concurrently; the second observes the first transaction's verified
+result before deciding whether a command is needed. This decision does not
+claim exclusion against another Agent Tools process or an unrelated package
+manager user. Portable inter-process coordination would be a separate public
+and persistence contract; native package-manager locking remains external, and
+this executor does not add file locks, named mutexes, or a lock service.
+
+An actionless plan is not accepted from plan history alone. Immediately before
+returning `NO_CHANGES`, the executor resolves every requested capability in the
+built-in catalogue and revalidates fresh provider evidence against the current
+immutable machine context. Unknown, stale, contradictory, or no-longer-verified
+requests fail preflight without claiming mutation.
 
 ## Final-provider selection contract
 
@@ -169,6 +215,17 @@ architecture; their local execution environment, catalogue option, and any
 manager-specific target argument are the relevant planning evidence. Planned
 argv uses the verified manager path so a later executor does not silently
 resolve a different installation.
+
+When planning selects translated Homebrew, the immutable action carries a
+dedicated structured authorization bit derived from membership of that exact
+canonical `PackageManagerState` in the caller's translated-fallback set. The
+executor revalidates manager identity, execution environment, architecture and
+native status against the current plan context and refuses translated or
+unknown-architecture Homebrew without that exact evidence. It does not infer
+authorization from reason text or other incidental strings. Native Homebrew is
+accepted without translated-fallback authorization and rejects a contradictory
+translated-only marker. The evidence is ephemeral plan/report data, not user
+configuration or persistent managed state.
 
 `platform.machine()` describes the running Python context and is not, by
 itself, sufficient evidence of host architecture when that Python may be
