@@ -429,9 +429,9 @@ Halt and report the evidence and required decision when:
   prerequisite is unavailable;
 - completion requires an unsafe host or user-configuration mutation;
 - work contradicts an accepted decision or acceptance criterion;
-- architecture adjudication finds a human-reserved policy/product choice or a
+- architecture adjudication finds a human-reserved policy/product choice, or a
   materially new data, discovery, persistence, mutation, or public-contract
-  boundary;
+  boundary whose semantics are not determined by accepted authority;
 - a necessary correction materially expands scope or authority;
 - required validation or CI fails and cannot be corrected within scope;
 - current-head review or mergeability cannot be established reliably;
