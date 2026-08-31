@@ -15,7 +15,7 @@ from enum import Enum
 from pathlib import Path, PureWindowsPath
 from typing import Any, Callable
 
-from .capabilities import get_capability
+from .capabilities import MachineState, get_capability
 from .provider_execution import (
     ActionOutcome,
     ActionReport,
@@ -113,12 +113,14 @@ def managed_state_path(
 
 
 def _resolved_home(home: Path | None) -> Path:
-    if home is not None:
-        return home
-    try:
-        return Path.home()
-    except (OSError, RuntimeError) as error:
-        raise ManagedStateError(f"user home directory is unavailable: {error}") from error
+    if home is None:
+        try:
+            home = Path.home()
+        except (OSError, RuntimeError) as error:
+            raise ManagedStateError(f"user home directory is unavailable: {error}") from error
+    if not home.is_absolute():
+        raise ManagedStateError("user home directory is not absolute")
+    return home
 
 
 def empty_document() -> dict[str, Any]:
@@ -224,6 +226,25 @@ def load_document(path: Path) -> dict[str, Any]:
             for name in ("platform", "architecture", "execution_environment")
         ):
             raise ManagedStateError(f"managed-state record {index} has invalid execution context")
+        machine = MachineState(
+            context["platform"],
+            context["architecture"],
+            context["execution_environment"],
+        )
+        package_matches = any(
+            package.manager == package_manager["name"]
+            and package.installation_unit == record["installation_unit"]
+            and machine.platform in package.platforms
+            and (
+                not package.architectures
+                or machine.architecture in package.architectures
+            )
+            for package in provider_spec.packages
+        )
+        if not provider_spec.supports(machine) or not package_matches:
+            raise ManagedStateError(
+                f"managed-state record {index} has inconsistent package or context evidence"
+            )
         commands = requested.get("commands")
         if (
             not isinstance(requested.get("kind"), str)
@@ -427,8 +448,9 @@ def execute_provider_plan(
         return ManagedExecutionResult(
             executor(plan, **executor_arguments), PersistenceOutcome.NOT_REQUIRED
         )
-    mutation_authorized = bool(executor_arguments.get("allow_provider_mutation"))
+    mutation_authorized = executor_arguments.get("allow_provider_mutation") is True
     if not mutation_authorized:
+        executor_arguments = {**executor_arguments, "allow_provider_mutation": False}
         return ManagedExecutionResult(
             executor(plan, **executor_arguments), PersistenceOutcome.NOT_REQUIRED
         )
@@ -471,18 +493,28 @@ def execute_provider_plan(
             return result
         try:
             _atomic_write(path, updated)
+            result = ManagedExecutionResult(report, PersistenceOutcome.SUCCEEDED)
+            if interruption is not None:
+                interruption.managed_result = result
+                raise interruption
+            return result
         except PersistenceInterrupted as error:
             result = _persistence_failure_result(report, error.outcome, error.detail)
             error.managed_result = result
             raise
         except PersistenceError as error:
             result = _persistence_failure_result(report, error.outcome, error.detail)
-        else:
+            if interruption is not None:
+                interruption.managed_result = result
+                raise interruption
+            return result
+        except (ProviderPlanInterrupted, ManagedExecutionInterrupted):
+            raise
+        except KeyboardInterrupt as error:
             result = ManagedExecutionResult(report, PersistenceOutcome.SUCCEEDED)
-        if interruption is not None:
-            interruption.managed_result = result
-            raise interruption
-        return result
+            final_interruption = ManagedExecutionInterrupted(error)
+            final_interruption.managed_result = result
+            raise final_interruption
 
 
 def _prepare_update(
