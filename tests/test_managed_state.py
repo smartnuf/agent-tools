@@ -222,17 +222,11 @@ class ManagedStateTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
             executor = Mock(return_value=self.report())
-            real_fsync = managed_state.os.fsync
-            calls = 0
-
-            def fail_directory_sync(descriptor):
-                nonlocal calls
-                calls += 1
-                if calls == 2:
-                    raise OSError("directory sync failed")
-                return real_fsync(descriptor)
-
-            with patch.object(managed_state.os, "fsync", side_effect=fail_directory_sync):
+            with patch.object(
+                managed_state,
+                "_sync_parent_directory",
+                side_effect=OSError("directory sync failed"),
+            ):
                 result = managed_state.execute_provider_plan(
                     self.plan,
                     state_path=path,

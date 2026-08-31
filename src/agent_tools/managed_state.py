@@ -233,12 +233,7 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
         os.replace(temporary, path)
         replaced = True
         temporary = None
-        if os.name != "nt":
-            descriptor = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
+        _sync_parent_directory(path.parent)
     except OSError as error:
         if temporary is not None:
             try:
@@ -247,6 +242,18 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
                 pass
         outcome = PersistenceOutcome.UNKNOWN if replaced else PersistenceOutcome.FAILED
         raise PersistenceError(outcome, f"managed-state atomic persistence failed: {error}") from error
+
+
+def _sync_parent_directory(directory: Path) -> None:
+    """Confirm replacement-directory durability where the platform supports it."""
+
+    if os.name == "nt":
+        return
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _timestamp() -> str:
