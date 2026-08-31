@@ -5,6 +5,7 @@ from __future__ import annotations
 import ntpath
 import os
 import posixpath
+import signal
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping
@@ -83,6 +84,8 @@ class ActionReport:
     commands: tuple[CommandReport, ...] = ()
     final_verified_paths: tuple[str, ...] = ()
     detail: str = ""
+    target_architecture: str | None = None
+    displaces_verified_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -125,14 +128,78 @@ def _path_is_absolute(path: str, machine: MachineState) -> bool:
 
 
 def _run(argv: tuple[str, ...], timeout: int) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    process_options: dict[str, object]
+    if os.name == "nt":
+        process_options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    else:
+        process_options = {"start_new_session": True}
+    process = subprocess.Popen(
         argv,
-        check=False,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        **process_options,
         text=True,
         errors="replace",
-        timeout=timeout,
     )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _terminate_process_tree(process)
+        stdout, stderr = process.communicate()
+        raise subprocess.TimeoutExpired(
+            argv,
+            timeout,
+            output=stdout,
+            stderr=stderr,
+        ) from None
+    return subprocess.CompletedProcess(
+        argv,
+        process.returncode,
+        stdout,
+        stderr,
+    )
+
+
+def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    """Terminate and reap the isolated command process tree."""
+
+    if os.name == "nt":
+        system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        taskkill = system_root / "System32" / "taskkill.exe"
+        try:
+            resolved_taskkill = taskkill.resolve(strict=True)
+            result = subprocess.run(
+                (
+                    str(resolved_taskkill),
+                    "/PID",
+                    str(process.pid),
+                    "/T",
+                    "/F",
+                ),
+                check=False,
+                capture_output=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            process.kill()
+            process.wait()
+            raise ExecutionContractError(
+                f"could not terminate timed-out Windows process tree: {error}"
+            ) from error
+        if result.returncode != 0 and process.poll() is None:
+            process.kill()
+            process.wait()
+            raise ExecutionContractError(
+                "could not terminate timed-out Windows process tree: "
+                + result.stderr.decode(errors="replace")
+            )
+        process.wait()
+        return
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait()
 
 
 def _detect(capability: CapabilitySpec, machine: MachineState) -> CapabilityState:
@@ -343,6 +410,27 @@ def _command_report(
     )
 
 
+def _action_report(
+    action: ProviderAction,
+    outcome: ActionOutcome,
+    commands: tuple[CommandReport, ...] = (),
+    final_verified_paths: tuple[str, ...] = (),
+    detail: str = "",
+) -> ActionReport:
+    return ActionReport(
+        action.capability_id,
+        action.provider_id,
+        action.manager,
+        action.installation_unit,
+        outcome,
+        commands,
+        final_verified_paths,
+        detail,
+        action.target_architecture,
+        action.displaces_verified_paths,
+    )
+
+
 def execute_provider_plan(
     plan: ProviderPlan,
     *,
@@ -373,11 +461,8 @@ def execute_provider_plan(
             plan.requested_capabilities,
             PlanOutcome.REFUSED,
             tuple(
-                ActionReport(
-                    action.capability_id,
-                    action.provider_id,
-                    action.manager,
-                    action.installation_unit,
+                _action_report(
+                    action,
                     ActionOutcome.REFUSED,
                     detail="provider mutation was not explicitly authorized",
                 )
@@ -389,7 +474,8 @@ def execute_provider_plan(
     reports: list[ActionReport] = []
     for action in plan.actions:
         capability = get_capability(action.capability_id)
-        before = detector(capability, context)
+        with _temporary_environment(environment_refresher(action)):
+            before = detector(capability, context)
         try:
             validate_capability_state(before, expected_context=context)
         except PlanningError as error:
@@ -399,11 +485,8 @@ def execute_provider_plan(
         existing_paths = _verified_provider_paths(action, before)
         if existing_paths:
             reports.append(
-                ActionReport(
-                    action.capability_id,
-                    action.provider_id,
-                    action.manager,
-                    action.installation_unit,
+                _action_report(
+                    action,
                     ActionOutcome.ALREADY_SATISFIED,
                     final_verified_paths=existing_paths,
                     detail="planned provider already verifies; no command executed",
@@ -412,11 +495,8 @@ def execute_provider_plan(
             continue
         if not manager_verifier(action.manager_state, context):
             reports.append(
-                ActionReport(
-                    action.capability_id,
-                    action.provider_id,
-                    action.manager,
-                    action.installation_unit,
+                _action_report(
+                    action,
                     ActionOutcome.MANAGER_UNAVAILABLE,
                     detail="verified package-manager identity is no longer available",
                 )
@@ -427,11 +507,8 @@ def execute_provider_plan(
         elevation = privilege_resolver(action)
         if elevation is None:
             reports.append(
-                ActionReport(
-                    action.capability_id,
-                    action.provider_id,
-                    action.manager,
-                    action.installation_unit,
+                _action_report(
+                    action,
                     ActionOutcome.PRIVILEGE_UNAVAILABLE,
                     detail="system privilege is required but no safe elevation path is available",
                 )
@@ -456,11 +533,8 @@ def execute_provider_plan(
                     )
                 )
                 reports.append(
-                    ActionReport(
-                        action.capability_id,
-                        action.provider_id,
-                        action.manager,
-                        action.installation_unit,
+                    _action_report(
+                        action,
                         ActionOutcome.TIMED_OUT,
                         tuple(commands),
                         detail=f"command exceeded {timeout_seconds} seconds",
@@ -473,11 +547,8 @@ def execute_provider_plan(
                 earlier_command_completed = bool(commands)
                 commands.append(CommandReport(argv, None, "", str(error)))
                 reports.append(
-                    ActionReport(
-                        action.capability_id,
-                        action.provider_id,
-                        action.manager,
-                        action.installation_unit,
+                    _action_report(
+                        action,
                         ActionOutcome.COMMAND_FAILED,
                         tuple(commands),
                         detail=f"command could not start: {error}",
@@ -492,11 +563,8 @@ def execute_provider_plan(
             commands.append(_command_report(argv, result))
             if result.returncode != 0:
                 reports.append(
-                    ActionReport(
-                        action.capability_id,
-                        action.provider_id,
-                        action.manager,
-                        action.installation_unit,
+                    _action_report(
+                        action,
                         ActionOutcome.COMMAND_FAILED,
                         tuple(commands),
                         detail=f"command exited with status {result.returncode}",
@@ -520,11 +588,8 @@ def execute_provider_plan(
             )
         if not final_paths:
             reports.append(
-                ActionReport(
-                    action.capability_id,
-                    action.provider_id,
-                    action.manager,
-                    action.installation_unit,
+                _action_report(
+                    action,
                     ActionOutcome.VERIFICATION_FAILED,
                     tuple(commands),
                     detail=verification_detail,
@@ -534,11 +599,8 @@ def execute_provider_plan(
                 plan, context, reports, mutation_may_have_started=True
             )
         reports.append(
-            ActionReport(
-                action.capability_id,
-                action.provider_id,
-                action.manager,
-                action.installation_unit,
+            _action_report(
+                action,
                 ActionOutcome.SUCCEEDED,
                 tuple(commands),
                 final_paths,
@@ -568,11 +630,8 @@ def _failed_report(
     mutation_may_have_started: bool,
 ) -> PlanExecutionReport:
     reports.extend(
-        ActionReport(
-            action.capability_id,
-            action.provider_id,
-            action.manager,
-            action.installation_unit,
+        _action_report(
+            action,
             ActionOutcome.NOT_ATTEMPTED,
             detail="not attempted because an earlier provider action failed",
         )

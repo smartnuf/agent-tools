@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -86,6 +87,30 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
                 provider_execution.ActionOutcome.ALREADY_SATISFIED,
             )
             self.assertEqual(len(subprocess_calls), 2)
+
+    def test_timeout_terminates_descendant_process_before_returning(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / "orphaned-child"
+            parent = root / "parent.py"
+            parent.write_text(
+                "import subprocess\n"
+                "import sys\n"
+                "import time\n"
+                "child = \"import pathlib, sys, time; time.sleep(1); \"\n"
+                "child += \"pathlib.Path(sys.argv[1]).write_text('orphan')\"\n"
+                "subprocess.Popen([sys.executable, '-c', child, sys.argv[1]])\n"
+                "time.sleep(30)\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(subprocess.TimeoutExpired):
+                provider_execution._run(
+                    (sys.executable, str(parent), str(marker)),
+                    0.2,
+                )
+            time.sleep(1.2)
+            self.assertFalse(marker.exists())
 
 
 if __name__ == "__main__":

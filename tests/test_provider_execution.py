@@ -316,6 +316,28 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         runner.assert_not_called()
 
+    def test_refreshed_precheck_skips_newly_visible_provider(self):
+        available = self.state(capabilities.GHOSTSCRIPT, available=True)
+        runner = Mock(side_effect=AssertionError("must not run"))
+        original = os.environ.get("PATH")
+
+        def detect(capability, machine):
+            self.assertEqual(os.environ.get("PATH"), "/persisted")
+            return available
+
+        report = self.execute(
+            self.plan(),
+            detector=detect,
+            runner=runner,
+            environment_refresher=lambda action: {"PATH": "/persisted"},
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.ALREADY_SATISFIED,
+        )
+        self.assertEqual(os.environ.get("PATH"), original)
+        runner.assert_not_called()
+
     def test_environment_refresh_is_temporary_and_precedes_verification(self):
         plan = self.plan()
         absent = self.state(capabilities.GHOSTSCRIPT)
@@ -326,9 +348,9 @@ class ProviderExecutionTests(unittest.TestCase):
         def detect(capability, machine):
             nonlocal calls
             calls += 1
+            self.assertEqual(os.environ.get("PATH"), "/refreshed")
             if calls == 1:
                 return absent
-            self.assertEqual(os.environ.get("PATH"), "/refreshed")
             return available
 
         report = self.execute(
@@ -378,6 +400,11 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(
             report.actions[0].outcome,
             provider_execution.ActionOutcome.VERIFICATION_FAILED,
+        )
+        self.assertEqual(report.actions[0].target_architecture, "arm64")
+        self.assertEqual(
+            report.actions[0].displaces_verified_paths,
+            plan.actions[0].displaces_verified_paths,
         )
 
     def detector_sequence_for_machine(self, machine, *states):
