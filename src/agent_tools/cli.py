@@ -213,7 +213,8 @@ def tools_status(capability_id: str | None = None) -> int:
             if records:
                 latest = records[-1]
                 print(f"  agent-tools requests: {len(records)}")
-                print(f"    latest request: {latest['recorded_at']}")
+                print(f"    latest request: {latest['requested_at']}")
+                print(f"    recorded at: {latest['recorded_at']}")
                 print(f"    installation unit: {latest['installation_unit']}")
                 print("    ownership: not claimed")
             else:

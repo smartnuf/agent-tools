@@ -329,9 +329,9 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _atomic_write(path: Path, document: dict[str, Any]) -> None:
-    temporary: Path | None = None
-    replace_attempted = False
     try:
+        temporary: Path | None = None
+        replace_attempted = False
         missing_directories = _missing_directories(path.parent)
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
@@ -353,6 +353,8 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
         for directory in reversed(missing_directories):
             _sync_parent_directory(directory.parent)
     except OSError as error:
+        temporary = locals().get("temporary")
+        replace_attempted = bool(locals().get("replace_attempted", False))
         _discard_temporary(temporary)
         outcome = (
             PersistenceOutcome.UNKNOWN
@@ -361,6 +363,8 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
         )
         raise PersistenceError(outcome, f"managed-state atomic persistence failed: {error}") from error
     except KeyboardInterrupt as error:
+        temporary = locals().get("temporary")
+        replace_attempted = bool(locals().get("replace_attempted", False))
         _discard_temporary(temporary)
         outcome = (
             PersistenceOutcome.UNKNOWN

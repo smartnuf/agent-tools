@@ -1241,8 +1241,35 @@ def _execute_provider_plan(
             return _failed_report(
                 plan, context, reports, mutation_may_have_started=True
             )
-        existing_provider = _acceptable_current_provider(
-            before, action.target_architecture
+        def precommand(operation):
+            try:
+                return operation()
+            except KeyboardInterrupt as error:
+                reports.append(
+                    _action_report(
+                        action,
+                        ActionOutcome.NOT_ATTEMPTED,
+                        detail=(
+                            "interrupted during execution preflight; no command "
+                            "started for this action"
+                        ),
+                    )
+                )
+                raise ProviderPlanInterrupted(
+                    _failed_report(
+                        plan,
+                        context,
+                        reports,
+                        mutation_may_have_started=any(
+                            report.commands for report in reports
+                        ),
+                    )
+                ) from error
+
+        existing_provider = precommand(
+            lambda: _acceptable_current_provider(
+                before, action.target_architecture
+            )
         )
         if existing_provider:
             existing_provider_id, existing_paths = existing_provider
@@ -1256,7 +1283,7 @@ def _execute_provider_plan(
                 )
             )
             continue
-        if not manager_verifier(action.manager_state, context):
+        if not precommand(lambda: manager_verifier(action.manager_state, context)):
             reports.append(
                 _action_report(
                     action,
@@ -1268,7 +1295,7 @@ def _execute_provider_plan(
                 plan, context, reports, mutation_may_have_started=False
             )
         if action.manager == "brew" and normalize_architecture(
-            manager_architecture_reader(action.manager_state)
+            precommand(lambda: manager_architecture_reader(action.manager_state))
         ) != normalize_architecture(action.manager_state.architecture):
             reports.append(
                 _action_report(
@@ -1280,7 +1307,7 @@ def _execute_provider_plan(
             return _failed_report(
                 plan, context, reports, mutation_may_have_started=False
             )
-        elevation = privilege_resolver(action)
+        elevation = precommand(lambda: privilege_resolver(action))
         if elevation is None:
             reports.append(
                 _action_report(
@@ -1292,7 +1319,7 @@ def _execute_provider_plan(
             return _failed_report(
                 plan, context, reports, mutation_may_have_started=False
             )
-        supervisor = supervisor_resolver(action)
+        supervisor = precommand(lambda: supervisor_resolver(action))
         if supervisor is None:
             reports.append(
                 _action_report(
@@ -1321,8 +1348,10 @@ def _execute_provider_plan(
             if elevated_linux
             else ()
         )
-        if elevated_linux and any(
-            not privilege_preflight(argv) for argv in elevated_commands
+        if elevated_linux and precommand(
+            lambda: any(
+                not privilege_preflight(argv) for argv in elevated_commands
+            )
         ):
             reports.append(
                 _action_report(

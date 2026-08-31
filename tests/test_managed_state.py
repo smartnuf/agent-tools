@@ -512,6 +512,27 @@ class ManagedStateTests(unittest.TestCase):
             self.assertEqual(result.persistence, managed_state.PersistenceOutcome.UNKNOWN)
             self.assertEqual(len(managed_state.load_document(path)["records"]), 1)
 
+    def test_prewrite_persistence_interrupt_is_failed_not_succeeded(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            with patch.object(
+                managed_state,
+                "_missing_directories",
+                side_effect=KeyboardInterrupt(),
+            ):
+                with self.assertRaises(managed_state.PersistenceInterrupted) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=Mock(return_value=self.report()),
+                        allow_provider_mutation=True,
+                    )
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.FAILED,
+            )
+            self.assertFalse(path.exists())
+
     def test_interruption_after_replace_begins_is_unknown(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"

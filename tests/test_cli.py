@@ -39,6 +39,7 @@ class CliTests(unittest.TestCase):
     def test_tools_status_reports_requested_provenance_without_ownership(self) -> None:
         record = {
             "capability_id": "bash",
+            "requested_at": "2026-08-31T11:59:00Z",
             "recorded_at": "2026-08-31T12:00:00Z",
             "installation_unit": "bash",
         }
@@ -51,6 +52,8 @@ class CliTests(unittest.TestCase):
         ):
             self.assertEqual(cli.tools_status("bash"), 0)
         self.assertIn("agent-tools requests: 1", output.getvalue())
+        self.assertIn("latest request: 2026-08-31T11:59:00Z", output.getvalue())
+        self.assertIn("recorded at: 2026-08-31T12:00:00Z", output.getvalue())
         self.assertIn("ownership: not claimed", output.getvalue())
 
     def test_tools_status_keeps_detection_visible_when_provenance_is_corrupt(self) -> None:

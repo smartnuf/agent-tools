@@ -149,6 +149,31 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         self.assertEqual(report.actions[1].commands, ())
 
+    def test_execution_preflight_interrupt_never_marks_current_action_attempted(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        phases = (
+            ("manager", {"manager_verifier": Mock(side_effect=KeyboardInterrupt())}),
+            ("privilege", {"privilege_resolver": Mock(side_effect=KeyboardInterrupt())}),
+            ("supervisor", {"supervisor_resolver": Mock(side_effect=KeyboardInterrupt())}),
+            ("sudo", {"privilege_preflight": Mock(side_effect=KeyboardInterrupt())}),
+        )
+        for name, overrides in phases:
+            with self.subTest(phase=name):
+                with self.assertRaises(
+                    provider_execution.ProviderPlanInterrupted
+                ) as raised:
+                    self.execute(
+                        self.plan(),
+                        detector=lambda capability, machine: absent,
+                        **overrides,
+                    )
+                report = raised.exception.report
+                self.assertEqual(
+                    report.actions[0].outcome,
+                    provider_execution.ActionOutcome.NOT_ATTEMPTED,
+                )
+                self.assertEqual(report.actions[0].commands, ())
+
     def test_zero_action_plan_revalidates_unknown_and_stale_requests(self):
         available = self.state(capabilities.GHOSTSCRIPT, available=True)
         plan = provider_plans.generate_provider_plan(
