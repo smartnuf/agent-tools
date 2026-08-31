@@ -88,7 +88,6 @@ def managed_state_path(
 
     env = os.environ if environment is None else environment
     platform_name = platform_name or platform.system()
-    home = home or Path.home()
     if platform_name in {"nt", "Windows"}:
         root = env.get("LOCALAPPDATA")
         if not root:
@@ -98,7 +97,7 @@ def managed_state_path(
         return Path(root) / "agent-tools" / "managed-state.json"
     if platform_name in {"Darwin", "darwin"}:
         return (
-            home
+            _resolved_home(home)
             / "Library"
             / "Application Support"
             / "agent-tools"
@@ -108,9 +107,18 @@ def managed_state_path(
     root = (
         Path(configured_value)
         if configured_value is not None and posixpath.isabs(configured_value)
-        else home / ".local" / "state"
+        else _resolved_home(home) / ".local" / "state"
     )
     return root / "agent-tools" / "managed-state.json"
+
+
+def _resolved_home(home: Path | None) -> Path:
+    if home is not None:
+        return home
+    try:
+        return Path.home()
+    except (OSError, RuntimeError) as error:
+        raise ManagedStateError(f"user home directory is unavailable: {error}") from error
 
 
 def empty_document() -> dict[str, Any]:
@@ -131,7 +139,7 @@ def load_document(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ManagedStateError("managed state root must be a JSON object")
     version = value.get("schema_version")
-    if version != SCHEMA_VERSION:
+    if type(version) is not int or version != SCHEMA_VERSION:
         raise ManagedStateError(f"unsupported managed-state schema version: {version!r}")
     records = value.get("records")
     if not isinstance(records, list) or not all(
@@ -259,7 +267,7 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _atomic_write(path: Path, document: dict[str, Any]) -> None:
     temporary: Path | None = None
-    replaced = False
+    replace_attempted = False
     try:
         missing_directories = _missing_directories(path.parent)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -275,19 +283,27 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
+        replace_attempted = True
         os.replace(temporary, path)
-        replaced = True
         temporary = None
         _sync_parent_directory(path.parent)
         for directory in reversed(missing_directories):
             _sync_parent_directory(directory.parent)
     except OSError as error:
         _discard_temporary(temporary)
-        outcome = PersistenceOutcome.UNKNOWN if replaced else PersistenceOutcome.FAILED
+        outcome = (
+            PersistenceOutcome.UNKNOWN
+            if replace_attempted
+            else PersistenceOutcome.FAILED
+        )
         raise PersistenceError(outcome, f"managed-state atomic persistence failed: {error}") from error
     except KeyboardInterrupt as error:
         _discard_temporary(temporary)
-        outcome = PersistenceOutcome.UNKNOWN if replaced else PersistenceOutcome.FAILED
+        outcome = (
+            PersistenceOutcome.UNKNOWN
+            if replace_attempted
+            else PersistenceOutcome.FAILED
+        )
         raise PersistenceInterrupted(
             outcome, "managed-state persistence was interrupted"
         ) from error
@@ -415,31 +431,22 @@ def execute_provider_plan(
         except KeyboardInterrupt as error:
             interruption = ManagedExecutionInterrupted(error)
             report = _unknown_interrupted_report(plan)
-        completed_at = _timestamp()
-        attempted_indexes = tuple(
-            index
-            for index, action in enumerate(report.actions)
-            if (
-                action.commands or action.outcome is ActionOutcome.INTERRUPTED
+        try:
+            completed_at, attempted_indexes, updated = _prepare_update(
+                document, plan, report, requested_at
             )
-            and action.outcome is not ActionOutcome.ALREADY_SATISFIED
-        )
+        except KeyboardInterrupt as error:
+            interruption = ManagedExecutionInterrupted(error)
+            report = _unknown_interrupted_report(plan)
+            completed_at, attempted_indexes, updated = _prepare_update(
+                document, plan, report, requested_at
+            )
         if not attempted_indexes:
             result = ManagedExecutionResult(report, PersistenceOutcome.NOT_REQUIRED)
             if interruption is not None:
                 interruption.managed_result = result
                 raise interruption
             return result
-        updated = {
-            **document,
-            "records": [
-                *document["records"],
-                *(
-                    _record(plan, report, index, requested_at, completed_at)
-                    for index in attempted_indexes
-                ),
-            ],
-        }
         try:
             _atomic_write(path, updated)
         except PersistenceInterrupted as error:
@@ -454,6 +461,32 @@ def execute_provider_plan(
             interruption.managed_result = result
             raise interruption
         return result
+
+
+def _prepare_update(
+    document: dict[str, Any],
+    plan: ProviderPlan,
+    report: PlanExecutionReport,
+    requested_at: str,
+) -> tuple[str, tuple[int, ...], dict[str, Any]]:
+    completed_at = _timestamp()
+    attempted_indexes = tuple(
+        index
+        for index, action in enumerate(report.actions)
+        if (action.commands or action.outcome is ActionOutcome.INTERRUPTED)
+        and action.outcome is not ActionOutcome.ALREADY_SATISFIED
+    )
+    updated = {
+        **document,
+        "records": [
+            *document["records"],
+            *(
+                _record(plan, report, index, requested_at, completed_at)
+                for index in attempted_indexes
+            ),
+        ],
+    }
+    return completed_at, attempted_indexes, updated
 
 
 def _unknown_interrupted_report(plan: ProviderPlan) -> PlanExecutionReport:
