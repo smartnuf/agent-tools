@@ -55,7 +55,8 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
   catalogue-owned WinGet, apt, dnf, pacman, and Homebrew command adapters from
   immutable verified package-manager evidence; already-satisfied requests
   produce zero actions.
-- [Issue #77](https://github.com/smartnuf/agent-tools/issues/77) installs
+- [PR #78](https://github.com/smartnuf/agent-tools/pull/78) implements
+  [issue #77](https://github.com/smartnuf/agent-tools/issues/77) by installing
   delegated architecture adjudication and an architectural closure sweep after
   #50, preserving human authority for product-policy choices before autonomous
   mutation work in #51.

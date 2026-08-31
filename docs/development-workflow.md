@@ -250,7 +250,7 @@ authority is missing:
 |---|---|---|
 | Architectural clarification / contract completion | Makes an accepted invariant explicit or closes a hole required to preserve it. Materially different outcomes are excluded by existing authority. | Continue autonomously after evidence-backed adjudication. Update an existing ADR only when its normative text is incomplete. |
 | Bounded architectural evolution | Selects an internal, reversible structure while preserving accepted product, safety, compatibility, persistence, and roadmap contracts. | Continue only after independent adjudication confirms the boundary and records the alternatives excluded by existing constraints. |
-| Architectural policy / product decision | Changes or chooses what the product promises, supports, mutates, exposes, prioritizes, persists, requires, or removes. | Halt for human authority and, when accepted, record the new or revised durable decision. |
+| Architectural policy / product decision | Changes or chooses what the product promises, supports, mutates, exposes, prioritizes, persists, requires, or removes. | Complete the bounded closure sweep, then halt for human authority and, when accepted, record the new or revised durable decision. |
 
 The adjudicator must be independent of the implementing context: use a
 separate read-only agent/context or a human reviewer that has not proposed the
@@ -279,8 +279,8 @@ roadmap scope and priority. Existing preservation, verification, security,
 mutation-safety, exact-head, review, and merge-owner gates remain mandatory.
 
 After the first finding in a decision family, perform an **architectural
-closure sweep** before the correction wave. Inspect the affected seam for its
-adjacent consequences:
+closure sweep** before the correction wave or a human-authority halt. Inspect
+the affected seam for its adjacent consequences:
 
 - identity, ownership/provenance, and execution context;
 - lifecycle, partial failure, recovery, retry safety, and idempotence;
@@ -318,9 +318,10 @@ validate, push once, and return to exact-head waiting.
 Declare separate numeric bounds for correction waves and independent
 architectural decision families before extended autonomous work. A bound that
 does not name its unit is a correction-wave bound; architecture adjudication
-does not reset, replace, or stop that counter. Halt when either bound is
-reached. Count architectural decision families independently from raw
-comments, files, and waves: a later finding that is another manifestation of an
+does not reset, replace, or stop that counter. Process up to each declared
+maximum; halt before beginning a wave or decision family that would exceed its
+bound. Count architectural decision families independently from raw comments,
+files, and waves: a later finding that is another manifestation of an
 adjudicated invariant remains in that family, but every pushed correction wave
 still consumes the wave bound. Also halt when adjudication identifies a
 human-reserved choice or the closure sweep shows that safe correction
