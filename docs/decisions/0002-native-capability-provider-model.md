@@ -102,8 +102,9 @@ and executes only argument vectors equivalent to
 <reviewed-manager-argv...>`. A root process uses the same verified supervisor
 without sudo. GNU timeout's normal process-group behavior is required;
 `--foreground` is prohibited. The five-second TERM-to-KILL grace is small and
-bounded so a cooperative manager can clean up while a TERM-resistant descendant
-cannot outlive the transaction indefinitely.
+bounded so a cooperative manager can clean up while TERM-resistant work that
+remains under GNU timeout's supported process-group supervision is escalated
+without an indefinite wait.
 
 The privileged supervisor, rather than the invoking Python process, is
 authoritative for elevated Linux termination. Python process-tree termination
@@ -129,6 +130,22 @@ group kill. If confirmed privileged termination cannot be established, that
 uncertain supervision failure replaces a normal interruption return so callers
 cannot safely infer that retry is ready.
 
+Agent Tools owns the synchronous package-manager invocation and work that
+remains under these supported supervision mechanisms. It does not provide a
+portable process sandbox or claim containment of arbitrary processes that a
+package hook or installed program intentionally detaches. After the supervised
+leader exits, output pipes receive only a one-second closure guard. A retained
+pipe is positive evidence that synchronous quiescence was not established: the
+runner stops its polling readers, closes its local handles, preserves bounded
+output tails and the actual leader exit status, and reports `SUPERVISOR_FAILED`
+with uncertain external state. It does not kill broadly, perform final
+verification, convert a temporarily visible executable into success, retry
+automatically, or attempt rollback/removal. Retry is permitted only after an
+operator independently establishes that relevant activity has quiesced and
+generates a fresh plan from current state. Invisible detached work is not
+speculatively detected; normal completion with normally closed output remains
+governed by manager exit evidence and complete rediscovery.
+
 The runner drains stdout and stderr concurrently while retaining at most one
 MiB of tail evidence per stream. Continuous installer output therefore cannot
 make memory use grow for the full command timeout, while the report preserves
@@ -149,9 +166,15 @@ probe set, its `ANY`/`ALL` policy, and any native target architecture.
 Package-manager success
 without that final evidence is a reported failure. Individually verified paths
 remain visible in that failure report even when an `ALL` condition or native
-architecture target is not satisfied. Reusing the same plan after
-the provider verifies performs no further command. Managed-state persistence
-remains a separate subsequent contract.
+architecture target is not satisfied. Reusing the same plan after any freshly
+detected catalogue-satisfying provider verifies performs no further command.
+Ordinary actions accept the highest-priority satisfying provider in the
+complete fresh capability state. Native-replacement actions accept any fresh
+satisfying provider whose verified executable evidence meets the target
+architecture; translated, unknown-architecture, or otherwise unsuitable
+evidence does not suppress the authorized replacement. The report names the
+provider whose fresh evidence caused the skip. Managed-state persistence remains
+a separate subsequent contract.
 
 Execution serialization is process-local. One process-wide re-entrant lock
 encloses current-context and catalogue validation, fresh provider detection,
