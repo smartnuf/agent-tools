@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -117,6 +118,42 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
                 )
             time.sleep(1.2)
             self.assertFalse(marker.exists())
+
+    def test_runner_drains_output_while_retaining_only_bounded_tails(self):
+        size = provider_execution.MAX_CAPTURED_OUTPUT_CHARS + 200_000
+        code = (
+            "import sys;"
+            f"sys.stdout.write('o'*{size});"
+            f"sys.stderr.write('e'*{size})"
+        )
+        result = provider_execution._run((sys.executable, "-c", code), 10)
+        prefix = "[earlier output truncated]\n"
+        self.assertTrue(result.stdout.startswith(prefix))
+        self.assertTrue(result.stderr.startswith(prefix))
+        self.assertLessEqual(
+            len(result.stdout),
+            len(prefix) + provider_execution.MAX_CAPTURED_OUTPUT_CHARS,
+        )
+        self.assertLessEqual(
+            len(result.stderr),
+            len(prefix) + provider_execution.MAX_CAPTURED_OUTPUT_CHARS,
+        )
+        self.assertTrue(result.stdout.endswith("o" * 100))
+        self.assertTrue(result.stderr.endswith("e" * 100))
+
+    @unittest.skipIf(os.name == "nt", "POSIX process-group fixture")
+    def test_runner_terminates_descendant_that_retains_output_pipes(self):
+        code = (
+            "import subprocess,sys;"
+            "subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'])"
+        )
+        with mock.patch.object(
+            provider_execution, "OUTPUT_PIPE_CLOSURE_GUARD_SECONDS", 0.1
+        ):
+            started = time.monotonic()
+            result = provider_execution._run((sys.executable, "-c", code), 5)
+        self.assertEqual(result.returncode, 0)
+        self.assertLess(time.monotonic() - started, 2)
 
     @unittest.skipIf(os.name == "nt", "POSIX signal fixture")
     def test_interrupt_terminates_descendant_process_before_propagating(self):

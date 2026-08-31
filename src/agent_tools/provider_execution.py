@@ -9,6 +9,7 @@ import signal
 import shutil
 import subprocess
 import threading
+from collections import deque
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -42,8 +43,10 @@ from .python_selection import NativeStatus, normalize_architecture
 
 
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 300
+MAX_CAPTURED_OUTPUT_CHARS = 1024 * 1024
 ELEVATED_TERM_TO_KILL_GRACE_SECONDS = 5
 ELEVATED_SUPERVISOR_GUARD_SECONDS = 10
+OUTPUT_PIPE_CLOSURE_GUARD_SECONDS = 10
 POSIX_SIGKILL_RETURNCODE = -9
 _ENVIRONMENT_LOCK = threading.RLock()
 _EXECUTION_LOCK = threading.RLock()
@@ -114,6 +117,7 @@ Runner = Callable[[tuple[str, ...], int], subprocess.CompletedProcess[str]]
 Detector = Callable[[CapabilitySpec, MachineState], CapabilityState]
 ContextReader = Callable[[], MachineState]
 ManagerVerifier = Callable[[PackageManagerState, MachineState], bool]
+ManagerArchitectureReader = Callable[[PackageManagerState], str | None]
 PrivilegeResolver = Callable[[ProviderAction], str | None]
 SupervisorResolver = Callable[[ProviderAction], str | None]
 PrivilegePreflight = Callable[[tuple[str, ...]], bool]
@@ -161,32 +165,109 @@ def _run(
         text=True,
         errors="replace",
     )
+    stdout_tail = _BoundedOutputTail(MAX_CAPTURED_OUTPUT_CHARS)
+    stderr_tail = _BoundedOutputTail(MAX_CAPTURED_OUTPUT_CHARS)
+    readers = (
+        threading.Thread(
+            target=_drain_output,
+            args=(process.stdout, stdout_tail),
+            daemon=True,
+        ),
+        threading.Thread(
+            target=_drain_output,
+            args=(process.stderr, stderr_tail),
+            daemon=True,
+        ),
+    )
+    for reader in readers:
+        reader.start()
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
+        process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         if privileged_supervision:
             _terminate_privileged_supervisor(process)
         else:
             _terminate_process_tree(process)
-        stdout, stderr = process.communicate()
+        _join_output_readers(process, readers, privileged_supervision)
         raise subprocess.TimeoutExpired(
             argv,
             timeout,
-            output=stdout,
-            stderr=stderr,
+            output=stdout_tail.value(),
+            stderr=stderr_tail.value(),
         ) from None
     except BaseException:
         if privileged_supervision:
             _terminate_privileged_supervisor(process)
         else:
             _terminate_process_tree(process)
-        process.communicate()
+        _join_output_readers(process, readers, privileged_supervision)
         raise
+    _join_output_readers(process, readers, privileged_supervision)
     return subprocess.CompletedProcess(
         argv,
         process.returncode,
-        stdout,
-        stderr,
+        stdout_tail.value(),
+        stderr_tail.value(),
+    )
+
+
+class _BoundedOutputTail:
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._chunks: deque[str] = deque()
+        self._size = 0
+        self._truncated = False
+
+    def append(self, chunk: str) -> None:
+        self._chunks.append(chunk)
+        self._size += len(chunk)
+        while self._size > self._limit and self._chunks:
+            overflow = self._size - self._limit
+            first = self._chunks[0]
+            if len(first) <= overflow:
+                self._chunks.popleft()
+                self._size -= len(first)
+            else:
+                self._chunks[0] = first[overflow:]
+                self._size -= overflow
+            self._truncated = True
+
+    def value(self) -> str:
+        value = "".join(self._chunks)
+        if self._truncated:
+            return "[earlier output truncated]\n" + value
+        return value
+
+
+def _drain_output(stream, tail: _BoundedOutputTail) -> None:
+    if stream is None:
+        return
+    try:
+        while chunk := stream.read(8192):
+            tail.append(chunk)
+    finally:
+        stream.close()
+
+
+def _join_output_readers(
+    process: subprocess.Popen[str],
+    readers: tuple[threading.Thread, threading.Thread],
+    privileged_supervision: bool,
+) -> None:
+    """Bound pipe closure and fail truthfully if descendants retain a pipe."""
+
+    for reader in readers:
+        reader.join(timeout=OUTPUT_PIPE_CLOSURE_GUARD_SECONDS)
+    if not any(reader.is_alive() for reader in readers):
+        return
+    if not privileged_supervision:
+        _terminate_process_tree(process)
+        for reader in readers:
+            reader.join(timeout=OUTPUT_PIPE_CLOSURE_GUARD_SECONDS)
+        if not any(reader.is_alive() for reader in readers):
+            return
+    raise ExecutionContractError(
+        "command output pipes did not close; descendant termination could not be established"
     )
 
 
@@ -198,7 +279,7 @@ def _terminate_privileged_supervisor(process: subprocess.Popen[str]) -> None:
     except ProcessLookupError:
         pass
     try:
-        process.communicate(
+        process.wait(
             timeout=(
                 ELEVATED_TERM_TO_KILL_GRACE_SECONDS
                 + ELEVATED_SUPERVISOR_GUARD_SECONDS
@@ -268,6 +349,28 @@ def _verify_manager(state: PackageManagerState, machine: MachineState) -> bool:
     if _path_key(resolved, machine) != _path_key(expected, machine):
         return False
     return state.installation_root is None or Path(state.installation_root).is_dir()
+
+
+def _read_manager_architecture(state: PackageManagerState) -> str | None:
+    if state.manager != "brew":
+        return state.architecture
+    executable = state.executable_path
+    environment = {**os.environ, "HOMEBREW_NO_AUTO_UPDATE": "1"}
+    try:
+        result = subprocess.run(
+            (executable, "ruby", "-e", "puts Hardware::CPU.arch"),
+            check=False,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=10,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return lines[-1] if result.returncode == 0 and lines else None
 
 
 def _resolve_privilege(action: ProviderAction) -> str | None:
@@ -644,6 +747,7 @@ def execute_provider_plan(
     detector: Detector = _detect,
     current_context: ContextReader = current_machine,
     manager_verifier: ManagerVerifier = _verify_manager,
+    manager_architecture_reader: ManagerArchitectureReader = _read_manager_architecture,
     privilege_resolver: PrivilegeResolver = _resolve_privilege,
     supervisor_resolver: SupervisorResolver = _resolve_supervisor,
     privilege_preflight: PrivilegePreflight = _preflight_privilege,
@@ -662,6 +766,7 @@ def execute_provider_plan(
             detector=detector,
             current_context=current_context,
             manager_verifier=manager_verifier,
+            manager_architecture_reader=manager_architecture_reader,
             privilege_resolver=privilege_resolver,
             supervisor_resolver=supervisor_resolver,
             privilege_preflight=privilege_preflight,
@@ -678,6 +783,7 @@ def _execute_provider_plan(
     detector: Detector,
     current_context: ContextReader,
     manager_verifier: ManagerVerifier,
+    manager_architecture_reader: ManagerArchitectureReader,
     privilege_resolver: PrivilegeResolver,
     supervisor_resolver: SupervisorResolver,
     privilege_preflight: PrivilegePreflight,
@@ -773,6 +879,19 @@ def _execute_provider_plan(
                     action,
                     ActionOutcome.MANAGER_UNAVAILABLE,
                     detail="verified package-manager identity is no longer available",
+                )
+            )
+            return _failed_report(
+                plan, context, reports, mutation_may_have_started=False
+            )
+        if action.manager == "brew" and normalize_architecture(
+            manager_architecture_reader(action.manager_state)
+        ) != normalize_architecture(action.manager_state.architecture):
+            reports.append(
+                _action_report(
+                    action,
+                    ActionOutcome.MANAGER_UNAVAILABLE,
+                    detail="Homebrew architecture no longer matches reviewed evidence",
                 )
             )
             return _failed_report(
@@ -903,11 +1022,7 @@ def _execute_provider_plan(
                     mutation_may_have_started=earlier_command_completed,
                 )
             command_report = _command_report(argv, result)
-            if elevated_linux and result.returncode in {
-                124,
-                137,
-                POSIX_SIGKILL_RETURNCODE,
-            }:
+            if elevated_linux and result.returncode == 124:
                 command_report = CommandReport(
                     command_report.argv,
                     command_report.returncode,
@@ -935,10 +1050,10 @@ def _execute_provider_plan(
                 outcome = supervised_outcomes[result.returncode]
                 details = {
                     124: "privileged command reached its timeout and terminated",
-                    137: "privileged command required KILL after the TERM grace interval",
+                    137: "command or supervisor exited after SIGKILL; timeout expiry is not independently established",
                     POSIX_SIGKILL_RETURNCODE: (
-                        "privileged command required KILL after the TERM grace "
-                        "interval"
+                        "command or supervisor exited after SIGKILL; timeout "
+                        "expiry is not independently established"
                     ),
                     125: "GNU timeout supervisor failed",
                     126: "GNU timeout could not start the reviewed command",

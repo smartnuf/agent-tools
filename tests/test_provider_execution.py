@@ -358,8 +358,13 @@ class ProviderExecutionTests(unittest.TestCase):
                 self.assertEqual(action.commands[0].stderr, "raw-err")
                 self.assertEqual(
                     action.commands[0].timed_out,
-                    returncode in {124, 137, -9},
+                    returncode == 124,
                 )
+                if returncode in {137, -9}:
+                    self.assertIn(
+                        "not independently established",
+                        action.detail,
+                    )
 
     def test_later_supervisor_start_failure_preserves_prior_mutation_guidance(self):
         plan = self.plan(capabilities.POPPLER)
@@ -818,6 +823,67 @@ class ProviderExecutionTests(unittest.TestCase):
                 allow_provider_mutation=True,
                 current_context=lambda: machine,
             )
+
+    def test_homebrew_architecture_is_revalidated_live_before_mutation(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        manager = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            machine,
+            locator=lambda probe, context: None,
+        )
+        plan = provider_plans.generate_provider_plan(
+            (absent,), ("ghostscript",), package_managers=(manager,)
+        )
+        runner = Mock(side_effect=AssertionError("must not run"))
+        report = provider_execution.execute_provider_plan(
+            plan,
+            allow_provider_mutation=True,
+            current_context=lambda: machine,
+            manager_verifier=lambda state, context: True,
+            manager_architecture_reader=lambda state: "x86_64",
+            privilege_resolver=lambda action: "",
+            detector=lambda capability, context: absent,
+            runner=runner,
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.MANAGER_UNAVAILABLE,
+        )
+        self.assertIn("architecture", report.actions[0].detail)
+        runner.assert_not_called()
+
+    def test_homebrew_architecture_probe_is_bounded_and_nonmutating(self):
+        state = provider_plans.PackageManagerState(
+            "brew",
+            "/aliases/brew",
+            "host",
+            "arm64",
+            resolved_executable_path="/opt/homebrew/bin/brew",
+        )
+        completed = subprocess.CompletedProcess((), 0, "arm64\n", "")
+        with patch.object(subprocess, "run", return_value=completed) as run:
+            self.assertEqual(
+                provider_execution._read_manager_architecture(state),
+                "arm64",
+            )
+        self.assertEqual(
+            run.call_args.args[0],
+            (
+                "/aliases/brew",
+                "ruby",
+                "-e",
+                "puts Hardware::CPU.arch",
+            ),
+        )
+        self.assertEqual(run.call_args.kwargs["timeout"], 10)
+        self.assertIs(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertEqual(
+            run.call_args.kwargs["env"]["HOMEBREW_NO_AUTO_UPDATE"],
+            "1",
+        )
 
     def test_native_replacement_requires_target_architecture_after_mutation(self):
         machine = capabilities.MachineState("Windows", "arm64")
