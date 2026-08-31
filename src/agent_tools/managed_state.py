@@ -118,7 +118,7 @@ def _resolved_home(home: Path | None) -> Path:
             home = Path.home()
         except (OSError, RuntimeError) as error:
             raise ManagedStateError(f"user home directory is unavailable: {error}") from error
-    if not home.is_absolute():
+    if not posixpath.isabs(home.as_posix()):
         raise ManagedStateError("user home directory is not absolute")
     return home
 

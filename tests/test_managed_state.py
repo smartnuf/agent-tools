@@ -131,6 +131,14 @@ class ManagedStateTests(unittest.TestCase):
             managed_state.managed_state_path(
                 platform_name="Darwin", environment={}, home=Path("relative")
             )
+        self.assertEqual(
+            managed_state.managed_state_path(
+                platform_name="Linux",
+                environment={},
+                home=Path("/posix/home"),
+            ),
+            Path("/posix/home/.local/state/agent-tools/managed-state.json"),
+        )
 
     def test_canonical_empty_plan_needs_no_context_or_persistence(self) -> None:
         plan = provider_plans.generate_provider_plan((), (), package_managers=())
