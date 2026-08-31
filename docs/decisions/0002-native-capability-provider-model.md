@@ -90,6 +90,21 @@ package-manager executable identity, required privilege path, and whether the
 planned provider already satisfies the request. A nonempty plan refuses unless
 the dedicated non-interactive provider-mutation authorization is present.
 
+For issue #51 this is a trusted producer/consumer seam, not a general-purpose
+execution API. The supported executor input is a plan legitimately emitted by
+the canonical provider planner from the current built-in catalogue and a
+supported machine/execution context. The executor still revalidates every
+accepted authorization, privilege, bounded-execution, partial-state,
+supervision, rediscovery, and verification invariant at its mutation boundary;
+the trust boundary does not excuse a defect reachable on that supported path.
+It does not promise indefinite defensive handling of arbitrary caller-built
+object graphs, hypothetical future providers, unsupported platforms or
+architectures, or stronger process containment than this decision specifies.
+Issue #51 exposes no public `tools install` command. A future public mutation
+surface or persistence contract, including issue #52, must define any broader
+input-validation and compatibility guarantees explicitly rather than treating
+this packaged executor as a universal untrusted-plan sandbox.
+
 Commands run sequentially in isolated process trees with explicit timeouts and
 captured outcomes; a timeout terminates and reaps that tree before returning.
 On Linux, a `SYSTEM`-privilege action has a stricter execution contract. Agent
@@ -208,7 +223,10 @@ with a missing-provider action. Before mutation or `NO_CHANGES`, the executor
 resolves every omitted request in the built-in catalogue and revalidates fresh
 provider evidence against the current immutable machine context. Unknown,
 stale, contradictory, or no-longer-verified requests fail preflight without
-claiming mutation.
+claiming mutation. Aggregate capability availability alone is insufficient:
+the same catalogue-satisfying, probe-policy-aware, absolute-identity predicate
+used by fresh action skips and final verification must identify an acceptable
+current provider.
 
 ## Final-provider selection contract
 
