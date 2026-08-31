@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Iterable
 
 from .capabilities import (
@@ -14,7 +15,9 @@ from .capabilities import (
     ProviderSpec,
     ProbePolicy,
     MachineState,
+    capability_availability,
     get_capability,
+    provider_availability,
 )
 from .python_selection import NativeStatus, normalize_architecture
 
@@ -194,19 +197,6 @@ def _option(
     return None
 
 
-def _aggregate_availability(state: CapabilityState) -> Availability:
-    """Derive capability availability from its immutable provider observations."""
-
-    satisfying = tuple(
-        item for item in state.providers if item.provider.satisfies_capability
-    )
-    if any(item.availability is Availability.AVAILABLE for item in satisfying):
-        return Availability.AVAILABLE
-    if any(item.availability is Availability.ABSENT for item in satisfying):
-        return Availability.ABSENT
-    return Availability.UNSUPPORTED
-
-
 def _manager_evidence_key(
     state: PackageManagerState,
 ) -> tuple[str, str, str, str]:
@@ -218,6 +208,39 @@ def _manager_evidence_key(
         state.execution_environment,
         normalize_architecture(state.architecture),
     )
+
+
+def _manager_path_is_absolute(path: str, context: MachineState | None) -> bool:
+    """Validate an executable identity using the plan platform's path rules."""
+
+    if context is None:
+        return PureWindowsPath(path).is_absolute() or PurePosixPath(path).is_absolute()
+    if context.platform == "Windows":
+        return PureWindowsPath(path).is_absolute()
+    return PurePosixPath(path).is_absolute()
+
+
+def _validate_provider_observations(state: CapabilityState) -> None:
+    """Reject provider enums that contradict catalogue probes and evidence."""
+
+    for provider_state in state.providers:
+        provider = provider_state.provider
+        expected_probes = provider.probes if provider.supports(state.machine) else ()
+        if tuple(item.probe for item in provider_state.executables) != expected_probes:
+            raise PlanningError(
+                "detected provider probes do not match built-in catalogue: "
+                f"{provider.provider_id}"
+            )
+        expected = provider_availability(
+            provider,
+            state.machine,
+            provider_state.executables,
+        )
+        if provider_state.availability is not expected:
+            raise PlanningError(
+                "detected provider availability contradicts executable evidence: "
+                f"{provider.provider_id}"
+            )
 
 
 def generate_provider_plan(
@@ -260,6 +283,10 @@ def generate_provider_plan(
         if not manager_state.executable_path.strip():
             raise PlanningError(
                 f"package manager has no verified executable path: {manager_state.manager}"
+            )
+        if not _manager_path_is_absolute(manager_state.executable_path, context):
+            raise PlanningError(
+                f"package manager executable path is not absolute: {manager_state.manager}"
             )
     by_identity: dict[tuple[str, str, str], PackageManagerState] = {}
     for manager_state in supplied_manager_states:
@@ -320,7 +347,8 @@ def generate_provider_plan(
             raise PlanningError(
                 f"detected state does not match built-in catalogue: {capability_id}"
             )
-        if state.availability is not _aggregate_availability(state):
+        _validate_provider_observations(state)
+        if state.availability is not capability_availability(state.providers):
             raise PlanningError(
                 f"detected capability availability contradicts provider states: {capability_id}"
             )
@@ -384,7 +412,10 @@ def generate_provider_plan(
             if displaced
             else "no compatible provider verified"
         )
-        if manager_native_status is NativeStatus.TRANSLATED:
+        if (
+            manager_native_status is NativeStatus.TRANSLATED
+            and manager_state in translated_fallbacks
+        ):
             reason += "; explicit translated package-manager fallback"
         actions.append(
             ProviderAction(

@@ -236,6 +236,22 @@ class ProviderPlanTests(unittest.TestCase):
             provider_plans.generate_provider_plan(
                 (state,), ("poppler",), package_managers=(missing_path,)
             )
+        for path in ("apt-get", "tools/apt-get"):
+            manager = provider_plans.PackageManagerState("apt", path, "host")
+            with self.subTest(path=path), self.assertRaisesRegex(
+                provider_plans.PlanningError, "not absolute"
+            ):
+                provider_plans.generate_provider_plan(
+                    (state,), ("poppler",), package_managers=(manager,)
+                )
+        windows = self.state(capabilities.POPPLER, "Windows")
+        relative_winget = provider_plans.PackageManagerState(
+            "winget", "C:tools\\winget.exe", "host"
+        )
+        with self.assertRaisesRegex(provider_plans.PlanningError, "not absolute"):
+            provider_plans.generate_provider_plan(
+                (windows,), ("poppler",), package_managers=(relative_winget,)
+            )
         first = provider_plans.PackageManagerState(
             "brew", "/opt/homebrew/bin/brew", "host", "arm64"
         )
@@ -522,6 +538,67 @@ class ProviderPlanTests(unittest.TestCase):
                 provider_plans.generate_provider_plan(
                     (state,), ("poppler",), package_managers=(self.manager("apt"),)
                 )
+
+    def test_provider_availability_must_match_any_and_all_probe_evidence(self):
+        cases = (
+            (capabilities.POPPLER, capabilities.ProbePolicy.ALL),
+            (capabilities.GHOSTSCRIPT, capabilities.ProbePolicy.ANY),
+        )
+        for capability, policy in cases:
+            detected = self.state(capability)
+            provider = detected.providers[0]
+            self.assertEqual(provider.provider.probe_policy, policy)
+            contradictory_provider = capabilities.ProviderState(
+                provider.provider,
+                capabilities.Availability.AVAILABLE,
+                provider.executables,
+            )
+            contradictory = capabilities.CapabilityState(
+                detected.capability,
+                detected.machine,
+                capabilities.Availability.AVAILABLE,
+                (contradictory_provider, *detected.providers[1:]),
+            )
+            with self.subTest(policy=policy), self.assertRaisesRegex(
+                provider_plans.PlanningError,
+                "provider availability contradicts executable evidence",
+            ):
+                provider_plans.generate_provider_plan(
+                    (contradictory,),
+                    (capability.capability_id,),
+                    package_managers=(self.manager("apt"),),
+                )
+
+    def test_valid_absolute_manager_paths_follow_plan_platform(self):
+        linux = self.state(capabilities.POPPLER)
+        windows = self.state(capabilities.POPPLER, "Windows")
+        linux_plan = provider_plans.generate_provider_plan(
+            (linux,), ("poppler",), package_managers=(self.manager("apt"),)
+        )
+        windows_plan = provider_plans.generate_provider_plan(
+            (windows,), ("poppler",), package_managers=(self.manager("winget"),)
+        )
+        self.assertEqual(linux_plan.actions[0].commands[0][0], "/usr/bin/apt-get")
+        self.assertEqual(
+            windows_plan.actions[0].commands[0][0],
+            "C:/Windows/System32/winget.exe",
+        )
+
+    def test_irrelevant_manager_translation_is_not_reported_as_fallback(self):
+        machine = capabilities.MachineState("Windows", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.POPPLER, machine, locator=lambda probe, machine: None
+        )
+        translated_winget = provider_plans.PackageManagerState(
+            "winget",
+            "C:/Windows/System32/winget.exe",
+            "host",
+            "x86_64",
+        )
+        plan = provider_plans.generate_provider_plan(
+            (state,), ("poppler",), package_managers=(translated_winget,)
+        )
+        self.assertNotIn("translated package-manager fallback", plan.actions[0].reason)
 
 
 if __name__ == "__main__":
