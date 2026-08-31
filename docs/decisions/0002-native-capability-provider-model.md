@@ -111,8 +111,9 @@ remains the same-privilege mechanism on other paths, but an elevated action
 never falls back to claiming success from an unprivileged group kill. Missing
 GNU timeout, unavailable non-interactive sudo, denied exact-command policy,
 supervisor failure, and command-start failure all fail closed. Reports preserve
-the actual supervised argv, raw return code, stdout, and stderr and distinguish
-ordinary command failure, timeout expiry, TERM-to-KILL escalation, supervisor
+the actual supervised argv, raw return code, and bounded stdout/stderr tails
+(marked when earlier output was truncated), and distinguish
+ordinary command failure, timeout expiry, ambiguous forced kill, supervisor
 failure, command-start failure, and privilege unavailability to the extent GNU
 timeout's exit contract permits. An outer Python guard that expires after the
 command timeout plus grace is an uncertain supervision failure, not a clean
@@ -127,6 +128,15 @@ privileged-side termination; it does not substitute an unprivileged process-
 group kill. If confirmed privileged termination cannot be established, that
 uncertain supervision failure replaces a normal interruption return so callers
 cannot safely infer that retry is ready.
+
+The runner drains stdout and stderr concurrently while retaining at most one
+MiB of tail evidence per stream. Continuous installer output therefore cannot
+make memory use grow for the full command timeout, while the report preserves
+the most recent diagnostics and explicitly marks discarded earlier output.
+GNU timeout status 124 is positive timeout evidence. Status 137 or a direct
+SIGKILL return is reported only as an ambiguous forced kill—an administrator,
+the OOM killer, or timeout escalation can produce it—so it does not set the
+report's `timed_out` flag or claim the TERM grace expired.
 
 The executor stops on the first timeout, nonzero exit, unavailable manager, or
 missing privilege. Failures before any command starts report no attempted
@@ -226,6 +236,12 @@ architecture; their local execution environment, catalogue option, and any
 manager-specific target argument are the relevant planning evidence. Planned
 argv uses the verified manager path so a later executor does not silently
 resolve a different installation.
+
+Immediately before executing a Homebrew action, the executor runs a bounded,
+noninteractive, no-auto-update Homebrew Ruby architecture probe through the
+exact planned executable path. Missing or changed live architecture evidence
+invalidates the manager before mutation; the immutable plan's earlier
+architecture is authorization evidence, not a substitute for current state.
 
 When planning selects translated Homebrew, the immutable action carries a
 dedicated structured authorization bit derived from membership of that exact
