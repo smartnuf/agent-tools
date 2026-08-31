@@ -99,6 +99,36 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         self.assertIn("unknown requested capability", report.recovery_guidance[0])
 
+    def test_mixed_plan_revalidates_requests_omitted_from_actions(self):
+        ghostscript = self.state(capabilities.GHOSTSCRIPT)
+        poppler_available = self.state(capabilities.POPPLER, available=True)
+        plan = provider_plans.generate_provider_plan(
+            (ghostscript, poppler_available),
+            ("ghostscript", "poppler"),
+            package_managers=(self.manager,),
+        )
+        self.assertEqual(
+            tuple(action.capability_id for action in plan.actions),
+            ("ghostscript",),
+        )
+        poppler_missing = self.state(capabilities.POPPLER)
+        runner = Mock(side_effect=AssertionError("must not run"))
+        report = self.execute(
+            plan,
+            detector=lambda capability, machine: poppler_missing,
+            runner=runner,
+        )
+        self.assertEqual(
+            report.outcome,
+            provider_execution.PlanOutcome.PREFLIGHT_FAILED,
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.NOT_ATTEMPTED,
+        )
+        self.assertIn("no longer verifies: poppler", report.recovery_guidance[1])
+        runner.assert_not_called()
+
     def test_mutating_plan_refuses_without_dedicated_authorization(self):
         runner = Mock(side_effect=AssertionError("must not run"))
         report = provider_execution.execute_provider_plan(
@@ -330,6 +360,33 @@ class ProviderExecutionTests(unittest.TestCase):
                     action.commands[0].timed_out,
                     returncode in {124, 137, -9},
                 )
+
+    def test_later_supervisor_start_failure_preserves_prior_mutation_guidance(self):
+        plan = self.plan(capabilities.POPPLER)
+        absent = self.state(capabilities.POPPLER)
+        calls = 0
+
+        def run(argv, timeout):
+            nonlocal calls
+            calls += 1
+            return subprocess.CompletedProcess(
+                argv,
+                0 if calls == 1 else 126,
+                "updated" if calls == 1 else "",
+                "could not invoke" if calls == 2 else "",
+            )
+
+        report = self.execute(
+            plan,
+            detector=self.detector_sequence(absent),
+            runner=run,
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.COMMAND_START_FAILED,
+        )
+        self.assertEqual(len(report.actions[0].commands), 2)
+        self.assertIn("partial host state", report.recovery_guidance[0])
 
     def test_elevated_preflight_fails_before_runner_without_prompt_path(self):
         absent = self.state(capabilities.GHOSTSCRIPT)

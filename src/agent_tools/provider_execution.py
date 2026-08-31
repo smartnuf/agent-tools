@@ -577,6 +577,29 @@ def _action_report(
     )
 
 
+def _omitted_request_failure(
+    plan: ProviderPlan,
+    context: MachineState,
+    detector: Detector,
+) -> str | None:
+    action_capabilities = {action.capability_id for action in plan.actions}
+    for capability_id in plan.requested_capabilities:
+        if capability_id in action_capabilities:
+            continue
+        try:
+            capability = get_capability(capability_id)
+        except KeyError:
+            return f"unknown requested capability: {capability_id}"
+        state = detector(capability, context)
+        try:
+            validate_capability_state(state, expected_context=context)
+        except PlanningError as error:
+            return f"omitted capability evidence is stale: {error}"
+        if state.availability is not Availability.AVAILABLE:
+            return f"requested capability no longer verifies: {capability_id}"
+    return None
+
+
 def execute_provider_plan(
     plan: ProviderPlan,
     *,
@@ -627,36 +650,14 @@ def _execute_provider_plan(
 ) -> PlanExecutionReport:
     context = _validate_plan(plan, current_context())
     if not plan.actions:
-        for capability_id in plan.requested_capabilities:
-            try:
-                capability = get_capability(capability_id)
-            except KeyError:
-                return PlanExecutionReport(
-                    context,
-                    plan.requested_capabilities,
-                    PlanOutcome.PREFLIGHT_FAILED,
-                    (),
-                    (f"unknown requested capability: {capability_id}",),
-                )
-            state = detector(capability, context)
-            try:
-                validate_capability_state(state, expected_context=context)
-            except PlanningError as error:
-                return PlanExecutionReport(
-                    context,
-                    plan.requested_capabilities,
-                    PlanOutcome.PREFLIGHT_FAILED,
-                    (),
-                    (f"actionless capability evidence is stale: {error}",),
-                )
-            if state.availability is not Availability.AVAILABLE:
-                return PlanExecutionReport(
-                    context,
-                    plan.requested_capabilities,
-                    PlanOutcome.PREFLIGHT_FAILED,
-                    (),
-                    (f"requested capability no longer verifies: {capability_id}",),
-                )
+        if failure := _omitted_request_failure(plan, context, detector):
+            return PlanExecutionReport(
+                context,
+                plan.requested_capabilities,
+                PlanOutcome.PREFLIGHT_FAILED,
+                (),
+                (failure,),
+            )
         return PlanExecutionReport(
             context,
             plan.requested_capabilities,
@@ -677,6 +678,25 @@ def _execute_provider_plan(
                 for action in plan.actions
             ),
             ("rerun with explicit provider-mutation authorization",),
+        )
+
+    if failure := _omitted_request_failure(plan, context, detector):
+        return PlanExecutionReport(
+            context,
+            plan.requested_capabilities,
+            PlanOutcome.PREFLIGHT_FAILED,
+            tuple(
+                _action_report(
+                    action,
+                    ActionOutcome.NOT_ATTEMPTED,
+                    detail="not attempted because requested capability preflight failed",
+                )
+                for action in plan.actions
+            ),
+            (
+                "no provider command started; this attempt did not mutate provider state",
+                failure,
+            ),
         )
 
     reports: list[ActionReport] = []
@@ -898,11 +918,11 @@ def _execute_provider_plan(
                     plan,
                     context,
                     reports,
-                    mutation_may_have_started=result.returncode in {
-                        124,
-                        137,
-                        POSIX_SIGKILL_RETURNCODE,
-                    },
+                    mutation_may_have_started=(
+                        len(commands) > 1
+                        or result.returncode
+                        in {124, 137, POSIX_SIGKILL_RETURNCODE}
+                    ),
                 )
             if result.returncode != 0:
                 reports.append(
