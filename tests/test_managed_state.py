@@ -228,6 +228,59 @@ class ManagedStateTests(unittest.TestCase):
                     )
                     path.write_text(json.dumps(document), encoding="utf-8")
 
+    def test_command_return_code_requires_explicit_null_or_exact_integer(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            for returncode in (True, 1.0, "1", object()):
+                with self.subTest(returncode=returncode):
+                    document = managed_state.load_document(path)
+                    evidence = document["records"][0]["command_evidence"][0]
+                    if type(returncode) is object:
+                        del evidence["returncode"]
+                    else:
+                        evidence["returncode"] = returncode
+                    path.write_text(json.dumps(document), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError, "command"
+                    ):
+                        managed_state.load_document(path)
+                    evidence["returncode"] = 0
+                    path.write_text(json.dumps(document), encoding="utf-8")
+
+    def test_capability_provider_origin_relationship_is_validated(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            for field, value in (
+                ("capability_id", "bash"),
+                ("origin", "tool-managed"),
+            ):
+                with self.subTest(field=field):
+                    document = managed_state.load_document(path)
+                    if field == "origin":
+                        document["records"][0]["provider"][field] = value
+                    else:
+                        document["records"][0][field] = value
+                    path.write_text(json.dumps(document), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError, "provider identity"
+                    ):
+                        managed_state.load_document(path)
+                    document["records"][0]["capability_id"] = "ghostscript"
+                    document["records"][0]["provider"]["origin"] = "system-external"
+                    path.write_text(json.dumps(document), encoding="utf-8")
+
     def test_success_appends_immutable_nonownership_records(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
@@ -552,7 +605,7 @@ class ManagedStateTests(unittest.TestCase):
             self.assertEqual(record["command_evidence"], [])
             self.assertIn("progress", record["verification"]["detail"])
 
-    def test_record_assembly_interrupt_is_conservatively_persisted(self) -> None:
+    def test_record_assembly_interrupt_preserves_completed_evidence(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
             original_record = managed_state._record
@@ -580,8 +633,9 @@ class ManagedStateTests(unittest.TestCase):
                 managed_state.PersistenceOutcome.SUCCEEDED,
             )
             record = managed_state.load_document(path)["records"][0]
-            self.assertEqual(record["verification"]["outcome"], "interrupted")
-            self.assertEqual(record["command_evidence"], [])
+            self.assertEqual(record["verification"]["outcome"], "succeeded")
+            self.assertEqual(record["command_evidence"][0]["returncode"], 0)
+            self.assertEqual(record["command_evidence"][0]["stdout"], "installed")
 
     def test_invalid_default_state_path_blocks_before_executor(self) -> None:
         executor = Mock(side_effect=AssertionError("must not mutate"))

@@ -194,6 +194,24 @@ def load_document(path: Path) -> dict[str, Any]:
             raise ManagedStateError(f"managed-state record {index} has invalid provider evidence")
         if provider["origin"] not in {"system-external", "tool-managed"}:
             raise ManagedStateError(f"managed-state record {index} has invalid provider origin")
+        try:
+            capability = get_capability(record["capability_id"])
+        except KeyError as error:
+            raise ManagedStateError(
+                f"managed-state record {index} names an unknown capability"
+            ) from error
+        provider_spec = next(
+            (
+                item
+                for item in capability.providers
+                if item.provider_id == provider["id"]
+            ),
+            None,
+        )
+        if provider_spec is None or provider_spec.origin.value != provider["origin"]:
+            raise ManagedStateError(
+                f"managed-state record {index} has inconsistent provider identity"
+            )
         if not all(
             isinstance(package_manager.get(name), str)
             for name in ("name", "executable")
@@ -245,7 +263,11 @@ def load_document(path: Path) -> dict[str, Any]:
                 isinstance(evidence, dict)
                 and isinstance(evidence.get("argv"), list)
                 and all(isinstance(argument, str) for argument in evidence["argv"])
-                and (evidence.get("returncode") is None or isinstance(evidence["returncode"], int))
+                and "returncode" in evidence
+                and (
+                    evidence.get("returncode") is None
+                    or type(evidence["returncode"]) is int
+                )
                 and isinstance(evidence.get("stdout"), str)
                 and isinstance(evidence.get("stderr"), str)
                 and isinstance(evidence.get("timed_out"), bool)
@@ -436,8 +458,8 @@ def execute_provider_plan(
                 document, plan, report, requested_at
             )
         except KeyboardInterrupt as error:
-            interruption = ManagedExecutionInterrupted(error)
-            report = _unknown_interrupted_report(plan)
+            if interruption is None:
+                interruption = ManagedExecutionInterrupted(error)
             completed_at, attempted_indexes, updated = _prepare_update(
                 document, plan, report, requested_at
             )
