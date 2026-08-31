@@ -92,6 +92,22 @@ class ManagedStateTests(unittest.TestCase):
         self.assertEqual(result.persistence, managed_state.PersistenceOutcome.NOT_REQUIRED)
         executor.assert_called_once_with(plan)
 
+    def test_unauthorized_plan_is_refused_without_state_access(self) -> None:
+        with patch.object(
+            managed_state,
+            "managed_state_path",
+            side_effect=AssertionError("must not resolve persistence path"),
+        ) as path:
+            result = managed_state.execute_provider_plan(
+                self.plan,
+                current_context=lambda: self.machine,
+            )
+        self.assertEqual(
+            result.execution.outcome, provider_execution.PlanOutcome.REFUSED
+        )
+        self.assertEqual(result.persistence, managed_state.PersistenceOutcome.NOT_REQUIRED)
+        path.assert_not_called()
+
     def test_absent_document_is_empty_and_unknown_or_corrupt_state_fails(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"

@@ -313,15 +313,15 @@ def execute_provider_plan(
         return ManagedExecutionResult(
             executor(plan, **executor_arguments), PersistenceOutcome.NOT_REQUIRED
         )
+    mutation_authorized = bool(executor_arguments.get("allow_provider_mutation"))
+    if not mutation_authorized:
+        return ManagedExecutionResult(
+            executor(plan, **executor_arguments), PersistenceOutcome.NOT_REQUIRED
+        )
     if plan.context is None:
         raise ManagedStateError("mutating provider plan has no execution context")
-    path = state_path or managed_state_path(platform_name=plan.context.platform)
     with _MANAGED_STATE_LOCK, _provider_execution_transaction():
-        mutation_authorized = bool(executor_arguments.get("allow_provider_mutation"))
-        if not mutation_authorized:
-            return ManagedExecutionResult(
-                executor(plan, **executor_arguments), PersistenceOutcome.NOT_REQUIRED
-            )
+        path = state_path or managed_state_path(platform_name=plan.context.platform)
         try:
             document = load_document(path)
         except ManagedStateError as error:
