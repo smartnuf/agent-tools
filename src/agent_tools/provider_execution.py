@@ -142,7 +142,12 @@ def _path_is_absolute(path: str, machine: MachineState) -> bool:
     )
 
 
-def _run(argv: tuple[str, ...], timeout: int) -> subprocess.CompletedProcess[str]:
+def _run(
+    argv: tuple[str, ...],
+    timeout: int,
+    *,
+    privileged_supervision: bool = False,
+) -> subprocess.CompletedProcess[str]:
     process_options: dict[str, object]
     if os.name == "nt":
         process_options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
@@ -159,7 +164,10 @@ def _run(argv: tuple[str, ...], timeout: int) -> subprocess.CompletedProcess[str
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        _terminate_process_tree(process)
+        if privileged_supervision:
+            _terminate_privileged_supervisor(process)
+        else:
+            _terminate_process_tree(process)
         stdout, stderr = process.communicate()
         raise subprocess.TimeoutExpired(
             argv,
@@ -167,12 +175,39 @@ def _run(argv: tuple[str, ...], timeout: int) -> subprocess.CompletedProcess[str
             output=stdout,
             stderr=stderr,
         ) from None
+    except BaseException:
+        if privileged_supervision:
+            _terminate_privileged_supervisor(process)
+        else:
+            _terminate_process_tree(process)
+        process.communicate()
+        raise
     return subprocess.CompletedProcess(
         argv,
         process.returncode,
         stdout,
         stderr,
     )
+
+
+def _terminate_privileged_supervisor(process: subprocess.Popen[str]) -> None:
+    """Ask sudo/timeout to terminate from the privileged side and confirm exit."""
+
+    try:
+        process.terminate()
+    except ProcessLookupError:
+        pass
+    try:
+        process.communicate(
+            timeout=(
+                ELEVATED_TERM_TO_KILL_GRACE_SECONDS
+                + ELEVATED_SUPERVISOR_GUARD_SECONDS
+            )
+        )
+    except subprocess.TimeoutExpired as error:
+        raise ExecutionContractError(
+            "privileged supervisor termination could not be established"
+        ) from error
 
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
@@ -813,7 +848,14 @@ def _execute_provider_plan(
                 else timeout_seconds
             )
             try:
-                result = runner(argv, runner_timeout)
+                if runner is _run:
+                    result = _run(
+                        argv,
+                        runner_timeout,
+                        privileged_supervision=elevated_linux,
+                    )
+                else:
+                    result = runner(argv, runner_timeout)
             except subprocess.TimeoutExpired as error:
                 commands.append(
                     CommandReport(
@@ -849,11 +891,7 @@ def _execute_provider_plan(
                 reports.append(
                     _action_report(
                         action,
-                        (
-                            ActionOutcome.COMMAND_START_FAILED
-                            if elevated_linux
-                            else ActionOutcome.COMMAND_FAILED
-                        ),
+                        ActionOutcome.COMMAND_START_FAILED,
                         tuple(commands),
                         detail=f"command could not start: {error}",
                     )

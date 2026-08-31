@@ -1,4 +1,6 @@
+import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -114,6 +116,31 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
                     0.2,
                 )
             time.sleep(1.2)
+            self.assertFalse(marker.exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX signal fixture")
+    def test_interrupt_terminates_descendant_process_before_propagating(self):
+        with TemporaryDirectory() as directory:
+            marker = Path(directory) / "orphaned-after-interrupt"
+            code = (
+                "import signal,sys;"
+                "from agent_tools import provider_execution;"
+                "child=\"import pathlib,sys,time;time.sleep(1);\";"
+                "child+=\"pathlib.Path(sys.argv[1]).write_text('orphan')\";"
+                "parent=\"import subprocess,sys,time;\";"
+                "parent+=\"subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2]]);\";"
+                "parent+=\"time.sleep(30)\";"
+                "\ntry: provider_execution._run((sys.executable,'-c',parent,child,sys.argv[1]),30)"
+                "\nexcept KeyboardInterrupt: pass"
+            )
+            process = subprocess.Popen(
+                (sys.executable, "-c", code, str(marker)),
+                env={**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")},
+            )
+            time.sleep(0.4)
+            process.send_signal(signal.SIGINT)
+            process.wait(timeout=3)
+            time.sleep(1.1)
             self.assertFalse(marker.exists())
 
     @unittest.skipUnless(shutil.which("timeout"), "GNU timeout is unavailable")

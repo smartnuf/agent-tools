@@ -490,6 +490,36 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertIn("no provider command started", report.recovery_guidance[0])
         self.assertNotIn("partial host state", report.recovery_guidance[0])
 
+    def test_current_user_command_start_failure_is_structured(self):
+        machine = capabilities.MachineState("Windows", "x86_64")
+        manager = provider_plans.PackageManagerState(
+            "winget", "C:/Windows/System32/winget.exe", "host", "x86_64"
+        )
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            machine,
+            locator=lambda probe, context: None,
+        )
+        plan = provider_plans.generate_provider_plan(
+            (absent,), ("ghostscript",), package_managers=(manager,)
+        )
+        report = provider_execution.execute_provider_plan(
+            plan,
+            allow_provider_mutation=True,
+            current_context=lambda: machine,
+            manager_verifier=lambda state, context: True,
+            privilege_resolver=lambda action: "",
+            detector=lambda capability, context: absent,
+            runner=lambda argv, timeout: (_ for _ in ()).throw(
+                FileNotFoundError("winget disappeared")
+            ),
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.COMMAND_START_FAILED,
+        )
+        self.assertIn("no provider command started", report.recovery_guidance[0])
+
     def test_later_command_start_failure_reports_prior_possible_mutation(self):
         plan = self.plan(capabilities.POPPLER)
         absent = self.state(capabilities.POPPLER)

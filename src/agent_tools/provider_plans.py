@@ -189,14 +189,22 @@ def adapter_environment_path_entries(
 
     if state.manager != "brew":
         return ()
+    executable = PurePosixPath(
+        state.resolved_executable_path or state.executable_path
+    )
+    derived_root = (
+        str(executable.parent.parent)
+        if executable.name == "brew" and executable.parent.name == "bin"
+        else None
+    )
     root = state.installation_root
-    if root is None:
-        executable = PurePosixPath(
-            state.resolved_executable_path or state.executable_path
-        )
-        if executable.name != "brew" or executable.parent.name != "bin":
+    if root is not None and derived_root is not None:
+        if posixpath.normpath(root) != posixpath.normpath(derived_root):
             return None
-        root = str(executable.parent.parent)
+    elif root is None:
+        if derived_root is None:
+            return None
+        root = derived_root
     formula_bin = posixpath.join(posixpath.normpath(root), "bin")
     if not _manager_path_is_absolute(formula_bin, context):
         return None

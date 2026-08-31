@@ -157,6 +157,25 @@ class ProviderPlanTests(unittest.TestCase):
                 (state,), ("ghostscript",), package_managers=(manager,)
             )
 
+    def test_homebrew_root_cannot_contradict_canonical_executable(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT, machine, locator=lambda probe, context: None
+        )
+        manager = provider_plans.PackageManagerState(
+            "brew",
+            "/usr/local/bin/brew",
+            "host",
+            "arm64",
+            installation_root="/opt/homebrew",
+        )
+        with self.assertRaisesRegex(
+            provider_plans.PlanningError, "no supported provider plan"
+        ):
+            provider_plans.generate_provider_plan(
+                (state,), ("ghostscript",), package_managers=(manager,)
+            )
+
     def test_conflicting_homebrew_installation_roots_fail_closed(self):
         machine = capabilities.MachineState("Darwin", "arm64")
         state = capabilities.detect_capability(
