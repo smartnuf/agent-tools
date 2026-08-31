@@ -147,11 +147,13 @@ manager user. Portable inter-process coordination would be a separate public
 and persistence contract; native package-manager locking remains external, and
 this executor does not add file locks, named mutexes, or a lock service.
 
-An actionless plan is not accepted from plan history alone. Immediately before
-returning `NO_CHANGES`, the executor resolves every requested capability in the
-built-in catalogue and revalidates fresh provider evidence against the current
-immutable machine context. Unknown, stale, contradictory, or no-longer-verified
-requests fail preflight without claiming mutation.
+A requested capability omitted from the action list is not accepted from plan
+history alone, whether the plan has zero actions or mixes satisfied requests
+with a missing-provider action. Before mutation or `NO_CHANGES`, the executor
+resolves every omitted request in the built-in catalogue and revalidates fresh
+provider evidence against the current immutable machine context. Unknown,
+stale, contradictory, or no-longer-verified requests fail preflight without
+claiming mutation.
 
 ## Final-provider selection contract
 
