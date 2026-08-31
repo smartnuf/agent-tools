@@ -387,6 +387,29 @@ def generate_provider_plan(
                 raise PlanningError(
                     f"native-provisioning override requires known host architecture: {capability_id}"
                 )
+            available_providers = tuple(
+                provider_state
+                for provider_state in state.providers
+                if provider_state.availability is Availability.AVAILABLE
+                and provider_state.provider.satisfies_capability
+            )
+            native_provider_exists = any(
+                verified
+                and all(
+                    normalize_architecture(item.architecture) == host_architecture
+                    for item in verified
+                )
+                for provider_state in available_providers
+                if (
+                    verified := tuple(
+                        item
+                        for item in provider_state.executables
+                        if item.verified
+                    )
+                )
+            )
+            if native_provider_exists:
+                continue
             selected_provider = state.selected_provider
             if selected_provider is None:
                 raise PlanningError(

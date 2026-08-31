@@ -375,7 +375,7 @@ class ProviderPlanTests(unittest.TestCase):
         self.assertEqual(plan.actions[0].target_architecture, "arm64")
         self.assertEqual(plan.actions[0].commands[0][-2:], ("--architecture", "arm64"))
 
-    def test_native_override_rejects_native_or_unrequested_capability(self):
+    def test_native_override_reuses_native_and_rejects_unrequested_capability(self):
         machine = capabilities.MachineState("Windows", "x86_64")
         native = capabilities.detect_capability(
             capabilities.BASH,
@@ -388,10 +388,13 @@ class ProviderPlanTests(unittest.TestCase):
             version_reader=lambda probe, path: "GNU bash 5.2",
             architecture_reader=lambda probe, path: "x86_64",
         )
-        with self.assertRaisesRegex(provider_plans.PlanningError, "not a verified translated"):
-            provider_plans.generate_provider_plan(
-                (native,), ("bash",), package_managers=(self.manager("winget"),), native_provisioning=("bash",)
-            )
+        plan = provider_plans.generate_provider_plan(
+            (native,),
+            ("bash",),
+            package_managers=(self.manager("winget"),),
+            native_provisioning=("bash",),
+        )
+        self.assertEqual(plan.actions, ())
         with self.assertRaisesRegex(provider_plans.PlanningError, "was not requested"):
             provider_plans.generate_provider_plan(
                 (native,), ("bash",), package_managers=(self.manager("winget"),), native_provisioning=("poppler",)
@@ -478,6 +481,31 @@ class ProviderPlanTests(unittest.TestCase):
                 native_provisioning=("bash",),
                 translated_manager_fallbacks=(translated,),
             )
+
+    def test_native_override_reuses_another_existing_native_provider(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, machine: (
+                "/bin/bash"
+                if probe.locator_strategy == "system-bash"
+                else "/opt/homebrew/bin/bash"
+                if probe.locator_strategy == "homebrew-bash"
+                else None
+            ),
+            version_reader=lambda probe, path: "GNU bash 5.2",
+            architecture_reader=lambda probe, path: (
+                "x86_64" if path == "/bin/bash" else "arm64"
+            ),
+        )
+        plan = provider_plans.generate_provider_plan(
+            (state,),
+            ("bash",),
+            package_managers=(self.manager("brew"),),
+            native_provisioning=("bash",),
+        )
+        self.assertEqual(plan.actions, ())
 
     def test_plan_rejects_system_and_homebrew_bash_at_same_identity(self):
         machine = capabilities.MachineState("Darwin", "arm64")
