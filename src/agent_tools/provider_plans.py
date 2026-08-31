@@ -37,6 +37,13 @@ class ExecutionPrivilege(str, Enum):
     SYSTEM = "system"
 
 
+class EnvironmentRefresh(str, Enum):
+    """Environment refresh required after an action and before verification."""
+
+    NONE = "none"
+    PATH = "path"
+
+
 @dataclass(frozen=True)
 class PackageManagerState:
     """Verified primary observations for one package-manager executable."""
@@ -45,6 +52,7 @@ class PackageManagerState:
     executable_path: str
     execution_environment: str
     architecture: str | None = None
+    resolved_executable_path: str | None = None
 
     def native_status(self, context: MachineState) -> NativeStatus:
         known_architectures = {"x86_64", "x86", "arm64", "arm"}
@@ -77,6 +85,7 @@ class ProviderAction:
     reason: str
     verification: VerificationRequirement
     execution_privilege: ExecutionPrivilege
+    environment_refresh: EnvironmentRefresh
     commands: tuple[tuple[str, ...], ...]
     shared_package: bool
     displaces_verified_paths: tuple[str, ...] = ()
@@ -156,6 +165,16 @@ def adapter_execution_privilege(manager: str) -> ExecutionPrivilege:
         raise PlanningError(f"unsupported package manager: {manager}") from error
 
 
+def adapter_environment_refresh(manager: str) -> EnvironmentRefresh:
+    """Return the post-action environment refresh required before verification."""
+
+    if manager == "winget":
+        return EnvironmentRefresh.PATH
+    if manager in {"apt", "dnf", "pacman", "brew"}:
+        return EnvironmentRefresh.NONE
+    raise PlanningError(f"unsupported package manager: {manager}")
+
+
 def _option(
     provider: ProviderSpec,
     context: MachineState,
@@ -197,7 +216,11 @@ def _option(
             candidates.append(
                 (
                     rank,
-                    _manager_path_key(manager_state.executable_path, context),
+                    _manager_path_key(
+                        manager_state.resolved_executable_path
+                        or manager_state.executable_path,
+                        context,
+                    ),
                     manager_state,
                     native_status,
                 )
@@ -208,18 +231,76 @@ def _option(
     return None
 
 
-def _manager_evidence_key(
+def _manager_identity_key(
     state: PackageManagerState,
     context: MachineState | None,
-) -> tuple[str, str, str, str]:
-    """Return alias-canonical identity for one manager observation."""
+) -> tuple[str, str]:
+    """Return the resolved executable identity and execution environment."""
 
     return (
-        state.manager,
-        _manager_path_key(state.executable_path, context),
+        _manager_path_key(
+            state.resolved_executable_path or state.executable_path,
+            context,
+        ),
         state.execution_environment,
-        normalize_architecture(state.architecture),
     )
+
+
+def _canonicalize_manager_states(
+    states: tuple[PackageManagerState, ...],
+    context: MachineState | None,
+) -> tuple[PackageManagerState, ...]:
+    """Merge complementary manager observations and reject contradictions."""
+
+    groups: dict[tuple[str, str], list[PackageManagerState]] = {}
+    for state in states:
+        groups.setdefault(_manager_identity_key(state, context), []).append(state)
+    canonical: list[PackageManagerState] = []
+    for identity in sorted(groups):
+        observations = groups[identity]
+        managers = {item.manager for item in observations}
+        if len(managers) != 1:
+            raise PlanningError(
+                f"conflicting package-manager identity evidence: {identity[0]}"
+            )
+        known_architectures = {
+            architecture
+            for item in observations
+            if (architecture := normalize_architecture(item.architecture))
+            != "unknown"
+        }
+        if len(known_architectures) > 1:
+            raise PlanningError(
+                "conflicting package-manager architecture evidence: "
+                f"{observations[0].manager}"
+            )
+        selected = min(
+            observations,
+            key=lambda item: _manager_path_key(item.executable_path, context),
+        )
+        explicit_resolved_paths = tuple(
+            item.resolved_executable_path
+            for item in observations
+            if item.resolved_executable_path is not None
+        )
+        resolved_path = (
+            min(
+                explicit_resolved_paths,
+                key=lambda path: _manager_path_key(path, context),
+            )
+            if explicit_resolved_paths
+            else None
+        )
+        canonical.append(
+            PackageManagerState(
+                manager=selected.manager,
+                executable_path=selected.executable_path,
+                execution_environment=selected.execution_environment,
+                architecture=next(iter(known_architectures), None),
+                resolved_executable_path=resolved_path,
+            )
+        )
+    return tuple(canonical)
 
 
 def _manager_path_key(path: str, context: MachineState | None) -> str:
@@ -308,33 +389,29 @@ def generate_provider_plan(
             raise PlanningError(
                 f"package manager executable path is not absolute: {manager_state.manager}"
             )
-    by_identity: dict[tuple[str, str, str], PackageManagerState] = {}
-    for manager_state in supplied_manager_states:
-        identity = (
-            manager_state.manager,
-            _manager_path_key(manager_state.executable_path, context),
-            manager_state.execution_environment,
-        )
-        existing = by_identity.get(identity)
-        if existing is not None and normalize_architecture(
-            existing.architecture
-        ) != normalize_architecture(manager_state.architecture):
-            raise PlanningError(
-                f"conflicting package-manager architecture evidence: {manager_state.manager}"
+        if manager_state.resolved_executable_path is not None and not (
+            manager_state.resolved_executable_path.strip()
+            and _manager_path_is_absolute(
+                manager_state.resolved_executable_path, context
             )
-        by_identity[identity] = manager_state
-    canonical_managers: dict[
-        tuple[str, str, str, str], PackageManagerState
-    ] = {}
-    for manager_state in supplied_manager_states:
-        canonical_managers.setdefault(
-            _manager_evidence_key(manager_state, context), manager_state
-        )
-    manager_states = tuple(canonical_managers.values())
+        ):
+            raise PlanningError(
+                "package manager resolved executable path is not absolute: "
+                f"{manager_state.manager}"
+            )
+    manager_states = _canonicalize_manager_states(
+        supplied_manager_states, context
+    )
+    canonical_managers = {
+        _manager_identity_key(manager_state, context): manager_state
+        for manager_state in manager_states
+    }
     translated_fallbacks_list: list[PackageManagerState] = []
     for fallback in translated_manager_fallbacks:
-        detected = canonical_managers.get(_manager_evidence_key(fallback, context))
-        if detected is None:
+        detected = canonical_managers.get(_manager_identity_key(fallback, context))
+        if detected is None or normalize_architecture(
+            fallback.architecture
+        ) != normalize_architecture(detected.architecture):
             raise PlanningError("translated package-manager fallback was not detected")
         translated_fallbacks_list.append(detected)
     translated_fallbacks = frozenset(translated_fallbacks_list)
@@ -498,6 +575,7 @@ def generate_provider_plan(
                     provider.probe_policy,
                 ),
                 execution_privilege=adapter_execution_privilege(package.manager),
+                environment_refresh=adapter_environment_refresh(package.manager),
                 commands=adapter_commands(
                     package.manager,
                     package.installation_unit,

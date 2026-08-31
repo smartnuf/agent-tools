@@ -94,6 +94,18 @@ class ProviderPlanTests(unittest.TestCase):
                     provider_plans.adapter_execution_privilege(manager), privilege
                 )
 
+    def test_package_manager_environment_refresh_is_explicit(self):
+        self.assertEqual(
+            provider_plans.adapter_environment_refresh("winget"),
+            provider_plans.EnvironmentRefresh.PATH,
+        )
+        for manager in ("apt", "dnf", "pacman", "brew"):
+            with self.subTest(manager=manager):
+                self.assertEqual(
+                    provider_plans.adapter_environment_refresh(manager),
+                    provider_plans.EnvironmentRefresh.NONE,
+                )
+
     def test_windows_git_bash_uses_shared_git_package(self):
         state = self.state(capabilities.BASH, "Windows")
         plan = provider_plans.generate_provider_plan(
@@ -106,6 +118,9 @@ class ProviderPlanTests(unittest.TestCase):
         self.assertTrue(action.shared_package)
         self.assertEqual(
             action.execution_privilege, provider_plans.ExecutionPrivilege.CURRENT_USER
+        )
+        self.assertEqual(
+            action.environment_refresh, provider_plans.EnvironmentRefresh.PATH
         )
 
     def test_linux_bash_is_explicitly_provisionable_on_host_and_wsl(self):
@@ -253,6 +268,16 @@ class ProviderPlanTests(unittest.TestCase):
             provider_plans.generate_provider_plan(
                 (windows,), ("poppler",), package_managers=(relative_winget,)
             )
+        relative_resolved = provider_plans.PackageManagerState(
+            "winget",
+            "C:/Windows/System32/winget.exe",
+            "host",
+            resolved_executable_path="System32/winget.exe",
+        )
+        with self.assertRaisesRegex(provider_plans.PlanningError, "resolved.*not absolute"):
+            provider_plans.generate_provider_plan(
+                (windows,), ("poppler",), package_managers=(relative_resolved,)
+            )
         first = provider_plans.PackageManagerState(
             "brew", "/opt/homebrew/bin/brew", "host", "arm64"
         )
@@ -312,6 +337,41 @@ class ProviderPlanTests(unittest.TestCase):
                     ("poppler",),
                     package_managers=(first_path, second_path),
                 )
+
+        symlink = provider_plans.PackageManagerState(
+            "brew",
+            "/opt/homebrew/bin/brew",
+            "host",
+            "arm64",
+            "/usr/local/Homebrew/bin/brew",
+        )
+        target = provider_plans.PackageManagerState(
+            "brew", "/usr/local/Homebrew/bin/brew", "host", "x86_64"
+        )
+        with self.assertRaisesRegex(provider_plans.PlanningError, "conflicting"):
+            provider_plans.generate_provider_plan(
+                (state,), ("poppler",), package_managers=(symlink, target)
+            )
+
+    def test_complementary_manager_architecture_evidence_is_merged(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH, machine, locator=lambda probe, machine: None
+        )
+        unknown = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host"
+        )
+        known = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "aarch64"
+        )
+        plan = provider_plans.generate_provider_plan(
+            (state,), ("bash",), package_managers=(unknown, known)
+        )
+        self.assertEqual(plan.actions[0].manager_state.architecture, "arm64")
+        self.assertEqual(
+            plan.actions[0].environment_refresh,
+            provider_plans.EnvironmentRefresh.NONE,
+        )
 
     def test_equivalent_manager_architecture_aliases_are_deduplicated(self):
         machine = capabilities.MachineState("Darwin", "arm64")

@@ -116,12 +116,19 @@ so an executor need not reconstruct the reviewed post-action condition. The
 plan also records whether each package-manager action requires system
 privilege; apt, dnf, and pacman actions require it, while Homebrew and WinGet
 actions do not inherit that Linux elevation policy. The executor, rather than
-the catalogue command, will apply the recorded privilege policy.
+the catalogue command, will apply the recorded privilege policy. An action
+also records any environment refresh required before its verification probes;
+WinGet actions refresh the process `PATH`, while the built-in POSIX managers
+require no equivalent refresh.
 
 Package-manager availability is verified evidence, not a bare manager name.
 The immutable planning input records the built-in manager identity, verified
 executable path, local execution environment, and executable architecture when
-observable. Platform comes from the plan's single machine context rather than
+observable. When the executable path is an alias or symlink, discovery also
+records its verified resolved executable path as the canonical identity.
+Complementary observations for that identity merge known architecture into
+missing architecture evidence; differing known architectures fail closed.
+Platform comes from the plan's single machine context rather than
 being duplicated in manager evidence. Suitability is derived from those
 observations and the catalogue option. Homebrew executable architecture is
 material because an Intel Homebrew on Apple silicon provisions translated
