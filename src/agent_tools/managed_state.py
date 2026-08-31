@@ -12,12 +12,14 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Callable
 
 from .capabilities import get_capability
 from .provider_execution import (
     ActionOutcome,
+    ActionReport,
+    PlanOutcome,
     PlanExecutionReport,
     ProviderPlanInterrupted,
     _execute_provider_plan_unmanaged,
@@ -59,6 +61,15 @@ class PersistenceInterrupted(KeyboardInterrupt):
         self.managed_result: ManagedExecutionResult | None = None
 
 
+class ManagedExecutionInterrupted(KeyboardInterrupt):
+    """Propagate an interruption after conservative provenance persistence."""
+
+    def __init__(self, original: KeyboardInterrupt) -> None:
+        super().__init__("managed provider execution interrupted")
+        self.original = original
+        self.managed_result: ManagedExecutionResult | None = None
+
+
 @dataclass(frozen=True)
 class ManagedExecutionResult:
     execution: PlanExecutionReport | None
@@ -82,6 +93,8 @@ def managed_state_path(
         root = env.get("LOCALAPPDATA")
         if not root:
             raise ManagedStateError("LOCALAPPDATA is unavailable")
+        if not PureWindowsPath(root).is_absolute():
+            raise ManagedStateError("LOCALAPPDATA is not an absolute Windows path")
         return Path(root) / "agent-tools" / "managed-state.json"
     if platform_name in {"Darwin", "darwin"}:
         return (
@@ -112,7 +125,7 @@ def load_document(path: Path) -> dict[str, Any]:
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ManagedStateError(f"managed state is unreadable or corrupt: {error}") from error
     try:
-        value = json.loads(text)
+        value = json.loads(text, object_pairs_hook=_unique_json_object)
     except json.JSONDecodeError as error:
         raise ManagedStateError(f"managed state is unreadable or corrupt: {error}") from error
     if not isinstance(value, dict):
@@ -187,7 +200,8 @@ def load_document(path: Path) -> dict[str, Any]:
             raise ManagedStateError(f"managed-state record {index} has invalid execution context")
         commands = requested.get("commands")
         if (
-            requested.get("kind") not in {"install", "native-replacement"}
+            not isinstance(requested.get("kind"), str)
+            or requested["kind"] not in {"install", "native-replacement"}
             or not isinstance(requested.get("reason"), str)
             or (
                 requested.get("target_architecture") is not None
@@ -210,7 +224,9 @@ def load_document(path: Path) -> dict[str, Any]:
         ):
             raise ManagedStateError(f"managed-state record {index} has invalid requested action")
         if not (
-            verification.get("outcome") in {outcome.value for outcome in ActionOutcome}
+            isinstance(verification.get("outcome"), str)
+            and verification["outcome"]
+            in {outcome.value for outcome in ActionOutcome}
             and isinstance(verification.get("verified_paths"), list)
             and all(isinstance(item, str) for item in verification["verified_paths"])
             and isinstance(verification.get("detail"), str)
@@ -227,6 +243,17 @@ def load_document(path: Path) -> dict[str, Any]:
                 and isinstance(evidence.get("timed_out"), bool)
             ):
                 raise ManagedStateError(f"managed-state record {index} has invalid command evidence")
+    return value
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for name, item in pairs:
+        if name in value:
+            raise ManagedStateError(
+                f"managed state contains duplicate JSON key: {name}"
+            )
+        value[name] = item
     return value
 
 
@@ -370,24 +397,32 @@ def execute_provider_plan(
     if plan.context is None:
         raise ManagedStateError("mutating provider plan has no execution context")
     with _MANAGED_STATE_LOCK, _provider_execution_transaction():
-        path = state_path or managed_state_path(platform_name=plan.context.platform)
         try:
+            path = state_path or managed_state_path(
+                platform_name=plan.context.platform
+            )
             document = load_document(path)
         except ManagedStateError as error:
             return ManagedExecutionResult(None, PersistenceOutcome.BLOCKED, str(error))
 
         requested_at = _timestamp()
-        interruption: ProviderPlanInterrupted | None = None
+        interruption: ProviderPlanInterrupted | ManagedExecutionInterrupted | None = None
         try:
             report = executor(plan, **executor_arguments)
         except ProviderPlanInterrupted as error:
             interruption = error
             report = error.report
+        except KeyboardInterrupt as error:
+            interruption = ManagedExecutionInterrupted(error)
+            report = _unknown_interrupted_report(plan)
         completed_at = _timestamp()
         attempted_indexes = tuple(
             index
             for index, action in enumerate(report.actions)
-            if action.commands and action.outcome is not ActionOutcome.ALREADY_SATISFIED
+            if (
+                action.commands or action.outcome is ActionOutcome.INTERRUPTED
+            )
+            and action.outcome is not ActionOutcome.ALREADY_SATISFIED
         )
         if not attempted_indexes:
             result = ManagedExecutionResult(report, PersistenceOutcome.NOT_REQUIRED)
@@ -419,6 +454,38 @@ def execute_provider_plan(
             interruption.managed_result = result
             raise interruption
         return result
+
+
+def _unknown_interrupted_report(plan: ProviderPlan) -> PlanExecutionReport:
+    return PlanExecutionReport(
+        plan.context,
+        plan.requested_capabilities,
+        PlanOutcome.PARTIAL_FAILURE,
+        tuple(
+            ActionReport(
+                action.capability_id,
+                action.provider_id,
+                action.manager,
+                action.installation_unit,
+                ActionOutcome.INTERRUPTED,
+                detail=(
+                    "authorized execution was interrupted; exact per-action command "
+                    "progress and resulting provider state are unknown"
+                ),
+                target_architecture=action.target_architecture,
+                displaces_verified_paths=action.displaces_verified_paths,
+                translated_manager_fallback_authorized=(
+                    action.translated_manager_fallback_authorized
+                ),
+            )
+            for action in plan.actions
+        ),
+        (
+            "provider mutation may have started or completed",
+            "do not retry automatically or immediately and do not attempt rollback or removal",
+            "rediscover current machine state and generate a fresh plan before any later mutation",
+        ),
+    )
 
 
 def _persistence_failure_result(

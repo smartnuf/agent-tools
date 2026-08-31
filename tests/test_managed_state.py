@@ -62,6 +62,16 @@ class ManagedStateTests(unittest.TestCase):
             ),
             Path(r"C:\Users\test\AppData\Local") / "agent-tools" / "managed-state.json",
         )
+        for invalid in ("relative", r"C:relative"):
+            with self.subTest(local_app_data=invalid):
+                with self.assertRaisesRegex(
+                    managed_state.ManagedStateError, "absolute Windows path"
+                ):
+                    managed_state.managed_state_path(
+                        platform_name="Windows",
+                        environment={"LOCALAPPDATA": invalid},
+                        home=home,
+                    )
         self.assertEqual(
             managed_state.managed_state_path(
                 platform_name="Linux", environment={"XDG_STATE_HOME": "/state"}, home=home
@@ -142,6 +152,40 @@ class ManagedStateTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(managed_state.ManagedStateError, "schema v1"):
                 managed_state.load_document(path)
+
+    def test_duplicate_json_keys_are_rejected(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            path.write_text(
+                '{"schema_version":1,"records":[],"records":[]}',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(managed_state.ManagedStateError, "duplicate"):
+                managed_state.load_document(path)
+
+    def test_container_discriminators_are_managed_schema_errors(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            for field, value in (
+                (("requested_action", "kind"), []),
+                (("verification", "outcome"), {}),
+            ):
+                with self.subTest(field=field):
+                    document = managed_state.load_document(path)
+                    document["records"][0][field[0]][field[1]] = value
+                    path.write_text(json.dumps(document), encoding="utf-8")
+                    with self.assertRaises(managed_state.ManagedStateError):
+                        managed_state.load_document(path)
+                    document["records"][0][field[0]][field[1]] = (
+                        "install" if field[0] == "requested_action" else "succeeded"
+                    )
+                    path.write_text(json.dumps(document), encoding="utf-8")
 
     def test_success_appends_immutable_nonownership_records(self) -> None:
         with TemporaryDirectory() as directory:
@@ -392,6 +436,44 @@ class ManagedStateTests(unittest.TestCase):
             self.assertEqual(result.persistence, managed_state.PersistenceOutcome.SUCCEEDED)
             record = managed_state.load_document(path)["records"][0]
             self.assertEqual(record["verification"]["outcome"], "interrupted")
+
+    def test_raw_post_command_interrupt_is_conservatively_persisted(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            executor = Mock(side_effect=KeyboardInterrupt())
+            with self.assertRaises(managed_state.ManagedExecutionInterrupted) as raised:
+                managed_state.execute_provider_plan(
+                    self.plan,
+                    state_path=path,
+                    executor=executor,
+                    allow_provider_mutation=True,
+                )
+            result = raised.exception.managed_result
+            self.assertEqual(result.persistence, managed_state.PersistenceOutcome.SUCCEEDED)
+            self.assertEqual(
+                result.execution.actions[0].outcome,
+                provider_execution.ActionOutcome.INTERRUPTED,
+            )
+            record = managed_state.load_document(path)["records"][0]
+            self.assertEqual(record["verification"]["outcome"], "interrupted")
+            self.assertEqual(record["command_evidence"], [])
+            self.assertIn("progress", record["verification"]["detail"])
+
+    def test_invalid_default_state_path_blocks_before_executor(self) -> None:
+        executor = Mock(side_effect=AssertionError("must not mutate"))
+        with patch.object(
+            managed_state,
+            "managed_state_path",
+            side_effect=managed_state.ManagedStateError("invalid state root"),
+        ):
+            result = managed_state.execute_provider_plan(
+                self.plan,
+                executor=executor,
+                allow_provider_mutation=True,
+            )
+        self.assertEqual(result.persistence, managed_state.PersistenceOutcome.BLOCKED)
+        self.assertIsNone(result.execution)
+        executor.assert_not_called()
 
     def test_native_replacement_semantics_are_persisted(self) -> None:
         with TemporaryDirectory() as directory:
