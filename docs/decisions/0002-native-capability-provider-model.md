@@ -83,6 +83,24 @@ Stage the CLI:
   requested and observed host change, and refuse when provenance or safety is
   uncertain.
 
+The provider executor consumes the immutable reviewed plan rather than
+reconstructing selection or package mappings. Before any command it verifies
+the current machine/execution context, catalogue-owned action contract,
+package-manager executable identity, required privilege path, and whether the
+planned provider already satisfies the request. A nonempty plan refuses unless
+the dedicated non-interactive provider-mutation authorization is present.
+
+Commands run sequentially with explicit timeouts and captured outcomes. The
+executor stops on the first timeout, nonzero exit, unavailable manager, or
+missing privilege and reports that package-manager state may be partial; it
+does not attempt provider removal or an unsafe rollback. After an apparent
+success it applies only the plan's temporary process-environment refresh,
+rediscovers the exact planned provider, and verifies the complete probe and
+`ANY`/`ALL` policy plus any native target architecture. Package-manager success
+without that final evidence is a reported failure. Reusing the same plan after
+the provider verifies performs no further command. Managed-state persistence
+remains a separate subsequent contract.
+
 ## Final-provider selection contract
 
 Discovery and bootstrap are not provider-selection policy. For every

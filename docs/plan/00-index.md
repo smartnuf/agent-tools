@@ -2,7 +2,7 @@
 
 - Last reconciled: 2026-08-31
 - Current milestone: M3 — tested update and capability lifecycle
-- Current state: M2 complete; M3 has completed read-only provider planning and its architecture-adjudication governance prerequisite; explicit provider mutation is next
+- Current state: M2 complete; M3 has completed explicitly authorized provider execution and complete change reporting; mutation-provenance persistence is next
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
 - Target lifecycle: tested upgrade, pin, rollback, safe provider mutation, and removal
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
@@ -15,11 +15,11 @@
 | M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
 | M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
-| M3 | Tested update and capability lifecycle | in-progress | 3/9 | 6.5–11 days | 3–7.25 days |
+| M3 | Tested update and capability lifecycle | in-progress | 3/9 | 6.5–11 days | 2.25–6 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **3–7.25 person-days remaining**.
+Estimated implementation effort through M3: **2.25–6 person-days remaining**.
 The selector and pre-seeded-workstation evidence slices complete the first
 joint M3 gate; read-only provider planning supplies the prerequisite for the
 still-open mutation lifecycle gate. Native discovery channels and the
@@ -60,6 +60,11 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
   delegated architecture adjudication and an architectural closure sweep after
   #50, preserving human authority for product-policy choices before autonomous
   mutation work in #51.
+- [Issue #51](https://github.com/smartnuf/agent-tools/issues/51) adds the
+  packaged, explicitly authorized provider-plan executor with bounded command
+  execution, structured attempted/observed change reports, mandatory
+  rediscovery/final verification, partial-state recovery guidance, and
+  idempotent repeat evidence on a disposable filesystem-backed host.
 
 M1 is complete and its factual record is frozen except for corrections. M1.5
 completed on 2026-08-29; M2 completed on 2026-08-30 with the first stable PyPI
@@ -69,11 +74,11 @@ excluded.
 
 ## Recommended next work
 
-Implement the explicitly authorized mutation executor and complete change
-reporting in [issue #51](https://github.com/smartnuf/agent-tools/issues/51) (L,
-**1–2 days**). Issue #77 supplies its governance prerequisite: architectural
-contract completion can continue through independent adjudication and a
-closure sweep, while product-policy choices still halt for human authority.
+Persist mutation provenance without claiming package ownership in
+[issue #52](https://github.com/smartnuf/agent-tools/issues/52) (M,
+**0.5–1 day**). The explicit executor now supplies the bounded attempted and
+observed action results that the managed-state record must preserve separately
+from provider mechanism and ownership.
 [Issue #26](https://github.com/smartnuf/agent-tools/issues/26) records the
 ordered M3 dependency chain beginning `#50 → #77 → #51`.
 
