@@ -38,7 +38,7 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
                     capability,
                     context,
                     locator=lambda probe, current: (
-                        str(marker)
+                        "/tools/gs"
                         if probe.name == "gs" and marker.is_file()
                         else None
                     ),
