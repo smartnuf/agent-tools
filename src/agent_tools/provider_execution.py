@@ -421,7 +421,9 @@ def execute_provider_plan(
                     detail="verified package-manager identity is no longer available",
                 )
             )
-            return _failed_report(plan, context, reports)
+            return _failed_report(
+                plan, context, reports, mutation_may_have_started=False
+            )
         elevation = privilege_resolver(action)
         if elevation is None:
             reports.append(
@@ -434,7 +436,9 @@ def execute_provider_plan(
                     detail="system privilege is required but no safe elevation path is available",
                 )
             )
-            return _failed_report(plan, context, reports)
+            return _failed_report(
+                plan, context, reports, mutation_may_have_started=False
+            )
 
         commands: list[CommandReport] = []
         for reviewed_argv in action.commands:
@@ -462,7 +466,9 @@ def execute_provider_plan(
                         detail=f"command exceeded {timeout_seconds} seconds",
                     )
                 )
-                return _failed_report(plan, context, reports)
+                return _failed_report(
+                    plan, context, reports, mutation_may_have_started=True
+                )
             except OSError as error:
                 commands.append(CommandReport(argv, None, "", str(error)))
                 reports.append(
@@ -476,7 +482,9 @@ def execute_provider_plan(
                         detail=f"command could not start: {error}",
                     )
                 )
-                return _failed_report(plan, context, reports)
+                return _failed_report(
+                    plan, context, reports, mutation_may_have_started=False
+                )
             commands.append(_command_report(argv, result))
             if result.returncode != 0:
                 reports.append(
@@ -490,7 +498,9 @@ def execute_provider_plan(
                         detail=f"command exited with status {result.returncode}",
                     )
                 )
-                return _failed_report(plan, context, reports)
+                return _failed_report(
+                    plan, context, reports, mutation_may_have_started=True
+                )
 
         with _temporary_environment(environment_refresher(action)):
             after = detector(capability, context)
@@ -516,7 +526,9 @@ def execute_provider_plan(
                     detail=verification_detail,
                 )
             )
-            return _failed_report(plan, context, reports)
+            return _failed_report(
+                plan, context, reports, mutation_may_have_started=True
+            )
         reports.append(
             ActionReport(
                 action.capability_id,
@@ -548,6 +560,8 @@ def _failed_report(
     plan: ProviderPlan,
     context: MachineState,
     reports: list[ActionReport],
+    *,
+    mutation_may_have_started: bool,
 ) -> PlanExecutionReport:
     reports.extend(
         ActionReport(
@@ -560,15 +574,25 @@ def _failed_report(
         )
         for action in plan.actions[len(reports) :]
     )
+    earlier_action_changed_state = any(
+        report.outcome is ActionOutcome.SUCCEEDED for report in reports
+    )
+    if mutation_may_have_started or earlier_action_changed_state:
+        recovery_guidance = (
+            "the package manager may have left partial host state",
+            "inspect the reported command output, restore provider availability if needed, "
+            "then regenerate a plan and retry; repeated package-manager operations are expected "
+            "to be idempotent",
+        )
+    else:
+        recovery_guidance = (
+            "no provider command started; this attempt did not mutate provider state",
+            "correct the reported pre-execution failure, then regenerate a plan and retry",
+        )
     return PlanExecutionReport(
         context,
         plan.requested_capabilities,
         PlanOutcome.PARTIAL_FAILURE,
         tuple(reports),
-        (
-            "the package manager may have left partial host state",
-            "inspect the reported command output, restore provider availability if needed, "
-            "then regenerate a plan and retry; repeated package-manager operations are expected "
-            "to be idempotent",
-        ),
+        recovery_guidance,
     )

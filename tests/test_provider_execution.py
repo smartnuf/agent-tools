@@ -205,6 +205,24 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(action.commands[0].stderr, "provider unavailable")
         runner.assert_called_once()
 
+    def test_command_start_failure_does_not_claim_partial_host_state(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+
+        def cannot_start(argv, timeout):
+            raise FileNotFoundError("manager disappeared")
+
+        report = self.execute(
+            self.plan(),
+            detector=self.detector_sequence(absent),
+            runner=cannot_start,
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.COMMAND_FAILED,
+        )
+        self.assertIn("no provider command started", report.recovery_guidance[0])
+        self.assertNotIn("partial host state", report.recovery_guidance[0])
+
     def test_failure_reports_later_requested_action_as_not_attempted(self):
         states = (
             self.state(capabilities.GHOSTSCRIPT),
@@ -254,6 +272,10 @@ class ProviderExecutionTests(unittest.TestCase):
                     privilege_resolver=resolver,
                 )
                 self.assertEqual(report.actions[0].outcome, outcome)
+                self.assertIn(
+                    "no provider command started", report.recovery_guidance[0]
+                )
+                self.assertNotIn("partial host state", report.recovery_guidance[0])
 
     def test_repeat_skips_commands_when_planned_provider_now_verifies(self):
         available = self.state(capabilities.GHOSTSCRIPT, available=True)
