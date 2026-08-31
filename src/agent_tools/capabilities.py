@@ -37,6 +37,13 @@ class RemovalPolicy(str, Enum):
     PROHIBITED = "prohibited"
 
 
+class ProviderOrigin(str, Enum):
+    """How provider state exists independently of Agent Tools provenance."""
+
+    SYSTEM_EXTERNAL = "system-external"
+    TOOL_MANAGED = "tool-managed"
+
+
 @dataclass(frozen=True)
 class ProviderPackage:
     """One catalogue-owned package-manager installation option."""
@@ -82,6 +89,7 @@ class ProviderSpec:
     packages: tuple[ProviderPackage, ...] = ()
     shared_package: bool = True
     removal_policy: RemovalPolicy = RemovalPolicy.PROHIBITED
+    origin: ProviderOrigin = ProviderOrigin.SYSTEM_EXTERNAL
     provided_environment: str = "host"
     satisfies_capability: bool = True
     supported_contexts: frozenset[tuple[str, str]] = frozenset()

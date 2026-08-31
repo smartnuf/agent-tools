@@ -55,7 +55,7 @@ class ProviderExecutionTests(unittest.TestCase):
             "privilege_preflight": lambda argv: True,
         }
         defaults.update(kwargs)
-        return provider_execution.execute_provider_plan(plan, **defaults)
+        return provider_execution._execute_provider_plan_unmanaged(plan, **defaults)
 
     def test_zero_action_plan_needs_no_mutation_authorization(self):
         state = self.state(capabilities.GHOSTSCRIPT, available=True)
@@ -63,7 +63,7 @@ class ProviderExecutionTests(unittest.TestCase):
             (state,), ("ghostscript",), package_managers=(self.manager,)
         )
         runner = Mock(side_effect=AssertionError("must not run"))
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             current_context=lambda: self.machine,
             detector=lambda capability, machine: state,
@@ -79,7 +79,7 @@ class ProviderExecutionTests(unittest.TestCase):
             (available,), ("ghostscript",), package_managers=(self.manager,)
         )
         stale = self.state(capabilities.GHOSTSCRIPT)
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             current_context=lambda: self.machine,
             detector=lambda capability, machine: stale,
@@ -90,7 +90,7 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertIn("no longer verifies", report.recovery_guidance[0])
 
         unknown = replace(plan, requested_capabilities=("unknown",))
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             unknown,
             current_context=lambda: self.machine,
         )
@@ -100,7 +100,7 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertIn("unknown requested capability", report.recovery_guidance[0])
 
         wrong = self.state(capabilities.POPPLER, available=True)
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             current_context=lambda: self.machine,
             detector=lambda capability, machine: wrong,
@@ -150,7 +150,7 @@ class ProviderExecutionTests(unittest.TestCase):
             version_reader=lambda probe, path: "1.0",
             architecture_reader=lambda probe, path: "x86_64",
         )
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             current_context=lambda: self.machine,
             detector=lambda capability, machine: relative,
@@ -160,7 +160,7 @@ class ProviderExecutionTests(unittest.TestCase):
 
     def test_mutating_plan_refuses_without_dedicated_authorization(self):
         runner = Mock(side_effect=AssertionError("must not run"))
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             self.plan(),
             current_context=lambda: self.machine,
             runner=runner,
@@ -468,7 +468,7 @@ class ProviderExecutionTests(unittest.TestCase):
             provider_execution.ExecutionContractError,
             "target architecture is unknown",
         ):
-            provider_execution.execute_provider_plan(
+            provider_execution._execute_provider_plan_unmanaged(
                 invalid,
                 allow_provider_mutation=True,
                 current_context=lambda: replace(self.machine, architecture="unknown"),
@@ -499,7 +499,7 @@ class ProviderExecutionTests(unittest.TestCase):
             package_managers=(manager,),
             native_provisioning=("bash",),
         )
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -655,7 +655,7 @@ class ProviderExecutionTests(unittest.TestCase):
         plan = provider_plans.generate_provider_plan(
             (absent,), ("ghostscript",), package_managers=(manager,)
         )
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -838,7 +838,7 @@ class ProviderExecutionTests(unittest.TestCase):
             architecture_reader=lambda probe, path: "arm64",
         )
         runner = Mock(side_effect=AssertionError("must not run"))
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -912,7 +912,7 @@ class ProviderExecutionTests(unittest.TestCase):
             native_provisioning=("ghostscript",),
         )
         runner = Mock(side_effect=AssertionError("must not run"))
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -929,7 +929,7 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         runner.assert_not_called()
 
-        mutated = provider_execution.execute_provider_plan(
+        mutated = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -1040,7 +1040,7 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         fresh_native = bash_state(system_arch="arm64", homebrew_arch="x86_64")
         runner = Mock(side_effect=AssertionError("must not run"))
-        skipped = provider_execution.execute_provider_plan(
+        skipped = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -1055,7 +1055,7 @@ class ProviderExecutionTests(unittest.TestCase):
         runner.assert_not_called()
 
         installed_native = bash_state(homebrew_arch="arm64")
-        mutated = provider_execution.execute_provider_plan(
+        mutated = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -1271,7 +1271,7 @@ class ProviderExecutionTests(unittest.TestCase):
             provider_execution.ExecutionContractError,
             "lacks explicit fallback authorization",
         ):
-            provider_execution.execute_provider_plan(
+            provider_execution._execute_provider_plan_unmanaged(
                 forged,
                 allow_provider_mutation=True,
                 current_context=lambda: machine,
@@ -1291,7 +1291,7 @@ class ProviderExecutionTests(unittest.TestCase):
             (absent,), ("ghostscript",), package_managers=(manager,)
         )
         runner = Mock(side_effect=AssertionError("must not run"))
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -1364,7 +1364,7 @@ class ProviderExecutionTests(unittest.TestCase):
             package_managers=(manager,),
             native_provisioning=("bash",),
         )
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,

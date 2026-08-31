@@ -11,6 +11,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from agent_tools import capabilities
+from agent_tools import managed_state
 from agent_tools import provider_execution
 from agent_tools import provider_plans
 
@@ -83,18 +84,35 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
                 "detector": detect,
                 "runner": run,
             }
-            first = provider_execution.execute_provider_plan(plan, **arguments)
-            self.assertEqual(first.outcome, provider_execution.PlanOutcome.SUCCEEDED)
+            state_path = root / "managed-state.json"
+            first = managed_state.execute_provider_plan(
+                plan, state_path=state_path, **arguments
+            )
+            self.assertEqual(
+                first.execution.outcome, provider_execution.PlanOutcome.SUCCEEDED
+            )
+            self.assertEqual(first.persistence, managed_state.PersistenceOutcome.SUCCEEDED)
             self.assertTrue(marker.is_file())
             self.assertEqual(len(subprocess_calls), 2)
+            records = managed_state.load_document(state_path)["records"]
+            self.assertEqual(len(records), 1)
+            self.assertFalse(records[0]["ownership"])
 
-            repeated = provider_execution.execute_provider_plan(plan, **arguments)
-            self.assertEqual(repeated.outcome, provider_execution.PlanOutcome.SUCCEEDED)
+            repeated = managed_state.execute_provider_plan(
+                plan, state_path=state_path, **arguments
+            )
             self.assertEqual(
-                repeated.actions[0].outcome,
+                repeated.execution.outcome, provider_execution.PlanOutcome.SUCCEEDED
+            )
+            self.assertEqual(
+                repeated.execution.actions[0].outcome,
                 provider_execution.ActionOutcome.ALREADY_SATISFIED,
             )
+            self.assertEqual(
+                repeated.persistence, managed_state.PersistenceOutcome.NOT_REQUIRED
+            )
             self.assertEqual(len(subprocess_calls), 2)
+            self.assertEqual(len(managed_state.load_document(state_path)["records"]), 1)
 
     def test_timeout_terminates_descendant_process_before_returning(self):
         with TemporaryDirectory() as directory:

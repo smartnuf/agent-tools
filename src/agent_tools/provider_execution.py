@@ -1021,7 +1021,15 @@ def _omitted_request_failure(
     return None
 
 
-def execute_provider_plan(
+@contextmanager
+def _provider_execution_transaction():
+    """Serialize the complete supported managed mutation transaction."""
+
+    with _EXECUTION_LOCK:
+        yield
+
+
+def _execute_provider_plan_unmanaged(
     plan: ProviderPlan,
     *,
     allow_provider_mutation: bool = False,
@@ -1036,11 +1044,11 @@ def execute_provider_plan(
     privilege_preflight: PrivilegePreflight = _preflight_privilege,
     environment_refresher: EnvironmentRefresher = _refresh_environment,
 ) -> PlanExecutionReport:
-    """Consume one reviewed plan, mutate only when authorized, and report outcomes."""
+    """Internal executor primitive; callers must use the managed-state boundary."""
 
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
-    with _EXECUTION_LOCK:
+    with _provider_execution_transaction():
         return _execute_provider_plan(
             plan,
             allow_provider_mutation=allow_provider_mutation,
