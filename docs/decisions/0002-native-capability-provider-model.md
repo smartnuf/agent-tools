@@ -118,8 +118,9 @@ privilege; apt, dnf, and pacman actions require it, while Homebrew and WinGet
 actions do not inherit that Linux elevation policy. The executor, rather than
 the catalogue command, will apply the recorded privilege policy. An action
 also records any environment refresh required before its verification probes;
-WinGet actions refresh the process `PATH`, while the built-in POSIX managers
-require no equivalent refresh.
+WinGet actions refresh the process `PATH`; Homebrew actions make the verified
+manager's `bin` directory available for rediscovery; the built-in Linux
+managers require no equivalent refresh.
 
 Package-manager availability is verified evidence, not a bare manager name.
 The immutable planning input records the built-in manager identity, verified

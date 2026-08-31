@@ -99,12 +99,16 @@ class ProviderPlanTests(unittest.TestCase):
             provider_plans.adapter_environment_refresh("winget"),
             provider_plans.EnvironmentRefresh.PATH,
         )
-        for manager in ("apt", "dnf", "pacman", "brew"):
+        for manager in ("apt", "dnf", "pacman"):
             with self.subTest(manager=manager):
                 self.assertEqual(
                     provider_plans.adapter_environment_refresh(manager),
                     provider_plans.EnvironmentRefresh.NONE,
                 )
+        self.assertEqual(
+            provider_plans.adapter_environment_refresh("brew"),
+            provider_plans.EnvironmentRefresh.MANAGER_BIN,
+        )
 
     def test_windows_git_bash_uses_shared_git_package(self):
         state = self.state(capabilities.BASH, "Windows")
@@ -217,6 +221,18 @@ class ProviderPlanTests(unittest.TestCase):
         )
         self.assertEqual(preferred.actions[0].manager_state, native)
         self.assertNotIn("translated package-manager", preferred.actions[0].reason)
+        mislabeled = provider_plans.PackageManagerState(
+            "apt", "/usr/local/bin/brew", "host", "x86_64"
+        )
+        with self.assertRaisesRegex(
+            provider_plans.PlanningError, "fallback was not detected"
+        ):
+            provider_plans.generate_provider_plan(
+                (state,),
+                ("bash",),
+                package_managers=(translated,),
+                translated_manager_fallbacks=(mislabeled,),
+            )
 
     def test_unknown_homebrew_architecture_fails_closed(self):
         machine = capabilities.MachineState("Darwin", "arm64")
@@ -358,20 +374,25 @@ class ProviderPlanTests(unittest.TestCase):
         state = capabilities.detect_capability(
             capabilities.BASH, machine, locator=lambda probe, machine: None
         )
-        unknown = provider_plans.PackageManagerState(
-            "brew", "/opt/homebrew/bin/brew", "host"
-        )
         known = provider_plans.PackageManagerState(
             "brew", "/opt/homebrew/bin/brew", "host", "aarch64"
         )
-        plan = provider_plans.generate_provider_plan(
-            (state,), ("bash",), package_managers=(unknown, known)
-        )
-        self.assertEqual(plan.actions[0].manager_state.architecture, "arm64")
-        self.assertEqual(
-            plan.actions[0].environment_refresh,
-            provider_plans.EnvironmentRefresh.NONE,
-        )
+        for unknown_architecture in (None, "unknown", "unrecognized"):
+            unknown = provider_plans.PackageManagerState(
+                "brew",
+                "/opt/homebrew/bin/brew",
+                "host",
+                unknown_architecture,
+            )
+            with self.subTest(architecture=unknown_architecture):
+                plan = provider_plans.generate_provider_plan(
+                    (state,), ("bash",), package_managers=(unknown, known)
+                )
+                self.assertEqual(plan.actions[0].manager_state.architecture, "arm64")
+                self.assertEqual(
+                    plan.actions[0].environment_refresh,
+                    provider_plans.EnvironmentRefresh.MANAGER_BIN,
+                )
 
     def test_equivalent_manager_architecture_aliases_are_deduplicated(self):
         machine = capabilities.MachineState("Darwin", "arm64")

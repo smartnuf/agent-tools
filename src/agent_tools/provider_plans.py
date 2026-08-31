@@ -42,6 +42,7 @@ class EnvironmentRefresh(str, Enum):
 
     NONE = "none"
     PATH = "path"
+    MANAGER_BIN = "manager-bin"
 
 
 @dataclass(frozen=True)
@@ -170,7 +171,9 @@ def adapter_environment_refresh(manager: str) -> EnvironmentRefresh:
 
     if manager == "winget":
         return EnvironmentRefresh.PATH
-    if manager in {"apt", "dnf", "pacman", "brew"}:
+    if manager == "brew":
+        return EnvironmentRefresh.MANAGER_BIN
+    if manager in {"apt", "dnf", "pacman"}:
         return EnvironmentRefresh.NONE
     raise PlanningError(f"unsupported package manager: {manager}")
 
@@ -263,11 +266,12 @@ def _canonicalize_manager_states(
             raise PlanningError(
                 f"conflicting package-manager identity evidence: {identity[0]}"
             )
+        recognized_architectures = {"x86_64", "x86", "arm64", "arm"}
         known_architectures = {
             architecture
             for item in observations
             if (architecture := normalize_architecture(item.architecture))
-            != "unknown"
+            in recognized_architectures
         }
         if len(known_architectures) > 1:
             raise PlanningError(
@@ -409,9 +413,12 @@ def generate_provider_plan(
     translated_fallbacks_list: list[PackageManagerState] = []
     for fallback in translated_manager_fallbacks:
         detected = canonical_managers.get(_manager_identity_key(fallback, context))
-        if detected is None or normalize_architecture(
-            fallback.architecture
-        ) != normalize_architecture(detected.architecture):
+        if (
+            detected is None
+            or fallback.manager != detected.manager
+            or normalize_architecture(fallback.architecture)
+            != normalize_architecture(detected.architecture)
+        ):
             raise PlanningError("translated package-manager fallback was not detected")
         translated_fallbacks_list.append(detected)
     translated_fallbacks = frozenset(translated_fallbacks_list)
