@@ -18,6 +18,7 @@ from .capabilities import get_capability
 from .provider_execution import (
     ActionOutcome,
     PlanExecutionReport,
+    ProviderPlanInterrupted,
     _execute_provider_plan_unmanaged,
     _provider_execution_transaction,
 )
@@ -45,6 +46,16 @@ class PersistenceError(ManagedStateError):
         super().__init__(detail)
         self.outcome = outcome
         self.detail = detail
+
+
+class PersistenceInterrupted(KeyboardInterrupt):
+    """Carry durability classification when state persistence is interrupted."""
+
+    def __init__(self, outcome: PersistenceOutcome, detail: str) -> None:
+        super().__init__(detail)
+        self.outcome = outcome
+        self.detail = detail
+        self.managed_result: ManagedExecutionResult | None = None
 
 
 @dataclass(frozen=True)
@@ -79,9 +90,10 @@ def managed_state_path(
             / "agent-tools"
             / "managed-state.json"
         )
+    configured_root = Path(env["XDG_STATE_HOME"]) if env.get("XDG_STATE_HOME") else None
     root = (
-        Path(env["XDG_STATE_HOME"])
-        if env.get("XDG_STATE_HOME")
+        configured_root
+        if configured_root is not None and configured_root.is_absolute()
         else home / ".local" / "state"
     )
     return root / "agent-tools" / "managed-state.json"
@@ -92,11 +104,15 @@ def empty_document() -> dict[str, Any]:
 
 
 def load_document(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return empty_document()
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return empty_document()
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ManagedStateError(f"managed state is unreadable or corrupt: {error}") from error
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as error:
         raise ManagedStateError(f"managed state is unreadable or corrupt: {error}") from error
     if not isinstance(value, dict):
         raise ManagedStateError("managed state root must be a JSON object")
@@ -193,7 +209,7 @@ def load_document(path: Path) -> dict[str, Any]:
         ):
             raise ManagedStateError(f"managed-state record {index} has invalid requested action")
         if not (
-            isinstance(verification.get("outcome"), str)
+            verification.get("outcome") in {outcome.value for outcome in ActionOutcome}
             and isinstance(verification.get("verified_paths"), list)
             and all(isinstance(item, str) for item in verification["verified_paths"])
             and isinstance(verification.get("detail"), str)
@@ -217,6 +233,7 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
     temporary: Path | None = None
     replaced = False
     try:
+        missing_directories = _missing_directories(path.parent)
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -234,14 +251,38 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
         replaced = True
         temporary = None
         _sync_parent_directory(path.parent)
+        for directory in reversed(missing_directories):
+            _sync_parent_directory(directory.parent)
     except OSError as error:
-        if temporary is not None:
-            try:
-                temporary.unlink()
-            except OSError:
-                pass
+        _discard_temporary(temporary)
         outcome = PersistenceOutcome.UNKNOWN if replaced else PersistenceOutcome.FAILED
         raise PersistenceError(outcome, f"managed-state atomic persistence failed: {error}") from error
+    except KeyboardInterrupt as error:
+        _discard_temporary(temporary)
+        outcome = PersistenceOutcome.UNKNOWN if replaced else PersistenceOutcome.FAILED
+        raise PersistenceInterrupted(
+            outcome, "managed-state persistence was interrupted"
+        ) from error
+
+
+def _discard_temporary(temporary: Path | None) -> None:
+    if temporary is None:
+        return
+    try:
+        temporary.unlink()
+    except OSError:
+        pass
+
+
+def _missing_directories(directory: Path) -> tuple[Path, ...]:
+    missing = []
+    current = directory
+    while not current.exists():
+        missing.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    return tuple(reversed(missing))
 
 
 def _sync_parent_directory(directory: Path) -> None:
@@ -335,7 +376,12 @@ def execute_provider_plan(
             return ManagedExecutionResult(None, PersistenceOutcome.BLOCKED, str(error))
 
         requested_at = _timestamp()
-        report = executor(plan, **executor_arguments)
+        interruption: ProviderPlanInterrupted | None = None
+        try:
+            report = executor(plan, **executor_arguments)
+        except ProviderPlanInterrupted as error:
+            interruption = error
+            report = error.report
         completed_at = _timestamp()
         attempted_indexes = tuple(
             index
@@ -343,7 +389,11 @@ def execute_provider_plan(
             if action.commands and action.outcome is not ActionOutcome.ALREADY_SATISFIED
         )
         if not attempted_indexes:
-            return ManagedExecutionResult(report, PersistenceOutcome.NOT_REQUIRED)
+            result = ManagedExecutionResult(report, PersistenceOutcome.NOT_REQUIRED)
+            if interruption is not None:
+                interruption.managed_result = result
+                raise interruption
+            return result
         updated = {
             **document,
             "records": [
@@ -356,21 +406,38 @@ def execute_provider_plan(
         }
         try:
             _atomic_write(path, updated)
+        except PersistenceInterrupted as error:
+            result = _persistence_failure_result(report, error.outcome, error.detail)
+            error.managed_result = result
+            raise
         except PersistenceError as error:
-            return ManagedExecutionResult(
-                report,
-                error.outcome,
-                error.detail,
-                (
-                    "provider execution evidence is preserved in this result",
-                    "provenance was not durably recorded"
-                    if error.outcome is PersistenceOutcome.FAILED
-                    else "whether provenance became durable is unknown",
-                    "do not rerun provider mutation automatically and do not uninstall or roll back",
-                    "rediscover current machine state and generate a fresh plan before any later mutation",
-                ),
-            )
-        return ManagedExecutionResult(report, PersistenceOutcome.SUCCEEDED)
+            result = _persistence_failure_result(report, error.outcome, error.detail)
+        else:
+            result = ManagedExecutionResult(report, PersistenceOutcome.SUCCEEDED)
+        if interruption is not None:
+            interruption.managed_result = result
+            raise interruption
+        return result
+
+
+def _persistence_failure_result(
+    report: PlanExecutionReport,
+    outcome: PersistenceOutcome,
+    detail: str,
+) -> ManagedExecutionResult:
+    return ManagedExecutionResult(
+        report,
+        outcome,
+        detail,
+        (
+            "provider execution evidence is preserved in this result",
+            "provenance was not durably recorded"
+            if outcome is PersistenceOutcome.FAILED
+            else "whether provenance became durable is unknown",
+            "do not rerun provider mutation automatically and do not uninstall or roll back",
+            "rediscover current machine state and generate a fresh plan before any later mutation",
+        ),
+    )
 
 
 def provenance_for_capability(

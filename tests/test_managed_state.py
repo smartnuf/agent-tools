@@ -76,6 +76,14 @@ class ManagedStateTests(unittest.TestCase):
         )
         self.assertEqual(
             managed_state.managed_state_path(
+                platform_name="Linux",
+                environment={"XDG_STATE_HOME": "relative-state"},
+                home=home,
+            ),
+            home / ".local/state/agent-tools/managed-state.json",
+        )
+        self.assertEqual(
+            managed_state.managed_state_path(
                 platform_name="Darwin", environment={}, home=home
             ),
             home / "Library/Application Support/agent-tools/managed-state.json",
@@ -119,6 +127,12 @@ class ManagedStateTests(unittest.TestCase):
             with self.assertRaisesRegex(managed_state.ManagedStateError, "corrupt"):
                 managed_state.load_document(path)
 
+    def test_inaccessible_document_is_not_treated_as_absent(self) -> None:
+        path = Path("/inaccessible/managed-state.json")
+        with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
+            with self.assertRaisesRegex(managed_state.ManagedStateError, "denied"):
+                managed_state.load_document(path)
+
     def test_malformed_v1_record_is_rejected_without_speculative_migration(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
@@ -160,6 +174,12 @@ class ManagedStateTests(unittest.TestCase):
             self.assertFalse(records[0]["ownership"])
             self.assertEqual(records[0]["verification"]["outcome"], "succeeded")
             self.assertEqual(records[0]["requested_action"]["kind"], "install")
+
+            damaged = managed_state.load_document(path)
+            damaged["records"][0]["verification"]["outcome"] = "nonsense"
+            path.write_text(json.dumps(damaged), encoding="utf-8")
+            with self.assertRaisesRegex(managed_state.ManagedStateError, "verification"):
+                managed_state.load_document(path)
 
     def test_preflight_failure_blocks_executor_and_preserves_document(self) -> None:
         with TemporaryDirectory() as directory:
@@ -218,6 +238,23 @@ class ManagedStateTests(unittest.TestCase):
             self.assertIn("provenance was not durably recorded", result.recovery_guidance)
             self.assertFalse(path.exists())
 
+    def test_new_directory_entries_are_synced_before_success(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "agent-tools" / "managed-state.json"
+            with patch.object(managed_state, "_sync_parent_directory") as sync:
+                result = managed_state.execute_provider_plan(
+                    self.plan,
+                    state_path=path,
+                    executor=Mock(return_value=self.report()),
+                    allow_provider_mutation=True,
+                )
+            self.assertEqual(result.persistence, managed_state.PersistenceOutcome.SUCCEEDED)
+            self.assertEqual(
+                [call.args[0] for call in sync.call_args_list],
+                [path.parent, root],
+            )
+
     def test_post_replace_sync_failure_reports_unknown_without_rerun(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
@@ -235,6 +272,25 @@ class ManagedStateTests(unittest.TestCase):
                 )
             self.assertEqual(result.persistence, managed_state.PersistenceOutcome.UNKNOWN)
             executor.assert_called_once()
+            self.assertEqual(len(managed_state.load_document(path)["records"]), 1)
+
+    def test_persistence_interruption_preserves_unknown_result(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            with patch.object(
+                managed_state,
+                "_sync_parent_directory",
+                side_effect=KeyboardInterrupt(),
+            ):
+                with self.assertRaises(managed_state.PersistenceInterrupted) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=Mock(return_value=self.report()),
+                        allow_provider_mutation=True,
+                    )
+            result = raised.exception.managed_result
+            self.assertEqual(result.persistence, managed_state.PersistenceOutcome.UNKNOWN)
             self.assertEqual(len(managed_state.load_document(path)["records"]), 1)
 
     def test_process_local_transactions_do_not_lose_records(self) -> None:
@@ -307,6 +363,35 @@ class ManagedStateTests(unittest.TestCase):
             record = managed_state.load_document(path)["records"][0]
             self.assertEqual(record["verification"]["outcome"], "command-failed")
             self.assertFalse(record["ownership"])
+
+    def test_interrupted_attempt_is_persisted_before_interrupt_propagates(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            action = replace(
+                self.report().actions[0],
+                outcome=provider_execution.ActionOutcome.INTERRUPTED,
+                detail="interrupted",
+            )
+            report = provider_execution.PlanExecutionReport(
+                self.machine,
+                self.plan.requested_capabilities,
+                provider_execution.PlanOutcome.PARTIAL_FAILURE,
+                (action,),
+                ("inspect current provider state",),
+            )
+            interruption = provider_execution.ProviderPlanInterrupted(report)
+            executor = Mock(side_effect=interruption)
+            with self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised:
+                managed_state.execute_provider_plan(
+                    self.plan,
+                    state_path=path,
+                    executor=executor,
+                    allow_provider_mutation=True,
+                )
+            result = raised.exception.managed_result
+            self.assertEqual(result.persistence, managed_state.PersistenceOutcome.SUCCEEDED)
+            record = managed_state.load_document(path)["records"][0]
+            self.assertEqual(record["verification"]["outcome"], "interrupted")
 
     def test_native_replacement_semantics_are_persisted(self) -> None:
         with TemporaryDirectory() as directory:

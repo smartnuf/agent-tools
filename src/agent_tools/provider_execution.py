@@ -92,6 +92,23 @@ class CommandInitializationError(ExecutionContractError):
         self.detail = detail
 
 
+class CommandInterruptedError(KeyboardInterrupt):
+    """Raised after an interrupted command is terminated and reaped."""
+
+    def __init__(self, result: subprocess.CompletedProcess[str]) -> None:
+        super().__init__("provider command interrupted after bounded cleanup")
+        self.result = result
+
+
+class ProviderPlanInterrupted(KeyboardInterrupt):
+    """Carry structured attempted-mutation evidence through interruption."""
+
+    def __init__(self, report: PlanExecutionReport) -> None:
+        super().__init__("provider plan interrupted after bounded cleanup")
+        self.report = report
+        self.managed_result: object | None = None
+
+
 class PlanOutcome(str, Enum):
     NO_CHANGES = "no-changes"
     REFUSED = "refused"
@@ -113,6 +130,7 @@ class ActionOutcome(str, Enum):
     TIMED_OUT = "timed-out"
     FORCED_KILL = "forced-kill"
     SUPERVISOR_FAILED = "supervisor-failed"
+    INTERRUPTED = "interrupted"
     VERIFICATION_FAILED = "verification-failed"
 
 
@@ -253,7 +271,7 @@ def _run(
             output=stdout_tail.value(),
             stderr=stderr_tail.value(),
         ) from None
-    except BaseException:
+    except BaseException as interruption:
         try:
             if privileged_supervision:
                 _terminate_privileged_supervisor(process)
@@ -277,6 +295,15 @@ def _run(
             raise _uncertain_output_error(
                 argv, process.returncode, stdout_tail, stderr_tail
             )
+        if isinstance(interruption, KeyboardInterrupt):
+            raise CommandInterruptedError(
+                subprocess.CompletedProcess(
+                    argv,
+                    process.returncode,
+                    stdout_tail.value(),
+                    stderr_tail.value(),
+                )
+            ) from interruption
         raise
     if not _join_output_readers(readers, stop_readers, reader_errors):
         raise _uncertain_output_error(
@@ -1307,6 +1334,24 @@ def _execute_provider_plan(
                     reports,
                     mutation_may_have_started=True,
                 )
+            except CommandInterruptedError as error:
+                commands.append(_command_report(argv, error.result))
+                reports.append(
+                    _action_report(
+                        action,
+                        ActionOutcome.INTERRUPTED,
+                        tuple(commands),
+                        detail="provider command interrupted after bounded cleanup",
+                    )
+                )
+                raise ProviderPlanInterrupted(
+                    _failed_report(
+                        plan,
+                        context,
+                        reports,
+                        mutation_may_have_started=True,
+                    )
+                ) from error
             except subprocess.TimeoutExpired as error:
                 commands.append(
                     CommandReport(

@@ -73,6 +73,28 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(report.actions, ())
         runner.assert_not_called()
 
+    def test_command_interruption_carries_partial_report(self):
+        result = subprocess.CompletedProcess(
+            ("/usr/bin/sudo",), -2, "partial output", "interrupted"
+        )
+
+        def interrupt(argv, timeout):
+            raise provider_execution.CommandInterruptedError(result)
+
+        with self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised:
+            self.execute(
+                self.plan(),
+                detector=lambda capability, machine: self.state(capability),
+                runner=interrupt,
+            )
+        report = raised.exception.report
+        self.assertEqual(report.outcome, provider_execution.PlanOutcome.PARTIAL_FAILURE)
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.INTERRUPTED,
+        )
+        self.assertEqual(report.actions[0].commands[0].stdout, "partial output")
+
     def test_zero_action_plan_revalidates_unknown_and_stale_requests(self):
         available = self.state(capabilities.GHOSTSCRIPT, available=True)
         plan = provider_plans.generate_provider_plan(
