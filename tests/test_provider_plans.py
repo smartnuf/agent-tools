@@ -322,6 +322,20 @@ class ProviderPlanTests(unittest.TestCase):
                 translated_manager_fallbacks=(mislabeled,),
             )
 
+        contradictory_root = replace(
+            translated,
+            installation_root="/opt/homebrew",
+        )
+        with self.assertRaisesRegex(
+            provider_plans.PlanningError, "fallback was not detected"
+        ):
+            provider_plans.generate_provider_plan(
+                (state,),
+                ("bash",),
+                package_managers=(translated,),
+                translated_manager_fallbacks=(contradictory_root,),
+            )
+
     def test_unknown_homebrew_architecture_fails_closed(self):
         machine = capabilities.MachineState("Darwin", "arm64")
         state = capabilities.detect_capability(

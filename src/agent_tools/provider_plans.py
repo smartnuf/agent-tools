@@ -514,12 +514,7 @@ def generate_provider_plan(
     translated_fallbacks_list: list[PackageManagerState] = []
     for fallback in translated_manager_fallbacks:
         detected = canonical_managers.get(_manager_identity_key(fallback, context))
-        if (
-            detected is None
-            or fallback.manager != detected.manager
-            or normalize_architecture(fallback.architecture)
-            != normalize_architecture(detected.architecture)
-        ):
+        if detected is None or fallback != detected:
             raise PlanningError("translated package-manager fallback was not detected")
         translated_fallbacks_list.append(detected)
     translated_fallbacks = frozenset(translated_fallbacks_list)
