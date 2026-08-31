@@ -119,6 +119,15 @@ command timeout plus grace is an uncertain supervision failure, not a clean
 timeout. Agent Tools does not modify sudoers, PATH, profiles, system packages,
 or user configuration to establish this contract.
 
+Caller interruption is also a process-lifetime boundary. Before propagating a
+non-timeout interruption such as Ctrl+C, the runner terminates and reaps an
+isolated same-privilege tree. For an elevated Linux action it signals the
+sudo/timeout supervisor and waits through the bounded grace/guard interval for
+privileged-side termination; it does not substitute an unprivileged process-
+group kill. If confirmed privileged termination cannot be established, that
+uncertain supervision failure replaces a normal interruption return so callers
+cannot safely infer that retry is ready.
+
 The executor stops on the first timeout, nonzero exit, unavailable manager, or
 missing privilege. Failures before any command starts report no attempted
 mutation; after a command starts, the report warns that package-manager state
