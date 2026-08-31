@@ -118,6 +118,22 @@ privilege; apt, dnf, and pacman actions require it, while Homebrew and WinGet
 actions do not inherit that Linux elevation policy. The executor, rather than
 the catalogue command, will apply the recorded privilege policy.
 
+Package-manager availability is verified evidence, not a bare manager name.
+The immutable planning input records the built-in manager identity, verified
+executable path, local execution environment, and executable architecture when
+observable. Platform comes from the plan's single machine context rather than
+being duplicated in manager evidence. Suitability is derived from those
+observations and the catalogue option. Homebrew executable architecture is
+material because an Intel Homebrew on Apple silicon provisions translated
+packages: native Homebrew ranks first, unknown architecture is unusable, and a
+translated Homebrew is usable only when that exact observed manager state is
+explicitly authorized as a visible fallback. The executable architecture of
+apt, dnf, pacman, or WinGet does not itself determine their target package
+architecture; their local execution environment, catalogue option, and any
+manager-specific target argument are the relevant planning evidence. Planned
+argv uses the verified manager path so a later executor does not silently
+resolve a different installation.
+
 `platform.machine()` describes the running Python context and is not, by
 itself, sufficient evidence of host architecture when that Python may be
 translated. Platform adapters may therefore add host/process evidence. On

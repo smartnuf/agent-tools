@@ -52,8 +52,9 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
   fixture evidence plus honest Windows, Ubuntu, and macOS hosted-runner checks;
   it explicitly does not claim hosted ARM64 coverage.
 - Issue #50 adds deterministic, inspectable, read-only provider plans and
-  catalogue-owned WinGet, apt, dnf, pacman, and Homebrew command adapters;
-  already-satisfied requests produce zero actions.
+  catalogue-owned WinGet, apt, dnf, pacman, and Homebrew command adapters from
+  immutable verified package-manager evidence; already-satisfied requests
+  produce zero actions.
 
 M1 is complete and its factual record is frozen except for corrections. M1.5
 completed on 2026-08-29; M2 completed on 2026-08-30 with the first stable PyPI
