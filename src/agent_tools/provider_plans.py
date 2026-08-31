@@ -348,6 +348,52 @@ def _validate_provider_observations(state: CapabilityState) -> None:
             )
 
 
+def validate_capability_state(
+    state: CapabilityState,
+    *,
+    expected_context: MachineState | None = None,
+) -> None:
+    """Validate caller-owned detected state against catalogue and context truth."""
+
+    try:
+        catalogue_capability = get_capability(state.capability.capability_id)
+    except KeyError as error:
+        raise PlanningError(
+            f"unknown built-in capability: {state.capability.capability_id}"
+        ) from error
+    if (
+        state.capability != catalogue_capability
+        or tuple(item.provider for item in state.providers)
+        != catalogue_capability.providers
+    ):
+        raise PlanningError(
+            "detected state does not match built-in catalogue: "
+            f"{state.capability.capability_id}"
+        )
+    if expected_context is not None and MachineState(
+        state.machine.platform,
+        normalize_architecture(state.machine.architecture),
+        state.machine.execution_environment,
+    ) != MachineState(
+        expected_context.platform,
+        normalize_architecture(expected_context.architecture),
+        expected_context.execution_environment,
+    ):
+        raise PlanningError(
+            f"detected state is from another execution context: {state.capability.capability_id}"
+        )
+    _validate_provider_observations(state)
+    try:
+        consolidate_executable_evidence(state.providers, state.machine)
+    except ExecutableEvidenceError as error:
+        raise PlanningError(str(error)) from error
+    if state.availability is not capability_availability(state.providers):
+        raise PlanningError(
+            "detected capability availability contradicts provider states: "
+            f"{state.capability.capability_id}"
+        )
+
+
 def generate_provider_plan(
     states: Iterable[CapabilityState],
     requested_capabilities: Iterable[str],
@@ -441,27 +487,7 @@ def generate_provider_plan(
             state = by_id[capability_id]
         except KeyError as error:
             raise PlanningError(f"capability has no detected state: {capability_id}") from error
-        try:
-            catalogue_capability = get_capability(capability_id)
-        except KeyError as error:
-            raise PlanningError(f"unknown built-in capability: {capability_id}") from error
-        if (
-            state.capability != catalogue_capability
-            or tuple(item.provider for item in state.providers)
-            != catalogue_capability.providers
-        ):
-            raise PlanningError(
-                f"detected state does not match built-in catalogue: {capability_id}"
-            )
-        _validate_provider_observations(state)
-        try:
-            consolidate_executable_evidence(state.providers, state.machine)
-        except ExecutableEvidenceError as error:
-            raise PlanningError(str(error)) from error
-        if state.availability is not capability_availability(state.providers):
-            raise PlanningError(
-                f"detected capability availability contradicts provider states: {capability_id}"
-            )
+        validate_capability_state(state, expected_context=context)
         displaced: tuple[str, ...] = ()
         if state.availability is Availability.AVAILABLE and capability_id not in native_overrides:
             continue
