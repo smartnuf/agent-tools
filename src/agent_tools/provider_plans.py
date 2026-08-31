@@ -18,6 +18,7 @@ from .capabilities import (
     ProviderSpec,
     ProbePolicy,
     MachineState,
+    acceptable_provider_executables,
     capability_availability,
     consolidate_executable_evidence,
     get_capability,
@@ -54,6 +55,7 @@ class PackageManagerState:
     execution_environment: str
     architecture: str | None = None
     resolved_executable_path: str | None = None
+    installation_root: str | None = None
 
     def native_status(self, context: MachineState) -> NativeStatus:
         known_architectures = {"x86_64", "x86", "arm64", "arm"}
@@ -91,6 +93,8 @@ class ProviderAction:
     shared_package: bool
     displaces_verified_paths: tuple[str, ...] = ()
     target_architecture: str | None = None
+    environment_path_entries: tuple[str, ...] = ()
+    translated_manager_fallback_authorized: bool = False
 
     @property
     def manager(self) -> str:
@@ -178,6 +182,36 @@ def adapter_environment_refresh(manager: str) -> EnvironmentRefresh:
     raise PlanningError(f"unsupported package manager: {manager}")
 
 
+def adapter_environment_path_entries(
+    state: PackageManagerState,
+    context: MachineState,
+) -> tuple[str, ...] | None:
+    """Return reviewed executable-search paths, or None when evidence is insufficient."""
+
+    if state.manager != "brew":
+        return ()
+    executable = PurePosixPath(
+        state.resolved_executable_path or state.executable_path
+    )
+    derived_root = (
+        str(executable.parent.parent)
+        if executable.name == "brew" and executable.parent.name == "bin"
+        else None
+    )
+    root = state.installation_root
+    if root is not None and derived_root is not None:
+        if posixpath.normpath(root) != posixpath.normpath(derived_root):
+            return None
+    elif root is None:
+        if derived_root is None:
+            return None
+        root = derived_root
+    formula_bin = posixpath.join(posixpath.normpath(root), "bin")
+    if not _manager_path_is_absolute(formula_bin, context):
+        return None
+    return (formula_bin,)
+
+
 def _option(
     provider: ProviderSpec,
     context: MachineState,
@@ -198,6 +232,8 @@ def _option(
                 manager_state.manager != package.manager
                 or manager_state.execution_environment != context.execution_environment
             ):
+                continue
+            if adapter_environment_path_entries(manager_state, context) is None:
                 continue
             native_status = manager_state.native_status(context)
             if package.manager == "brew":
@@ -295,6 +331,16 @@ def _canonicalize_manager_states(
             if explicit_resolved_paths
             else None
         )
+        installation_roots = {
+            posixpath.normpath(item.installation_root)
+            for item in observations
+            if item.installation_root is not None
+        }
+        if len(installation_roots) > 1:
+            raise PlanningError(
+                "conflicting package-manager installation-root evidence: "
+                f"{observations[0].manager}"
+            )
         canonical.append(
             PackageManagerState(
                 manager=selected.manager,
@@ -302,6 +348,7 @@ def _canonicalize_manager_states(
                 execution_environment=selected.execution_environment,
                 architecture=next(iter(known_architectures), None),
                 resolved_executable_path=resolved_path,
+                installation_root=next(iter(installation_roots), None),
             )
         )
     return tuple(canonical)
@@ -346,6 +393,52 @@ def _validate_provider_observations(state: CapabilityState) -> None:
                 "detected provider availability contradicts executable evidence: "
                 f"{provider.provider_id}"
             )
+
+
+def validate_capability_state(
+    state: CapabilityState,
+    *,
+    expected_context: MachineState | None = None,
+) -> None:
+    """Validate caller-owned detected state against catalogue and context truth."""
+
+    try:
+        catalogue_capability = get_capability(state.capability.capability_id)
+    except KeyError as error:
+        raise PlanningError(
+            f"unknown built-in capability: {state.capability.capability_id}"
+        ) from error
+    if (
+        state.capability != catalogue_capability
+        or tuple(item.provider for item in state.providers)
+        != catalogue_capability.providers
+    ):
+        raise PlanningError(
+            "detected state does not match built-in catalogue: "
+            f"{state.capability.capability_id}"
+        )
+    if expected_context is not None and MachineState(
+        state.machine.platform,
+        normalize_architecture(state.machine.architecture),
+        state.machine.execution_environment,
+    ) != MachineState(
+        expected_context.platform,
+        normalize_architecture(expected_context.architecture),
+        expected_context.execution_environment,
+    ):
+        raise PlanningError(
+            f"detected state is from another execution context: {state.capability.capability_id}"
+        )
+    _validate_provider_observations(state)
+    try:
+        consolidate_executable_evidence(state.providers, state.machine)
+    except ExecutableEvidenceError as error:
+        raise PlanningError(str(error)) from error
+    if state.availability is not capability_availability(state.providers):
+        raise PlanningError(
+            "detected capability availability contradicts provider states: "
+            f"{state.capability.capability_id}"
+        )
 
 
 def generate_provider_plan(
@@ -403,6 +496,15 @@ def generate_provider_plan(
                 "package manager resolved executable path is not absolute: "
                 f"{manager_state.manager}"
             )
+        if manager_state.installation_root is not None and (
+            manager_state.manager != "brew"
+            or not manager_state.installation_root.strip()
+            or not _manager_path_is_absolute(manager_state.installation_root, context)
+        ):
+            raise PlanningError(
+                "package-manager installation root is invalid: "
+                f"{manager_state.manager}"
+            )
     manager_states = _canonicalize_manager_states(
         supplied_manager_states, context
     )
@@ -413,12 +515,7 @@ def generate_provider_plan(
     translated_fallbacks_list: list[PackageManagerState] = []
     for fallback in translated_manager_fallbacks:
         detected = canonical_managers.get(_manager_identity_key(fallback, context))
-        if (
-            detected is None
-            or fallback.manager != detected.manager
-            or normalize_architecture(fallback.architecture)
-            != normalize_architecture(detected.architecture)
-        ):
+        if detected is None or fallback != detected:
             raise PlanningError("translated package-manager fallback was not detected")
         translated_fallbacks_list.append(detected)
     translated_fallbacks = frozenset(translated_fallbacks_list)
@@ -441,29 +538,19 @@ def generate_provider_plan(
             state = by_id[capability_id]
         except KeyError as error:
             raise PlanningError(f"capability has no detected state: {capability_id}") from error
-        try:
-            catalogue_capability = get_capability(capability_id)
-        except KeyError as error:
-            raise PlanningError(f"unknown built-in capability: {capability_id}") from error
-        if (
-            state.capability != catalogue_capability
-            or tuple(item.provider for item in state.providers)
-            != catalogue_capability.providers
-        ):
-            raise PlanningError(
-                f"detected state does not match built-in catalogue: {capability_id}"
-            )
-        _validate_provider_observations(state)
-        try:
-            consolidate_executable_evidence(state.providers, state.machine)
-        except ExecutableEvidenceError as error:
-            raise PlanningError(str(error)) from error
-        if state.availability is not capability_availability(state.providers):
-            raise PlanningError(
-                f"detected capability availability contradicts provider states: {capability_id}"
-            )
+        validate_capability_state(state, expected_context=context)
         displaced: tuple[str, ...] = ()
-        if state.availability is Availability.AVAILABLE and capability_id not in native_overrides:
+        acceptable_current_provider = any(
+            acceptable_provider_executables(
+                provider_state,
+                lambda item: (
+                    item.path is not None
+                    and _manager_path_is_absolute(item.path, context)
+                ),
+            )
+            for provider_state in state.providers
+        )
+        if acceptable_current_provider and capability_id not in native_overrides:
             continue
         if capability_id in native_overrides:
             host_architecture = normalize_architecture(state.machine.architecture)
@@ -471,37 +558,34 @@ def generate_provider_plan(
                 raise PlanningError(
                     f"native-provisioning override requires known host architecture: {capability_id}"
                 )
-            available_providers = tuple(
-                provider_state
-                for provider_state in state.providers
-                if provider_state.availability is Availability.AVAILABLE
-                and provider_state.provider.satisfies_capability
-            )
             native_providers = tuple(
                 verified
-                for provider_state in available_providers
+                for provider_state in state.providers
                 if (
-                    verified := tuple(
-                        item
-                        for item in provider_state.executables
-                        if item.verified
+                    verified := acceptable_provider_executables(
+                        provider_state,
+                        lambda item: (
+                            normalize_architecture(item.architecture)
+                            == host_architecture
+                            and item.path is not None
+                            and _manager_path_is_absolute(item.path, context)
+                        ),
                     )
                 )
-                and all(
-                    normalize_architecture(item.architecture) == host_architecture
-                    for item in verified
-                )
             )
-            if any(
-                all(
-                    item.path is not None
-                    and _manager_path_is_absolute(item.path, context)
-                    for item in verified
-                )
-                for verified in native_providers
-            ):
-                continue
             if native_providers:
+                continue
+            native_with_invalid_identity = tuple(
+                acceptable_provider_executables(
+                    provider_state,
+                    lambda item: (
+                        normalize_architecture(item.architecture)
+                        == host_architecture
+                    ),
+                )
+                for provider_state in state.providers
+            )
+            if any(native_with_invalid_identity):
                 raise PlanningError(
                     "native-provider reuse requires absolute verified provider paths: "
                     f"{capability_id}"
@@ -599,6 +683,13 @@ def generate_provider_plan(
                     host_architecture
                     if displaced
                     else None
+                ),
+                environment_path_entries=(
+                    adapter_environment_path_entries(manager_state, context) or ()
+                ),
+                translated_manager_fallback_authorized=(
+                    manager_native_status is NativeStatus.TRANSLATED
+                    and manager_state in translated_fallbacks
                 ),
             )
         )

@@ -83,6 +83,162 @@ Stage the CLI:
   requested and observed host change, and refuse when provenance or safety is
   uncertain.
 
+The provider executor consumes the immutable reviewed plan rather than
+reconstructing selection or package mappings. Before any command it verifies
+the current machine/execution context, catalogue-owned action contract,
+package-manager executable identity, required privilege path, and whether the
+planned provider already satisfies the request. A nonempty plan refuses unless
+the dedicated non-interactive provider-mutation authorization is present.
+
+For issue #51 this is a trusted producer/consumer seam, not a general-purpose
+execution API. The supported executor input is a plan legitimately emitted by
+the canonical provider planner from the current built-in catalogue and a
+supported machine/execution context. The executor still revalidates every
+accepted authorization, privilege, bounded-execution, partial-state,
+supervision, rediscovery, and verification invariant at its mutation boundary;
+the trust boundary does not excuse a defect reachable on that supported path.
+It does not promise indefinite defensive handling of arbitrary caller-built
+object graphs, hypothetical future providers, unsupported platforms or
+architectures, or stronger process containment than this decision specifies.
+Issue #51 exposes no public `tools install` command. A future public mutation
+surface or persistence contract, including issue #52, must define any broader
+input-validation and compatibility guarantees explicitly rather than treating
+this packaged executor as a universal untrusted-plan sandbox.
+
+Commands run sequentially in isolated process trees with explicit timeouts and
+captured outcomes; a timeout terminates and reaps that tree before returning.
+On Linux, a `SYSTEM`-privilege action has a stricter execution contract. Agent
+Tools first resolves an absolute executable identity for GNU Coreutils
+`timeout`, verifies that identity with its version output, and does not install
+or configure a supervisor when none is available. A non-root process then
+checks non-interactive sudo authorization for every exact supervised command
+and executes only argument vectors equivalent to
+`sudo -n -- <verified-timeout> --signal=TERM --kill-after=5s <timeout>
+<reviewed-manager-argv...>`. A root process uses the same verified supervisor
+without sudo. GNU timeout's normal process-group behavior is required;
+`--foreground` is prohibited. The five-second TERM-to-KILL grace is small and
+bounded so a cooperative manager can clean up while TERM-resistant work that
+remains under GNU timeout's supported process-group supervision is escalated
+without an indefinite wait.
+
+The privileged supervisor, rather than the invoking Python process, is
+authoritative for elevated Linux termination. Python process-tree termination
+remains the same-privilege mechanism on other paths, but an elevated action
+never falls back to claiming success from an unprivileged group kill. Missing
+GNU timeout, unavailable non-interactive sudo, denied exact-command policy,
+supervisor failure, and command-start failure all fail closed. Reports preserve
+the actual supervised argv, raw return code, and bounded stdout/stderr tails
+(marked when earlier output was truncated), and distinguish
+ordinary command failure, timeout expiry, ambiguous forced kill, supervisor
+failure, command-start failure, and privilege unavailability to the extent GNU
+timeout's exit contract permits. Statuses 125, 126, and 127 are not proof of a
+supervisor-only or pre-start failure because GNU timeout can propagate the
+reviewed command's same status; they preserve possible-mutation evidence and
+block automatic or immediate retry. An outer Python guard that expires after the
+command timeout plus grace is an uncertain supervision failure, not a clean
+timeout. Agent Tools does not modify sudoers, PATH, profiles, system packages,
+or user configuration to establish this contract.
+
+Caller interruption is also a process-lifetime boundary. Before propagating a
+non-timeout interruption such as Ctrl+C, the runner terminates and reaps an
+isolated same-privilege tree. For an elevated Linux action it signals the
+sudo/timeout supervisor and waits through the bounded grace/guard interval for
+privileged-side termination; it does not substitute an unprivileged process-
+group kill. If confirmed privileged termination cannot be established, that
+uncertain supervision failure replaces a normal interruption return so callers
+cannot safely infer that retry is ready.
+
+Agent Tools owns the synchronous package-manager invocation and work that
+remains under these supported supervision mechanisms. It does not provide a
+portable process sandbox or claim containment of arbitrary processes that a
+package hook or installed program intentionally detaches. After the supervised
+leader exits, output pipes receive only a one-second closure guard. A retained
+pipe is positive evidence that synchronous quiescence was not established: the
+runner stops its polling readers, closes its local handles, preserves bounded
+output tails and the actual leader exit status, and reports `SUPERVISOR_FAILED`
+with uncertain external state. It does not kill broadly, perform final
+verification, convert a temporarily visible executable into success, retry
+automatically, or attempt rollback/removal. Retry is permitted only after an
+operator independently establishes that relevant activity has quiesced and
+generates a fresh plan from current state. Invisible detached work is not
+speculatively detected; normal completion with normally closed output remains
+governed by manager exit evidence and complete rediscovery.
+
+An interruption during the post-exit pipe-closure guard follows that same
+uncertain path: polling readers are stopped and local handles closed in bounded
+time, but Agent Tools does not retroactively claim ownership of or broadly kill
+work after the supervised leader has exited.
+
+The runner drains stdout and stderr concurrently while retaining at most one
+MiB of tail evidence per stream. Continuous installer output therefore cannot
+make memory use grow for the full command timeout, while the report preserves
+the most recent diagnostics and explicitly marks discarded earlier output.
+GNU timeout status 124 is ambiguous because GNU timeout also propagates a
+reviewed command's own status 124; it is therefore a command failure without a
+`timed_out` claim unless the outer Python guard supplies independent deadline
+evidence. Status 137 or a direct SIGKILL return is likewise reported only as an
+ambiguous forced kill—an administrator, the OOM killer, or timeout escalation
+can produce it—so it does not set the report's `timed_out` flag or claim the
+TERM grace expired.
+
+All non-process output state is allocated before process creation. Once a
+process exists, output-reader construction and startup are inside the same
+cleanup boundary as waiting: failure terminates and reaps through the
+appropriate same-privilege or privileged-supervisor path, closes and joins any
+local reader resources in bounded time, preserves available process/output
+evidence, and reports that mutation may have started. Failure to establish
+termination retains the uncertain-supervision, no-immediate-retry contract.
+
+The executor stops on the first timeout, nonzero exit, unavailable manager, or
+missing privilege. Failures before any command starts report no attempted
+mutation; after a command starts, the report warns that package-manager state
+may be partial and does not attempt provider removal or an unsafe rollback.
+After an apparent
+success it applies only the plan's temporary process-environment refresh before
+both the repeat-safety check and final rediscovery, then verifies the complete
+probe set, its `ANY`/`ALL` policy, and any native target architecture.
+Package-manager success
+without that final evidence is a reported failure. Individually verified paths
+remain visible in that failure report even when an `ALL` condition or native
+architecture target is not satisfied. Final success requires absolute verified
+identities just as the pre-action skip does. Every detector result must also
+name the exact built-in capability requested at that omitted, pre-action, or
+post-action seam; valid evidence for a different capability fails closed rather
+than being substituted. Reusing the same plan after any freshly
+detected catalogue-satisfying provider verifies performs no further command.
+Ordinary actions accept the highest-priority satisfying provider in the
+complete fresh capability state. Native-replacement actions accept any fresh
+satisfying provider whose verified executable evidence meets the target
+architecture; translated, unknown-architecture, or otherwise unsuitable
+evidence does not suppress the authorized replacement. The report names the
+provider whose fresh evidence caused the skip, and every reported skip path
+must be absolute so the decision does not depend on the caller's working
+directory. Managed-state persistence remains a separate subsequent contract.
+
+Execution serialization is process-local. One process-wide re-entrant lock
+encloses current-context and catalogue validation, fresh provider detection,
+manager and translated-Homebrew authorization validation, privilege/supervisor
+preflight, every command in the action, temporary environment refresh,
+post-action rediscovery, final verification, and report construction. Thus two
+threads in one Agent Tools process cannot both pass the missing-provider check
+and mutate concurrently; the second observes the first transaction's verified
+result before deciding whether a command is needed. This decision does not
+claim exclusion against another Agent Tools process or an unrelated package
+manager user. Portable inter-process coordination would be a separate public
+and persistence contract; native package-manager locking remains external, and
+this executor does not add file locks, named mutexes, or a lock service.
+
+A requested capability omitted from the action list is not accepted from plan
+history alone, whether the plan has zero actions or mixes satisfied requests
+with a missing-provider action. Before mutation or `NO_CHANGES`, the executor
+resolves every omitted request in the built-in catalogue and revalidates fresh
+provider evidence against the current immutable machine context. Unknown,
+stale, contradictory, or no-longer-verified requests fail preflight without
+claiming mutation. Aggregate capability availability alone is insufficient:
+the same catalogue-satisfying, probe-policy-aware, absolute-identity predicate
+used by fresh action skips and final verification must identify an acceptable
+current provider.
+
 ## Final-provider selection contract
 
 Discovery and bootstrap are not provider-selection policy. For every
@@ -118,8 +274,8 @@ privilege; apt, dnf, and pacman actions require it, while Homebrew and WinGet
 actions do not inherit that Linux elevation policy. The executor, rather than
 the catalogue command, will apply the recorded privilege policy. An action
 also records any environment refresh required before its verification probes;
-WinGet actions refresh the process `PATH`; Homebrew actions make the verified
-manager's `bin` directory available for rediscovery; the built-in Linux
+WinGet actions refresh the process `PATH`; Homebrew actions make the exact
+reviewed formula `bin` directory available for rediscovery; the built-in Linux
 managers require no equivalent refresh.
 
 Package-manager availability is verified evidence, not a bare manager name.
@@ -127,6 +283,10 @@ The immutable planning input records the built-in manager identity, verified
 executable path, local execution environment, and executable architecture when
 observable. When the executable path is an alias or symlink, discovery also
 records its verified resolved executable path as the canonical identity.
+When that identity does not unambiguously have `<root>/bin/brew` form,
+Homebrew planning also requires verified installation-root evidence and carries
+the derived formula `bin` path in the action; missing or contradictory root
+evidence fails closed.
 Complementary observations for that identity merge known architecture into
 missing architecture evidence; differing known architectures fail closed.
 Platform comes from the plan's single machine context rather than
@@ -141,6 +301,23 @@ architecture; their local execution environment, catalogue option, and any
 manager-specific target argument are the relevant planning evidence. Planned
 argv uses the verified manager path so a later executor does not silently
 resolve a different installation.
+
+Immediately before executing a Homebrew action, the executor runs a bounded,
+noninteractive, no-auto-update Homebrew Ruby architecture probe through the
+exact planned executable path. Missing or changed live architecture evidence
+invalidates the manager before mutation; the immutable plan's earlier
+architecture is authorization evidence, not a substitute for current state.
+
+When planning selects translated Homebrew, the immutable action carries a
+dedicated structured authorization bit derived from membership of that exact
+canonical `PackageManagerState` in the caller's translated-fallback set. The
+executor revalidates manager identity, execution environment, architecture and
+native status against the current plan context and refuses translated or
+unknown-architecture Homebrew without that exact evidence. It does not infer
+authorization from reason text or other incidental strings. Native Homebrew is
+accepted without translated-fallback authorization and rejects a contradictory
+translated-only marker. The evidence is ephemeral plan/report data, not user
+configuration or persistent managed state.
 
 `platform.machine()` describes the running Python context and is not, by
 itself, sufficient evidence of host architecture when that Python may be

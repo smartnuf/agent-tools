@@ -38,6 +38,23 @@ class ProviderPlanTests(unittest.TestCase):
         self.assertFalse(plan.changes_host)
         self.assertEqual(plan.context, states[0].machine)
 
+    def test_relative_provider_identity_does_not_omit_install_action(self):
+        machine = capabilities.MachineState("Linux", "x86_64")
+        relative = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            machine,
+            locator=lambda probe, context: "./gs" if probe.name == "gs" else None,
+            version_reader=lambda probe, path: "1.0",
+        )
+        plan = provider_plans.generate_provider_plan(
+            (relative,),
+            ("ghostscript",),
+            package_managers=(self.manager("apt"),),
+        )
+        self.assertEqual(len(plan.actions), 1)
+        self.assertEqual(plan.actions[0].provider_id, "host-ghostscript")
+        self.assertEqual(plan.actions[0].installation_unit, "ghostscript")
+
     def test_linux_plan_is_deterministic_and_inspectable(self):
         states = (self.state(capabilities.POPPLER), self.state(capabilities.GHOSTSCRIPT))
         plan = provider_plans.generate_provider_plan(
@@ -109,6 +126,90 @@ class ProviderPlanTests(unittest.TestCase):
             provider_plans.adapter_environment_refresh("brew"),
             provider_plans.EnvironmentRefresh.MANAGER_BIN,
         )
+        self.assertEqual(
+            provider_plans.adapter_environment_path_entries(
+                self.manager("brew"),
+                capabilities.MachineState("Darwin", "arm64"),
+            ),
+            ("/opt/homebrew/bin",),
+        )
+
+    def test_homebrew_formula_bin_uses_verified_installation_root(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT, machine, locator=lambda probe, context: None
+        )
+        manager = provider_plans.PackageManagerState(
+            "brew",
+            "/aliases/brew",
+            "host",
+            "arm64",
+            "/srv/homebrew/Library/Homebrew/brew.sh",
+            "/srv/homebrew",
+        )
+        plan = provider_plans.generate_provider_plan(
+            (state,), ("ghostscript",), package_managers=(manager,)
+        )
+        self.assertEqual(
+            plan.actions[0].environment_path_entries,
+            ("/srv/homebrew/bin",),
+        )
+
+    def test_homebrew_without_formula_bin_evidence_fails_closed(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT, machine, locator=lambda probe, context: None
+        )
+        manager = provider_plans.PackageManagerState(
+            "brew",
+            "/aliases/brew",
+            "host",
+            "arm64",
+            "/srv/homebrew/Library/Homebrew/brew.sh",
+        )
+        with self.assertRaisesRegex(
+            provider_plans.PlanningError, "no supported provider plan"
+        ):
+            provider_plans.generate_provider_plan(
+                (state,), ("ghostscript",), package_managers=(manager,)
+            )
+
+    def test_homebrew_root_cannot_contradict_canonical_executable(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT, machine, locator=lambda probe, context: None
+        )
+        manager = provider_plans.PackageManagerState(
+            "brew",
+            "/usr/local/bin/brew",
+            "host",
+            "arm64",
+            installation_root="/opt/homebrew",
+        )
+        with self.assertRaisesRegex(
+            provider_plans.PlanningError, "no supported provider plan"
+        ):
+            provider_plans.generate_provider_plan(
+                (state,), ("ghostscript",), package_managers=(manager,)
+            )
+
+    def test_conflicting_homebrew_installation_roots_fail_closed(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT, machine, locator=lambda probe, context: None
+        )
+        first = provider_plans.PackageManagerState(
+            "brew", "/aliases/brew", "host", "arm64", "/real/bin/brew", "/real"
+        )
+        conflicting = replace(first, installation_root="/other")
+        with self.assertRaisesRegex(
+            provider_plans.PlanningError, "installation-root evidence"
+        ):
+            provider_plans.generate_provider_plan(
+                (state,),
+                ("ghostscript",),
+                package_managers=(first, conflicting),
+            )
 
     def test_windows_git_bash_uses_shared_git_package(self):
         state = self.state(capabilities.BASH, "Windows")
@@ -211,6 +312,7 @@ class ProviderPlanTests(unittest.TestCase):
         action = plan.actions[0]
         self.assertEqual(action.manager_state, translated)
         self.assertIn("explicit translated package-manager fallback", action.reason)
+        self.assertTrue(action.translated_manager_fallback_authorized)
 
         native = self.manager("brew")
         preferred = provider_plans.generate_provider_plan(
@@ -221,6 +323,9 @@ class ProviderPlanTests(unittest.TestCase):
         )
         self.assertEqual(preferred.actions[0].manager_state, native)
         self.assertNotIn("translated package-manager", preferred.actions[0].reason)
+        self.assertFalse(
+            preferred.actions[0].translated_manager_fallback_authorized
+        )
         mislabeled = provider_plans.PackageManagerState(
             "apt", "/usr/local/bin/brew", "host", "x86_64"
         )
@@ -232,6 +337,20 @@ class ProviderPlanTests(unittest.TestCase):
                 ("bash",),
                 package_managers=(translated,),
                 translated_manager_fallbacks=(mislabeled,),
+            )
+
+        contradictory_root = replace(
+            translated,
+            installation_root="/opt/homebrew",
+        )
+        with self.assertRaisesRegex(
+            provider_plans.PlanningError, "fallback was not detected"
+        ):
+            provider_plans.generate_provider_plan(
+                (state,),
+                ("bash",),
+                package_managers=(translated,),
+                translated_manager_fallbacks=(contradictory_root,),
             )
 
     def test_unknown_homebrew_architecture_fails_closed(self):
