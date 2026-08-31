@@ -16,6 +16,12 @@ from .capabilities import (
     detect_capabilities,
     get_capability,
 )
+from .managed_state import (
+    ManagedStateError,
+    load_document,
+    managed_state_path,
+    provenance_for_capability,
+)
 
 DISTRIBUTION_NAME = "smartnuf-agent-tools"
 PACKAGE_PROBES = ("pypdf", "pdfplumber", "pymupdf", "PIL", "reportlab", "docx", "openpyxl")
@@ -190,23 +196,44 @@ def tools_status(capability_id: str | None = None) -> int:
         catalogue = CAPABILITY_CATALOGUE
 
     states = detect_capabilities(catalogue)
+    managed_error: str | None = None
+    try:
+        managed = load_document(
+            managed_state_path(platform_name=states[0].machine.platform)
+        )
+    except ManagedStateError as error:
+        managed = None
+        managed_error = str(error)
     for index, state in enumerate(states):
         if index:
             print()
         _print_capability_status(state)
+        if managed is not None:
+            records = provenance_for_capability(managed, state.capability.capability_id)
+            if records:
+                latest = records[-1]
+                print(f"  agent-tools requests: {len(records)}")
+                print(f"    latest request: {latest['recorded_at']}")
+                print(f"    installation unit: {latest['installation_unit']}")
+                print("    ownership: not claimed")
+            else:
+                print("  agent-tools requests: none recorded")
+    if managed_error is not None:
+        print(f"managed provenance unavailable: {managed_error}", file=sys.stderr)
 
     if capability_id is not None:
         availability = states[0].availability
         if availability is Availability.AVAILABLE:
             return 0
         return 1 if availability is Availability.ABSENT else 2
-    return int(
+    detected_status = int(
         any(
             state.capability.required_by_default
             and state.availability is not Availability.AVAILABLE
             for state in states
         )
     )
+    return detected_status
 
 
 def build_parser() -> argparse.ArgumentParser:
