@@ -176,8 +176,9 @@ complete fresh capability state. Native-replacement actions accept any fresh
 satisfying provider whose verified executable evidence meets the target
 architecture; translated, unknown-architecture, or otherwise unsuitable
 evidence does not suppress the authorized replacement. The report names the
-provider whose fresh evidence caused the skip. Managed-state persistence remains
-a separate subsequent contract.
+provider whose fresh evidence caused the skip, and every reported skip path
+must be absolute so the decision does not depend on the caller's working
+directory. Managed-state persistence remains a separate subsequent contract.
 
 Execution serialization is process-local. One process-wide re-entrant lock
 encloses current-context and catalogue validation, fresh provider detection,
