@@ -276,6 +276,7 @@ class ProviderPlanTests(unittest.TestCase):
         action = plan.actions[0]
         self.assertEqual(action.manager_state, translated)
         self.assertIn("explicit translated package-manager fallback", action.reason)
+        self.assertTrue(action.translated_manager_fallback_authorized)
 
         native = self.manager("brew")
         preferred = provider_plans.generate_provider_plan(
@@ -286,6 +287,9 @@ class ProviderPlanTests(unittest.TestCase):
         )
         self.assertEqual(preferred.actions[0].manager_state, native)
         self.assertNotIn("translated package-manager", preferred.actions[0].reason)
+        self.assertFalse(
+            preferred.actions[0].translated_manager_fallback_authorized
+        )
         mislabeled = provider_plans.PackageManagerState(
             "apt", "/usr/local/bin/brew", "host", "x86_64"
         )

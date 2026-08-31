@@ -38,11 +38,14 @@ from .provider_plans import (
     PlanningError,
     validate_capability_state,
 )
-from .python_selection import normalize_architecture
+from .python_selection import NativeStatus, normalize_architecture
 
 
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 300
+ELEVATED_TERM_TO_KILL_GRACE_SECONDS = 5
+ELEVATED_SUPERVISOR_GUARD_SECONDS = 10
 _ENVIRONMENT_LOCK = threading.RLock()
+_EXECUTION_LOCK = threading.RLock()
 
 
 class ExecutionContractError(RuntimeError):
@@ -54,6 +57,7 @@ class PlanOutcome(str, Enum):
     REFUSED = "refused"
     SUCCEEDED = "succeeded"
     PARTIAL_FAILURE = "partial-failure"
+    PREFLIGHT_FAILED = "preflight-failed"
 
 
 class ActionOutcome(str, Enum):
@@ -65,7 +69,10 @@ class ActionOutcome(str, Enum):
     PRIVILEGE_UNAVAILABLE = "privilege-unavailable"
     PREFLIGHT_FAILED = "preflight-failed"
     COMMAND_FAILED = "command-failed"
+    COMMAND_START_FAILED = "command-start-failed"
     TIMED_OUT = "timed-out"
+    FORCED_KILL = "forced-kill"
+    SUPERVISOR_FAILED = "supervisor-failed"
     VERIFICATION_FAILED = "verification-failed"
 
 
@@ -90,6 +97,7 @@ class ActionReport:
     detail: str = ""
     target_architecture: str | None = None
     displaces_verified_paths: tuple[str, ...] = ()
+    translated_manager_fallback_authorized: bool = False
 
 
 @dataclass(frozen=True)
@@ -106,6 +114,8 @@ Detector = Callable[[CapabilitySpec, MachineState], CapabilityState]
 ContextReader = Callable[[], MachineState]
 ManagerVerifier = Callable[[PackageManagerState, MachineState], bool]
 PrivilegeResolver = Callable[[ProviderAction], str | None]
+SupervisorResolver = Callable[[ProviderAction], str | None]
+PrivilegePreflight = Callable[[tuple[str, ...]], bool]
 EnvironmentRefresher = Callable[[ProviderAction], Mapping[str, str]]
 
 
@@ -231,6 +241,65 @@ def _resolve_privilege(action: ProviderAction) -> str | None:
         return ""
     sudo = shutil.which("sudo")
     return sudo if sudo and Path(sudo).is_absolute() else None
+
+
+def _resolve_supervisor(action: ProviderAction) -> str | None:
+    if (
+        action.execution_privilege is not ExecutionPrivilege.SYSTEM
+        or os.name == "nt"
+    ):
+        return ""
+    candidate = shutil.which("timeout")
+    if not candidate or not Path(candidate).is_absolute():
+        return None
+    try:
+        resolved = Path(candidate).resolve(strict=True)
+        result = subprocess.run(
+            (str(resolved), "--version"),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0 or "GNU coreutils" not in result.stdout:
+        return None
+    return str(resolved)
+
+
+def _preflight_privilege(argv: tuple[str, ...]) -> bool:
+    if len(argv) < 4 or argv[1:3] != ("-n", "--"):
+        return True
+    try:
+        result = subprocess.run(
+            (argv[0], "-n", "-l", "--", *argv[3:]),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def _elevated_argv(
+    reviewed_argv: tuple[str, ...],
+    *,
+    elevation: str,
+    supervisor: str,
+    timeout_seconds: int,
+) -> tuple[str, ...]:
+    supervised = (
+        supervisor,
+        "--signal=TERM",
+        f"--kill-after={ELEVATED_TERM_TO_KILL_GRACE_SECONDS}s",
+        f"{timeout_seconds}s",
+        *reviewed_argv,
+    )
+    return (elevation, "-n", "--", *supervised) if elevation else supervised
 
 
 def _windows_persisted_path() -> str:
@@ -384,6 +453,28 @@ def _validate_action(action: ProviderAction, context: MachineState) -> None:
         for path in action.displaces_verified_paths
     ):
         raise ExecutionContractError("displaced provider identity is not absolute")
+    manager_native_status = action.manager_state.native_status(context)
+    if action.manager == "brew":
+        if manager_native_status is NativeStatus.UNKNOWN:
+            raise ExecutionContractError("Homebrew manager architecture is unknown")
+        if (
+            manager_native_status is NativeStatus.TRANSLATED
+            and not action.translated_manager_fallback_authorized
+        ):
+            raise ExecutionContractError(
+                "translated Homebrew manager lacks explicit fallback authorization"
+            )
+        if (
+            manager_native_status is NativeStatus.NATIVE
+            and action.translated_manager_fallback_authorized
+        ):
+            raise ExecutionContractError(
+                "native Homebrew cannot carry translated-fallback authorization"
+            )
+    elif action.translated_manager_fallback_authorized:
+        raise ExecutionContractError(
+            "translated package-manager authorization is limited to Homebrew"
+        )
 
 
 def _validate_plan(plan: ProviderPlan, current: MachineState) -> MachineState:
@@ -481,6 +572,7 @@ def _action_report(
         detail,
         action.target_architecture,
         action.displaces_verified_paths,
+        action.translated_manager_fallback_authorized,
     )
 
 
@@ -494,14 +586,76 @@ def execute_provider_plan(
     current_context: ContextReader = current_machine,
     manager_verifier: ManagerVerifier = _verify_manager,
     privilege_resolver: PrivilegeResolver = _resolve_privilege,
+    supervisor_resolver: SupervisorResolver = _resolve_supervisor,
+    privilege_preflight: PrivilegePreflight = _preflight_privilege,
     environment_refresher: EnvironmentRefresher = _refresh_environment,
 ) -> PlanExecutionReport:
     """Consume one reviewed plan, mutate only when authorized, and report outcomes."""
 
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
+    with _EXECUTION_LOCK:
+        return _execute_provider_plan(
+            plan,
+            allow_provider_mutation=allow_provider_mutation,
+            timeout_seconds=timeout_seconds,
+            runner=runner,
+            detector=detector,
+            current_context=current_context,
+            manager_verifier=manager_verifier,
+            privilege_resolver=privilege_resolver,
+            supervisor_resolver=supervisor_resolver,
+            privilege_preflight=privilege_preflight,
+            environment_refresher=environment_refresher,
+        )
+
+
+def _execute_provider_plan(
+    plan: ProviderPlan,
+    *,
+    allow_provider_mutation: bool,
+    timeout_seconds: int,
+    runner: Runner,
+    detector: Detector,
+    current_context: ContextReader,
+    manager_verifier: ManagerVerifier,
+    privilege_resolver: PrivilegeResolver,
+    supervisor_resolver: SupervisorResolver,
+    privilege_preflight: PrivilegePreflight,
+    environment_refresher: EnvironmentRefresher,
+) -> PlanExecutionReport:
     context = _validate_plan(plan, current_context())
     if not plan.actions:
+        for capability_id in plan.requested_capabilities:
+            try:
+                capability = get_capability(capability_id)
+            except KeyError:
+                return PlanExecutionReport(
+                    context,
+                    plan.requested_capabilities,
+                    PlanOutcome.PREFLIGHT_FAILED,
+                    (),
+                    (f"unknown requested capability: {capability_id}",),
+                )
+            state = detector(capability, context)
+            try:
+                validate_capability_state(state, expected_context=context)
+            except PlanningError as error:
+                return PlanExecutionReport(
+                    context,
+                    plan.requested_capabilities,
+                    PlanOutcome.PREFLIGHT_FAILED,
+                    (),
+                    (f"actionless capability evidence is stale: {error}",),
+                )
+            if state.availability is not Availability.AVAILABLE:
+                return PlanExecutionReport(
+                    context,
+                    plan.requested_capabilities,
+                    PlanOutcome.PREFLIGHT_FAILED,
+                    (),
+                    (f"requested capability no longer verifies: {capability_id}",),
+                )
         return PlanExecutionReport(
             context,
             plan.requested_capabilities,
@@ -580,12 +734,65 @@ def execute_provider_plan(
             return _failed_report(
                 plan, context, reports, mutation_may_have_started=False
             )
+        supervisor = supervisor_resolver(action)
+        if supervisor is None:
+            reports.append(
+                _action_report(
+                    action,
+                    ActionOutcome.SUPERVISOR_FAILED,
+                    detail="verified GNU timeout supervision is unavailable",
+                )
+            )
+            return _failed_report(
+                plan, context, reports, mutation_may_have_started=False
+            )
+        elevated_linux = (
+            action.execution_privilege is ExecutionPrivilege.SYSTEM
+            and context.platform == "Linux"
+        )
+        elevated_commands = (
+            tuple(
+                _elevated_argv(
+                    reviewed_argv,
+                    elevation=elevation,
+                    supervisor=supervisor,
+                    timeout_seconds=timeout_seconds,
+                )
+                for reviewed_argv in action.commands
+            )
+            if elevated_linux
+            else ()
+        )
+        if elevated_linux and any(
+            not privilege_preflight(argv) for argv in elevated_commands
+        ):
+            reports.append(
+                _action_report(
+                    action,
+                    ActionOutcome.PRIVILEGE_UNAVAILABLE,
+                    detail="noninteractive sudo refused the verified supervisor",
+                )
+            )
+            return _failed_report(
+                plan, context, reports, mutation_may_have_started=False
+            )
 
         commands: list[CommandReport] = []
-        for reviewed_argv in action.commands:
-            argv = (elevation, *reviewed_argv) if elevation else reviewed_argv
+        for command_index, reviewed_argv in enumerate(action.commands):
+            argv = (
+                elevated_commands[command_index]
+                if elevated_linux
+                else ((elevation, *reviewed_argv) if elevation else reviewed_argv)
+            )
+            runner_timeout = (
+                timeout_seconds
+                + ELEVATED_TERM_TO_KILL_GRACE_SECONDS
+                + ELEVATED_SUPERVISOR_GUARD_SECONDS
+                if elevated_linux
+                else timeout_seconds
+            )
             try:
-                result = runner(argv, timeout_seconds)
+                result = runner(argv, runner_timeout)
             except subprocess.TimeoutExpired as error:
                 commands.append(
                     CommandReport(
@@ -599,9 +806,17 @@ def execute_provider_plan(
                 reports.append(
                     _action_report(
                         action,
-                        ActionOutcome.TIMED_OUT,
+                        (
+                            ActionOutcome.SUPERVISOR_FAILED
+                            if elevated_linux
+                            else ActionOutcome.TIMED_OUT
+                        ),
                         tuple(commands),
-                        detail=f"command exceeded {timeout_seconds} seconds",
+                        detail=(
+                            "privileged supervisor did not establish bounded termination"
+                            if elevated_linux
+                            else f"command exceeded {timeout_seconds} seconds"
+                        ),
                     )
                 )
                 return _failed_report(
@@ -613,7 +828,11 @@ def execute_provider_plan(
                 reports.append(
                     _action_report(
                         action,
-                        ActionOutcome.COMMAND_FAILED,
+                        (
+                            ActionOutcome.COMMAND_START_FAILED
+                            if elevated_linux
+                            else ActionOutcome.COMMAND_FAILED
+                        ),
                         tuple(commands),
                         detail=f"command could not start: {error}",
                     )
@@ -624,7 +843,66 @@ def execute_provider_plan(
                     reports,
                     mutation_may_have_started=earlier_command_completed,
                 )
-            commands.append(_command_report(argv, result))
+            command_report = _command_report(argv, result)
+            if elevated_linux and result.returncode in {
+                124,
+                137,
+                -signal.SIGKILL,
+            }:
+                command_report = CommandReport(
+                    command_report.argv,
+                    command_report.returncode,
+                    command_report.stdout,
+                    command_report.stderr,
+                    timed_out=True,
+                )
+            commands.append(command_report)
+            if elevated_linux and result.returncode in {
+                124,
+                137,
+                -signal.SIGKILL,
+                125,
+                126,
+                127,
+            }:
+                supervised_outcomes = {
+                    124: ActionOutcome.TIMED_OUT,
+                    137: ActionOutcome.FORCED_KILL,
+                    -signal.SIGKILL: ActionOutcome.FORCED_KILL,
+                    125: ActionOutcome.SUPERVISOR_FAILED,
+                    126: ActionOutcome.COMMAND_START_FAILED,
+                    127: ActionOutcome.COMMAND_START_FAILED,
+                }
+                outcome = supervised_outcomes[result.returncode]
+                details = {
+                    124: "privileged command reached its timeout and terminated",
+                    137: "privileged command required KILL after the TERM grace interval",
+                    -signal.SIGKILL: (
+                        "privileged command required KILL after the TERM grace "
+                        "interval"
+                    ),
+                    125: "GNU timeout supervisor failed",
+                    126: "GNU timeout could not start the reviewed command",
+                    127: "GNU timeout could not resolve the reviewed command",
+                }
+                reports.append(
+                    _action_report(
+                        action,
+                        outcome,
+                        tuple(commands),
+                        detail=details[result.returncode],
+                    )
+                )
+                return _failed_report(
+                    plan,
+                    context,
+                    reports,
+                    mutation_may_have_started=result.returncode in {
+                        124,
+                        137,
+                        -signal.SIGKILL,
+                    },
+                )
             if result.returncode != 0:
                 reports.append(
                     _action_report(

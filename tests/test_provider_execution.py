@@ -3,7 +3,7 @@ import subprocess
 import threading
 import unittest
 from dataclasses import replace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from agent_tools import capabilities
 from agent_tools import provider_execution
@@ -51,6 +51,8 @@ class ProviderExecutionTests(unittest.TestCase):
             "current_context": lambda: self.machine,
             "manager_verifier": lambda state, machine: True,
             "privilege_resolver": lambda action: "/usr/bin/sudo",
+            "supervisor_resolver": lambda action: "/usr/bin/timeout",
+            "privilege_preflight": lambda argv: True,
         }
         defaults.update(kwargs)
         return provider_execution.execute_provider_plan(plan, **defaults)
@@ -64,11 +66,38 @@ class ProviderExecutionTests(unittest.TestCase):
         report = provider_execution.execute_provider_plan(
             plan,
             current_context=lambda: self.machine,
+            detector=lambda capability, machine: state,
             runner=runner,
         )
         self.assertEqual(report.outcome, provider_execution.PlanOutcome.NO_CHANGES)
         self.assertEqual(report.actions, ())
         runner.assert_not_called()
+
+    def test_zero_action_plan_revalidates_unknown_and_stale_requests(self):
+        available = self.state(capabilities.GHOSTSCRIPT, available=True)
+        plan = provider_plans.generate_provider_plan(
+            (available,), ("ghostscript",), package_managers=(self.manager,)
+        )
+        stale = self.state(capabilities.GHOSTSCRIPT)
+        report = provider_execution.execute_provider_plan(
+            plan,
+            current_context=lambda: self.machine,
+            detector=lambda capability, machine: stale,
+        )
+        self.assertEqual(
+            report.outcome, provider_execution.PlanOutcome.PREFLIGHT_FAILED
+        )
+        self.assertIn("no longer verifies", report.recovery_guidance[0])
+
+        unknown = replace(plan, requested_capabilities=("unknown",))
+        report = provider_execution.execute_provider_plan(
+            unknown,
+            current_context=lambda: self.machine,
+        )
+        self.assertEqual(
+            report.outcome, provider_execution.PlanOutcome.PREFLIGHT_FAILED
+        )
+        self.assertIn("unknown requested capability", report.recovery_guidance[0])
 
     def test_mutating_plan_refuses_without_dedicated_authorization(self):
         runner = Mock(side_effect=AssertionError("must not run"))
@@ -177,10 +206,17 @@ class ProviderExecutionTests(unittest.TestCase):
             timeout_seconds=17,
         )
         self.assertEqual(report.outcome, provider_execution.PlanOutcome.SUCCEEDED)
-        self.assertEqual(report.actions[0].outcome, provider_execution.ActionOutcome.SUCCEEDED)
-        self.assertEqual(calls[0][0][0], "/usr/bin/sudo")
-        self.assertEqual(calls[0][0][1:], plan.actions[0].commands[0])
-        self.assertEqual(calls[0][1], 17)
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.SUCCEEDED,
+        )
+        self.assertEqual(calls[0][0][:3], ("/usr/bin/sudo", "-n", "--"))
+        self.assertEqual(calls[0][0][3], "/usr/bin/timeout")
+        self.assertEqual(
+            calls[0][0][-len(plan.actions[0].commands[0]) :],
+            plan.actions[0].commands[0],
+        )
+        self.assertEqual(calls[0][1], 32)
         self.assertEqual(
             report.actions[0].final_verified_paths,
             ("/tools/gs", "/tools/gswin64c", "/tools/gswin32c"),
@@ -240,9 +276,125 @@ class ProviderExecutionTests(unittest.TestCase):
             timeout_seconds=3,
         )
         action = report.actions[0]
-        self.assertEqual(action.outcome, provider_execution.ActionOutcome.TIMED_OUT)
+        self.assertEqual(
+            action.outcome,
+            provider_execution.ActionOutcome.SUPERVISOR_FAILED,
+        )
         self.assertTrue(action.commands[0].timed_out)
         self.assertEqual(action.commands[0].stdout, "partial")
+
+    def test_elevated_supervisor_argv_is_noninteractive_and_reports_statuses(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        for returncode, expected in (
+            (124, provider_execution.ActionOutcome.TIMED_OUT),
+            (137, provider_execution.ActionOutcome.FORCED_KILL),
+            (-9, provider_execution.ActionOutcome.FORCED_KILL),
+            (125, provider_execution.ActionOutcome.SUPERVISOR_FAILED),
+            (126, provider_execution.ActionOutcome.COMMAND_START_FAILED),
+            (127, provider_execution.ActionOutcome.COMMAND_START_FAILED),
+        ):
+            with self.subTest(returncode=returncode):
+                calls = []
+
+                def run(argv, timeout):
+                    calls.append((argv, timeout))
+                    return subprocess.CompletedProcess(
+                        argv, returncode, "raw-out", "raw-err"
+                    )
+
+                report = self.execute(
+                    self.plan(),
+                    detector=self.detector_sequence(absent),
+                    runner=run,
+                    timeout_seconds=7,
+                )
+                action = report.actions[0]
+                self.assertEqual(action.outcome, expected)
+                self.assertEqual(
+                    calls[0][0][:7],
+                    (
+                        "/usr/bin/sudo",
+                        "-n",
+                        "--",
+                        "/usr/bin/timeout",
+                        "--signal=TERM",
+                        "--kill-after=5s",
+                        "7s",
+                    ),
+                )
+                self.assertEqual(calls[0][1], 22)
+                self.assertEqual(action.commands[0].returncode, returncode)
+                self.assertEqual(action.commands[0].stdout, "raw-out")
+                self.assertEqual(action.commands[0].stderr, "raw-err")
+                self.assertEqual(
+                    action.commands[0].timed_out,
+                    returncode in {124, 137, -9},
+                )
+
+    def test_elevated_preflight_fails_before_runner_without_prompt_path(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        runner = Mock(side_effect=AssertionError("must not run"))
+        preflight = Mock(return_value=False)
+        report = self.execute(
+            self.plan(),
+            detector=self.detector_sequence(absent),
+            runner=runner,
+            privilege_preflight=preflight,
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.PRIVILEGE_UNAVAILABLE,
+        )
+        preflight.assert_called_once()
+        self.assertEqual(
+            preflight.call_args.args[0][:3],
+            ("/usr/bin/sudo", "-n", "--"),
+        )
+        runner.assert_not_called()
+
+    def test_sudo_preflight_uses_noninteractive_exact_argv_and_closed_stdin(self):
+        supervised = (
+            "/usr/bin/sudo",
+            "-n",
+            "--",
+            "/usr/bin/timeout",
+            "--signal=TERM",
+            "--kill-after=5s",
+            "7s",
+            "/usr/bin/apt-get",
+            "update",
+        )
+        completed = subprocess.CompletedProcess(supervised, 0, "allowed", "")
+        with patch.object(subprocess, "run", return_value=completed) as run:
+            self.assertTrue(provider_execution._preflight_privilege(supervised))
+        self.assertEqual(
+            run.call_args.args[0],
+            (
+                "/usr/bin/sudo",
+                "-n",
+                "-l",
+                "--",
+                *supervised[3:],
+            ),
+        )
+        self.assertIs(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertEqual(run.call_args.kwargs["timeout"], 10)
+
+    def test_missing_supervisor_fails_before_mutation(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        runner = Mock(side_effect=AssertionError("must not run"))
+        report = self.execute(
+            self.plan(),
+            detector=self.detector_sequence(absent),
+            supervisor_resolver=lambda action: None,
+            runner=runner,
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.SUPERVISOR_FAILED,
+        )
+        self.assertIn("no provider command started", report.recovery_guidance[0])
+        runner.assert_not_called()
 
     def test_nonzero_command_stops_action_and_reports_output(self):
         plan = self.plan(capabilities.POPPLER)
@@ -276,7 +428,7 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         self.assertEqual(
             report.actions[0].outcome,
-            provider_execution.ActionOutcome.COMMAND_FAILED,
+            provider_execution.ActionOutcome.COMMAND_START_FAILED,
         )
         self.assertIn("no provider command started", report.recovery_guidance[0])
         self.assertNotIn("partial host state", report.recovery_guidance[0])
@@ -300,7 +452,7 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         self.assertEqual(
             report.actions[0].outcome,
-            provider_execution.ActionOutcome.COMMAND_FAILED,
+            provider_execution.ActionOutcome.COMMAND_START_FAILED,
         )
         self.assertEqual(len(report.actions[0].commands), 2)
         self.assertIn("partial host state", report.recovery_guidance[0])
@@ -496,6 +648,89 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertFalse(second_thread.is_alive())
         self.assertEqual(observed, [("refresh", original), ("applied", "/second")])
         self.assertEqual(os.environ.get("PATH"), original)
+
+    def test_complete_provider_transactions_are_process_local_serialized(self):
+        plan = self.plan()
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        available = self.state(capabilities.GHOSTSCRIPT, available=True)
+        installed = threading.Event()
+        first_runner_entered = threading.Event()
+        release_first = threading.Event()
+        runner_calls = []
+        reports = []
+
+        def detect(capability, machine):
+            return available if installed.is_set() else absent
+
+        def run(argv, timeout):
+            runner_calls.append(argv)
+            first_runner_entered.set()
+            release_first.wait(2)
+            installed.set()
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        def execute():
+            reports.append(self.execute(plan, detector=detect, runner=run))
+
+        first = threading.Thread(target=execute)
+        second = threading.Thread(target=execute)
+        first.start()
+        self.assertTrue(first_runner_entered.wait(2))
+        second.start()
+        self.assertEqual(len(runner_calls), 1)
+        release_first.set()
+        first.join(2)
+        second.join(2)
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(len(runner_calls), len(plan.actions[0].commands))
+        self.assertEqual(
+            {report.actions[0].outcome for report in reports},
+            {
+                provider_execution.ActionOutcome.SUCCEEDED,
+                provider_execution.ActionOutcome.ALREADY_SATISFIED,
+            },
+        )
+
+    def test_translated_homebrew_requires_structured_exact_authorization(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        translated_manager = provider_plans.PackageManagerState(
+            "brew",
+            "/usr/local/bin/brew",
+            "host",
+            "x86_64",
+            installation_root="/usr/local",
+        )
+        missing = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            machine,
+            locator=lambda probe, context: None,
+        )
+        plan = provider_plans.generate_provider_plan(
+            (missing,),
+            ("ghostscript",),
+            package_managers=(translated_manager,),
+            translated_manager_fallbacks=(translated_manager,),
+        )
+        self.assertTrue(plan.actions[0].translated_manager_fallback_authorized)
+        forged = replace(
+            plan,
+            actions=(
+                replace(
+                    plan.actions[0],
+                    translated_manager_fallback_authorized=False,
+                ),
+            ),
+        )
+        with self.assertRaisesRegex(
+            provider_execution.ExecutionContractError,
+            "lacks explicit fallback authorization",
+        ):
+            provider_execution.execute_provider_plan(
+                forged,
+                allow_provider_mutation=True,
+                current_context=lambda: machine,
+            )
 
     def test_native_replacement_requires_target_architecture_after_mutation(self):
         machine = capabilities.MachineState("Windows", "arm64")

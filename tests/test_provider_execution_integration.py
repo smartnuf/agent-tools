@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 import sys
 import time
@@ -52,11 +53,12 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
             subprocess_calls = []
 
             def run(reviewed_argv, timeout):
+                manager_index = reviewed_argv.index("/verified/apt-get")
                 actual = (
                     sys.executable,
                     str(helper),
                     str(marker),
-                    *reviewed_argv[1:],
+                    *reviewed_argv[manager_index + 1 :],
                 )
                 subprocess_calls.append(actual)
                 return subprocess.run(
@@ -72,6 +74,8 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
                 "current_context": lambda: machine,
                 "manager_verifier": lambda state, context: True,
                 "privilege_resolver": lambda action: "",
+                "supervisor_resolver": lambda action: "/usr/bin/timeout",
+                "privilege_preflight": lambda argv: True,
                 "detector": detect,
                 "runner": run,
             }
@@ -110,6 +114,58 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
                     0.2,
                 )
             time.sleep(1.2)
+            self.assertFalse(marker.exists())
+
+    @unittest.skipUnless(shutil.which("timeout"), "GNU timeout is unavailable")
+    def test_gnu_timeout_kills_term_resistant_descendant_group(self):
+        timeout = provider_execution._resolve_supervisor(
+            provider_plans.generate_provider_plan(
+                (
+                    capabilities.detect_capability(
+                        capabilities.GHOSTSCRIPT,
+                        capabilities.MachineState("Linux", "x86_64"),
+                        locator=lambda probe, machine: None,
+                    ),
+                ),
+                ("ghostscript",),
+                package_managers=(
+                    provider_plans.PackageManagerState(
+                        "apt", "/usr/bin/apt-get", "host", "x86_64"
+                    ),
+                ),
+            ).actions[0]
+        )
+        if not timeout:
+            self.skipTest("available timeout is not verified GNU Coreutils")
+        with TemporaryDirectory() as directory:
+            marker = Path(directory) / "survivor"
+            child = (
+                "import pathlib,signal,sys,time;"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN);"
+                "time.sleep(1);pathlib.Path(sys.argv[1]).write_text('alive')"
+            )
+            parent = (
+                "import signal,subprocess,sys,time;"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN);"
+                "subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2]]);"
+                "time.sleep(30)"
+            )
+            result = provider_execution._run(
+                (
+                    timeout,
+                    "--signal=TERM",
+                    "--kill-after=0.2s",
+                    "0.2s",
+                    sys.executable,
+                    "-c",
+                    parent,
+                    child,
+                    str(marker),
+                ),
+                2,
+            )
+            self.assertIn(result.returncode, {137, -9})
+            time.sleep(1.1)
             self.assertFalse(marker.exists())
 
 

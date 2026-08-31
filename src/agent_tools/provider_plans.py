@@ -93,6 +93,7 @@ class ProviderAction:
     displaces_verified_paths: tuple[str, ...] = ()
     target_architecture: str | None = None
     environment_path_entries: tuple[str, ...] = ()
+    translated_manager_fallback_authorized: bool = False
 
     @property
     def manager(self) -> str:
@@ -674,6 +675,10 @@ def generate_provider_plan(
                 ),
                 environment_path_entries=(
                     adapter_environment_path_entries(manager_state, context) or ()
+                ),
+                translated_manager_fallback_authorized=(
+                    manager_native_status is NativeStatus.TRANSLATED
+                    and manager_state in translated_fallbacks
                 ),
             )
         )
