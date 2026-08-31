@@ -163,6 +163,31 @@ class ProviderState:
         return tuple(item.probe.name for item in self.executables if not item.verified)
 
 
+def acceptable_provider_executables(
+    provider_state: ProviderState,
+    qualifies: Callable[[ExecutableState], bool],
+) -> tuple[ExecutableState, ...]:
+    """Return qualifying evidence using the provider's ANY/ALL probe policy."""
+
+    if (
+        provider_state.availability is not Availability.AVAILABLE
+        or not provider_state.provider.satisfies_capability
+    ):
+        return ()
+    qualifying = tuple(
+        executable
+        for executable in provider_state.executables
+        if executable.verified and qualifies(executable)
+    )
+    if provider_state.provider.probe_policy is ProbePolicy.ALL:
+        return (
+            qualifying
+            if len(qualifying) == len(provider_state.executables)
+            else ()
+        )
+    return qualifying
+
+
 @dataclass(frozen=True)
 class CapabilityState:
     """Detected state for a capability, independent of desired or managed state."""

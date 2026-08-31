@@ -26,6 +26,8 @@ from .capabilities import (
     CapabilitySpec,
     CapabilityState,
     MachineState,
+    ProviderState,
+    acceptable_provider_executables,
     current_machine,
     detect_capability,
     get_capability,
@@ -52,7 +54,6 @@ ELEVATED_TERM_TO_KILL_GRACE_SECONDS = 5
 ELEVATED_SUPERVISOR_GUARD_SECONDS = 10
 OUTPUT_PIPE_CLOSURE_GUARD_SECONDS = 1
 POSIX_SIGKILL_RETURNCODE = -9
-SUPPORTED_NATIVE_ARCHITECTURES = frozenset({"x86", "x86_64", "arm", "arm64"})
 _ENVIRONMENT_LOCK = threading.RLock()
 _EXECUTION_LOCK = threading.RLock()
 
@@ -711,9 +712,9 @@ def _validate_action(action: ProviderAction, context: MachineState) -> None:
         raise ExecutionContractError("action verification does not match the catalogue")
     if action.target_architecture is not None:
         target_architecture = normalize_architecture(action.target_architecture)
-        if target_architecture not in SUPPORTED_NATIVE_ARCHITECTURES:
+        if target_architecture == "unknown":
             raise ExecutionContractError(
-                "native replacement target architecture is unknown or unsupported"
+                "native replacement target architecture is unknown"
             )
         if target_architecture != normalize_architecture(context.architecture):
             raise ExecutionContractError(
@@ -779,27 +780,40 @@ def _verified_provider_paths(
         (item for item in state.providers if item.provider.provider_id == action.provider_id),
         None,
     )
-    if provider is None or provider.availability is not Availability.AVAILABLE:
+    if provider is None:
         return ()
     if (
         provider.provider.probes != action.verification.probes
         or provider.provider.probe_policy is not action.verification.policy
     ):
         return ()
-    verified = tuple(item for item in provider.executables if item.verified)
-    if action.target_architecture is not None and (
-        not verified
-        or any(
-            normalize_architecture(item.architecture)
-            != normalize_architecture(action.target_architecture)
-            for item in verified
-        )
-    ):
-        return ()
-    paths = tuple(item.path for item in verified if item.path is not None)
-    if not paths or any(not _path_is_absolute(path, state.machine) for path in paths):
-        return ()
-    return paths
+    return _acceptable_provider_paths(
+        provider, state.machine, action.target_architecture
+    )
+
+
+def _acceptable_provider_paths(
+    provider: ProviderState,
+    machine: MachineState,
+    target_architecture: str | None,
+) -> tuple[str, ...]:
+    target = (
+        normalize_architecture(target_architecture)
+        if target_architecture is not None
+        else None
+    )
+    qualifying = acceptable_provider_executables(
+        provider,
+        lambda item: (
+            item.path is not None
+            and _path_is_absolute(item.path, machine)
+            and (
+                target is None
+                or normalize_architecture(item.architecture) == target
+            )
+        ),
+    )
+    return tuple(item.path for item in qualifying if item.path is not None)
 
 
 def _acceptable_current_provider(
@@ -808,26 +822,11 @@ def _acceptable_current_provider(
 ) -> tuple[str, tuple[str, ...]] | None:
     """Select fresh satisfying evidence using catalogue provider priority."""
 
-    target = (
-        normalize_architecture(target_architecture)
-        if target_architecture is not None
-        else None
-    )
     for provider in state.providers:
-        if (
-            provider.availability is not Availability.AVAILABLE
-            or not provider.provider.satisfies_capability
-        ):
-            continue
-        verified = tuple(item for item in provider.executables if item.verified)
-        if not verified:
-            continue
-        if target is not None and any(
-            normalize_architecture(item.architecture) != target for item in verified
-        ):
-            continue
-        paths = tuple(item.path for item in verified if item.path is not None)
-        if paths and all(_path_is_absolute(path, state.machine) for path in paths):
+        paths = _acceptable_provider_paths(
+            provider, state.machine, target_architecture
+        )
+        if paths:
             return provider.provider.provider_id, paths
     return None
 
@@ -907,7 +906,7 @@ def _omitted_request_failure(
             validate_capability_state(state, expected_context=context)
         except PlanningError as error:
             return f"omitted capability evidence is stale: {error}"
-        if state.availability is not Availability.AVAILABLE:
+        if _acceptable_current_provider(state, None) is None:
             return f"requested capability no longer verifies: {capability_id}"
     return None
 

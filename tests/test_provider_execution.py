@@ -138,6 +138,26 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertIn("no longer verifies: poppler", report.recovery_guidance[1])
         runner.assert_not_called()
 
+    def test_zero_action_plan_rejects_relative_provider_identity(self):
+        available = self.state(capabilities.GHOSTSCRIPT, available=True)
+        plan = provider_plans.generate_provider_plan(
+            (available,), ("ghostscript",), package_managers=(self.manager,)
+        )
+        relative = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            self.machine,
+            locator=lambda probe, machine: "./gs" if probe.name == "gs" else None,
+            version_reader=lambda probe, path: "1.0",
+            architecture_reader=lambda probe, path: "x86_64",
+        )
+        report = provider_execution.execute_provider_plan(
+            plan,
+            current_context=lambda: self.machine,
+            detector=lambda capability, machine: relative,
+        )
+        self.assertEqual(report.outcome, provider_execution.PlanOutcome.PREFLIGHT_FAILED)
+        self.assertIn("no longer verifies", report.recovery_guidance[0])
+
     def test_mutating_plan_refuses_without_dedicated_authorization(self):
         runner = Mock(side_effect=AssertionError("must not run"))
         report = provider_execution.execute_provider_plan(
@@ -385,31 +405,66 @@ class ProviderExecutionTests(unittest.TestCase):
                         action.detail,
                     )
 
-    def test_native_replacement_rejects_unknown_or_unsupported_target(self):
+    def test_native_replacement_rejects_unknown_target(self):
         plan = self.plan()
-        for architecture in ("unknown", "mips64"):
-            with self.subTest(architecture=architecture):
-                action = replace(
-                    plan.actions[0],
-                    target_architecture=architecture,
-                    displaces_verified_paths=("/old/provider",),
-                )
-                invalid = replace(
-                    plan,
-                    context=replace(plan.context, architecture=architecture),
-                    actions=(action,),
-                )
-                with self.assertRaisesRegex(
-                    provider_execution.ExecutionContractError,
-                    "unknown or unsupported",
-                ):
-                    provider_execution.execute_provider_plan(
-                        invalid,
-                        allow_provider_mutation=True,
-                        current_context=lambda: replace(
-                            self.machine, architecture=architecture
-                        ),
-                    )
+        action = replace(
+            plan.actions[0],
+            target_architecture="unknown",
+            displaces_verified_paths=("/old/provider",),
+        )
+        invalid = replace(
+            plan,
+            context=replace(plan.context, architecture="unknown"),
+            actions=(action,),
+        )
+        with self.assertRaisesRegex(
+            provider_execution.ExecutionContractError,
+            "target architecture is unknown",
+        ):
+            provider_execution.execute_provider_plan(
+                invalid,
+                allow_provider_mutation=True,
+                current_context=lambda: replace(self.machine, architecture="unknown"),
+            )
+
+    def test_planner_generated_ppc64le_native_replacement_executes(self):
+        machine = capabilities.MachineState("Linux", "ppc64le")
+
+        def bash_state(architecture):
+            return capabilities.detect_capability(
+                capabilities.BASH,
+                machine,
+                locator=lambda probe, context: (
+                    "/usr/bin/bash"
+                    if probe.locator_strategy == "system-bash"
+                    else None
+                ),
+                version_reader=lambda probe, path: "GNU bash 5.2",
+                architecture_reader=lambda probe, path: architecture,
+            )
+
+        translated = bash_state("x86_64")
+        native = bash_state("ppc64le")
+        manager = replace(self.manager, architecture="ppc64le")
+        plan = provider_plans.generate_provider_plan(
+            (translated,),
+            ("bash",),
+            package_managers=(manager,),
+            native_provisioning=("bash",),
+        )
+        report = provider_execution.execute_provider_plan(
+            plan,
+            allow_provider_mutation=True,
+            current_context=lambda: machine,
+            detector=self.detector_sequence_for_machine(machine, translated, native),
+            manager_verifier=lambda state, context: True,
+            privilege_resolver=lambda action: "/usr/bin/sudo",
+            supervisor_resolver=lambda action: "/usr/bin/timeout",
+            privilege_preflight=lambda argv: True,
+            runner=lambda argv, timeout: subprocess.CompletedProcess(argv, 0, "", ""),
+        )
+        self.assertEqual(report.actions[0].outcome, provider_execution.ActionOutcome.SUCCEEDED)
+        self.assertEqual(report.actions[0].target_architecture, "ppc64le")
 
     def test_later_supervisor_start_failure_preserves_prior_mutation_guidance(self):
         plan = self.plan(capabilities.POPPLER)
@@ -765,6 +820,89 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         self.assertIsNone(
             provider_execution._acceptable_current_provider(relative, "arm64")
+        )
+
+    def test_native_probe_policy_matrix_is_shared_by_skip_and_verification(self):
+        machine = capabilities.MachineState("Windows", "arm64")
+
+        def state(capability, architectures):
+            return capabilities.detect_capability(
+                capability,
+                machine,
+                locator=lambda probe, context: (
+                    f"C:/tools/{probe.name}.exe"
+                    if probe.name in architectures
+                    else None
+                ),
+                version_reader=lambda probe, path: "1.0",
+                architecture_reader=lambda probe, path: architectures[probe.name],
+            )
+
+        any_mixed = state(
+            capabilities.GHOSTSCRIPT,
+            {"gswin64c": "arm64", "gswin32c": "x86_64"},
+        )
+        all_mixed = state(
+            capabilities.POPPLER,
+            {"pdfinfo": "arm64", "pdftotext": "arm64", "pdftoppm": "x86_64"},
+        )
+        self.assertEqual(
+            provider_execution._acceptable_current_provider(any_mixed, "arm64"),
+            ("host-ghostscript", ("C:/tools/gswin64c.exe",)),
+        )
+        self.assertIsNone(
+            provider_execution._acceptable_current_provider(all_mixed, "arm64")
+        )
+
+        manager = provider_plans.PackageManagerState(
+            "winget", "C:/Windows/System32/winget.exe", "host"
+        )
+        translated = state(capabilities.GHOSTSCRIPT, {"gswin32c": "x86_64"})
+        plan = provider_plans.generate_provider_plan(
+            (translated,),
+            ("ghostscript",),
+            package_managers=(manager,),
+            native_provisioning=("ghostscript",),
+        )
+        runner = Mock(side_effect=AssertionError("must not run"))
+        report = provider_execution.execute_provider_plan(
+            plan,
+            allow_provider_mutation=True,
+            current_context=lambda: machine,
+            detector=lambda capability, context: any_mixed,
+            runner=runner,
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.ALREADY_SATISFIED,
+        )
+        self.assertEqual(
+            report.actions[0].final_verified_paths,
+            ("C:/tools/gswin64c.exe",),
+        )
+        runner.assert_not_called()
+
+        mutated = provider_execution.execute_provider_plan(
+            plan,
+            allow_provider_mutation=True,
+            current_context=lambda: machine,
+            detector=self.detector_sequence_for_machine(
+                machine, translated, any_mixed
+            ),
+            manager_verifier=lambda state, context: True,
+            privilege_resolver=lambda action: "",
+            environment_refresher=lambda action: {},
+            runner=lambda argv, timeout: subprocess.CompletedProcess(
+                argv, 0, "", ""
+            ),
+        )
+        self.assertEqual(
+            mutated.actions[0].outcome,
+            provider_execution.ActionOutcome.SUCCEEDED,
+        )
+        self.assertEqual(
+            mutated.actions[0].final_verified_paths,
+            ("C:/tools/gswin64c.exe",),
         )
 
     def test_relative_post_install_identity_cannot_report_success(self):

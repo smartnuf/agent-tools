@@ -18,6 +18,7 @@ from .capabilities import (
     ProviderSpec,
     ProbePolicy,
     MachineState,
+    acceptable_provider_executables,
     capability_availability,
     consolidate_executable_evidence,
     get_capability,
@@ -547,37 +548,34 @@ def generate_provider_plan(
                 raise PlanningError(
                     f"native-provisioning override requires known host architecture: {capability_id}"
                 )
-            available_providers = tuple(
-                provider_state
-                for provider_state in state.providers
-                if provider_state.availability is Availability.AVAILABLE
-                and provider_state.provider.satisfies_capability
-            )
             native_providers = tuple(
                 verified
-                for provider_state in available_providers
+                for provider_state in state.providers
                 if (
-                    verified := tuple(
-                        item
-                        for item in provider_state.executables
-                        if item.verified
+                    verified := acceptable_provider_executables(
+                        provider_state,
+                        lambda item: (
+                            normalize_architecture(item.architecture)
+                            == host_architecture
+                            and item.path is not None
+                            and _manager_path_is_absolute(item.path, context)
+                        ),
                     )
                 )
-                and all(
-                    normalize_architecture(item.architecture) == host_architecture
-                    for item in verified
-                )
             )
-            if any(
-                all(
-                    item.path is not None
-                    and _manager_path_is_absolute(item.path, context)
-                    for item in verified
-                )
-                for verified in native_providers
-            ):
-                continue
             if native_providers:
+                continue
+            native_with_invalid_identity = tuple(
+                acceptable_provider_executables(
+                    provider_state,
+                    lambda item: (
+                        normalize_architecture(item.architecture)
+                        == host_architecture
+                    ),
+                )
+                for provider_state in state.providers
+            )
+            if any(native_with_invalid_identity):
                 raise PlanningError(
                     "native-provider reuse requires absolute verified provider paths: "
                     f"{capability_id}"
