@@ -25,7 +25,7 @@ from .provider_execution import (
     _execute_provider_plan_unmanaged,
     _provider_execution_transaction,
 )
-from .provider_plans import ProviderPlan
+from .provider_plans import PlanningError, ProviderPlan, adapter_commands
 from .python_selection import normalize_architecture
 
 
@@ -272,6 +272,24 @@ def load_document(path: Path) -> dict[str, Any]:
         ):
             raise ManagedStateError(f"managed-state record {index} has invalid requested action")
         target_architecture = requested.get("target_architecture")
+        try:
+            expected_commands = [
+                list(command)
+                for command in adapter_commands(
+                    package_manager["name"],
+                    record["installation_unit"],
+                    executable_path=package_manager["executable"],
+                    target_architecture=target_architecture,
+                )
+            ]
+        except PlanningError as error:
+            raise ManagedStateError(
+                f"managed-state record {index} has invalid adapter semantics: {error}"
+            ) from error
+        if commands != expected_commands:
+            raise ManagedStateError(
+                f"managed-state record {index} has unreviewed requested commands"
+            )
         displaced_paths = requested["displaces_verified_paths"]
         native_target = normalize_architecture(target_architecture)
         context_architecture = normalize_architecture(context["architecture"])
@@ -321,6 +339,17 @@ def load_document(path: Path) -> dict[str, Any]:
                 and isinstance(evidence.get("timed_out"), bool)
             ):
                 raise ManagedStateError(f"managed-state record {index} has invalid command evidence")
+        if verification["outcome"] == ActionOutcome.SUCCEEDED.value and (
+            not verification["verified_paths"]
+            or len(record["command_evidence"]) != len(expected_commands)
+            or any(
+                evidence["returncode"] != 0 or evidence["timed_out"]
+                for evidence in record["command_evidence"]
+            )
+        ):
+            raise ManagedStateError(
+                f"managed-state record {index} has inconsistent success evidence"
+            )
     return value
 
 

@@ -33,8 +33,13 @@ class ManagedStateTests(unittest.TestCase):
     ) -> provider_execution.PlanExecutionReport:
         action = self.plan.actions[0]
         command_reports = (
-            provider_execution.CommandReport(action.commands[0], 0, "installed", ""),
-        ) if commands else ()
+            tuple(
+                provider_execution.CommandReport(command, 0, "installed", "")
+                for command in action.commands
+            )
+            if commands
+            else ()
+        )
         return provider_execution.PlanExecutionReport(
             self.machine,
             self.plan.requested_capabilities,
@@ -312,6 +317,72 @@ class ManagedStateTests(unittest.TestCase):
                 managed_state.ManagedStateError, "command evidence"
             ):
                 managed_state.load_document(path)
+
+    def test_requested_commands_must_match_reviewed_adapter(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            document = managed_state.load_document(path)
+            document["records"][0]["requested_action"]["commands"] = [
+                ["/bin/sh", "-c", "unreviewed"]
+            ]
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(managed_state.ManagedStateError, "unreviewed"):
+                managed_state.load_document(path)
+
+            with patch.object(
+                managed_state,
+                "adapter_commands",
+                side_effect=provider_plans.PlanningError("unsupported target"),
+            ):
+                with self.assertRaisesRegex(
+                    managed_state.ManagedStateError, "adapter semantics"
+                ):
+                    managed_state.load_document(path)
+
+    def test_success_requires_zero_non_timeout_commands_and_verified_paths(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            document_sentinel = object()
+            corruptions = (
+                (("command_evidence", 0, "returncode"), 1),
+                (("command_evidence", 0, "timed_out"), True),
+                (("verification", "verified_paths"), []),
+                (("command_evidence",), document_sentinel),
+            )
+            for fields, value in corruptions:
+                with self.subTest(fields=fields):
+                    document = managed_state.load_document(path)
+                    target = document["records"][0]
+                    for field in fields[:-1]:
+                        target = target[field]
+                    if value is document_sentinel:
+                        target[fields[-1]] = target[fields[-1]][:1]
+                    else:
+                        target[fields[-1]] = value
+                    path.write_text(json.dumps(document), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError, "success evidence"
+                    ):
+                        managed_state.load_document(path)
+                    path.unlink()
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=Mock(return_value=self.report()),
+                        allow_provider_mutation=True,
+                    )
 
     def test_capability_provider_origin_relationship_is_validated(self) -> None:
         with TemporaryDirectory() as directory:
