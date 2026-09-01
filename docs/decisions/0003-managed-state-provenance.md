@@ -101,6 +101,12 @@ particular, absence of a durable provenance record after force-abort is not
 evidence that no host mutation occurred. A later Agent Tools mutation requires
 fresh machine-state rediscovery and a newly generated plan.
 
+One supported managed mutation operation therefore uses one operation-scoped
+internal cancellation context from provider execution through managed
+finalization. That context is the authoritative cancellation phase; individual
+layers do not reconstruct first cancellation versus force-abort from local
+exception type, stack position, or caller-supplied flags.
+
 Process-local serialization protects one read–execute–write transaction from
 lost updates within Agent Tools. Portable cross-process locking is outside
 issue #52; independent processes and unrelated package-manager users are not

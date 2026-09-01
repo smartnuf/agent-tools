@@ -14,8 +14,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Mapping
-from contextlib import contextmanager
-from contextlib import suppress
+from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -101,7 +100,11 @@ class CommandLifecycleError(ExecutionContractError):
         self.timed_out = timed_out
 
 
-class CommandInterruptedError(KeyboardInterrupt):
+class _ControlledCancellation(KeyboardInterrupt):
+    """Base class for structured evidence carrying the first cancellation."""
+
+
+class CommandInterruptedError(_ControlledCancellation):
     """Carry post-start command evidence through an interruption."""
 
     def __init__(
@@ -117,7 +120,100 @@ class CommandInterruptedError(KeyboardInterrupt):
         self.lifetime_uncertain = lifetime_uncertain
 
 
-class ProviderPlanInterrupted(KeyboardInterrupt):
+class _ForceAbort(KeyboardInterrupt):
+    """Carry a later interrupt through an active cancellation unchanged."""
+
+    def __init__(self, interruption: KeyboardInterrupt) -> None:
+        super().__init__("force-abort during provider cancellation")
+        self.interruption = interruption
+
+
+class _CancellationPhase(str, Enum):
+    RUNNING = "running"
+    CANCELLING = "cancelling"
+    FORCE_ABORTED = "force-aborted"
+
+
+@dataclass
+class _CancellationContext:
+    """Own cancellation phase for one provider operation."""
+
+    phase: _CancellationPhase = _CancellationPhase.RUNNING
+    first_interruption: KeyboardInterrupt | None = None
+    force_abort: _ForceAbort | None = None
+
+    def _raise_force_abort(self, interruption: KeyboardInterrupt) -> None:
+        if self.force_abort is None:
+            self.force_abort = _ForceAbort(interruption)
+        self.phase = _CancellationPhase.FORCE_ABORTED
+        raise self.force_abort from interruption
+
+    def _carries_first_interruption(
+        self, interruption: KeyboardInterrupt
+    ) -> bool:
+        current: BaseException | None = interruption
+        seen: set[int] = set()
+        while current is not None and id(current) not in seen:
+            if current is self.first_interruption:
+                return True
+            seen.add(id(current))
+            current = current.__cause__ or getattr(current, "original", None)
+        return False
+
+    def observe(self, interruption: KeyboardInterrupt) -> None:
+        """Classify one raw interrupt at the point where it is observed."""
+
+        if isinstance(interruption, _ForceAbort):
+            raise interruption
+        if self.phase is _CancellationPhase.RUNNING:
+            self.phase = _CancellationPhase.CANCELLING
+            self.first_interruption = interruption
+            return
+        if (
+            self.phase is _CancellationPhase.CANCELLING
+            and interruption is self.first_interruption
+        ):
+            return
+        self._raise_force_abort(interruption)
+
+    def adopt(self, interruption: _ControlledCancellation) -> None:
+        """Adopt a structured first-cancellation carrier from an internal seam."""
+
+        if self.phase is _CancellationPhase.RUNNING:
+            self.phase = _CancellationPhase.CANCELLING
+            self.first_interruption = interruption
+            return
+        if (
+            self.phase is _CancellationPhase.CANCELLING
+            and self._carries_first_interruption(interruption)
+        ):
+            return
+        if self.phase is _CancellationPhase.CANCELLING:
+            self._raise_force_abort(interruption)
+        if self.phase is _CancellationPhase.FORCE_ABORTED:
+            if self.force_abort is None:
+                raise RuntimeError("force-aborted context has no carrier")
+            raise self.force_abort
+
+    @contextmanager
+    def guard(self):
+        """Convert a later raw interrupt before controlled recovery can continue."""
+
+        if self.phase is not _CancellationPhase.CANCELLING:
+            raise RuntimeError("cancellation guard requires active cancellation")
+        try:
+            yield
+        except _ForceAbort:
+            raise
+        except _ControlledCancellation as interruption:
+            self.adopt(interruption)
+            raise
+        except KeyboardInterrupt as interruption:
+            self.observe(interruption)
+            raise AssertionError("force-abort observation must raise")
+
+
+class ProviderPlanInterrupted(_ControlledCancellation):
     """Carry structured attempted-mutation evidence through interruption."""
 
     def __init__(self, report: PlanExecutionReport) -> None:
@@ -231,7 +327,9 @@ def _run(
     timeout: int,
     *,
     privileged_supervision: bool = False,
+    _cancellation: _CancellationContext | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    cancellation = _cancellation or _CancellationContext()
     process_options: dict[str, object]
     if os.name == "nt":
         process_options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
@@ -261,7 +359,10 @@ def _run(
             stop_readers,
             reader_errors,
             started_readers,
+            cancellation,
         )
+    except _ForceAbort:
+        raise
     except CommandLifecycleError as error:
         try:
             cleanup_established = _best_effort_started_process_cleanup(
@@ -270,21 +371,24 @@ def _run(
                 tuple(started_readers),
                 stop_readers,
                 reader_errors,
+                cancellation,
             )
         except KeyboardInterrupt as interruption:
-            raise CommandInterruptedError(
-                subprocess.CompletedProcess(
-                    argv,
-                    process.returncode,
-                    stdout_tail.value(),
-                    stderr_tail.value(),
-                ),
-                (
-                    "provider command launched, lifecycle handling failed, and "
-                    "cleanup was interrupted before quiescence could be established"
-                ),
-                lifetime_uncertain=True,
-            ) from interruption
+            cancellation.observe(interruption)
+            with cancellation.guard():
+                raise CommandInterruptedError(
+                    subprocess.CompletedProcess(
+                        argv,
+                        process.returncode,
+                        stdout_tail.value(),
+                        stderr_tail.value(),
+                    ),
+                    (
+                        "provider command launched, lifecycle handling failed, and "
+                        "cleanup was interrupted before quiescence could be established"
+                    ),
+                    lifetime_uncertain=True,
+                ) from interruption
         raise CommandLifecycleError(
             subprocess.CompletedProcess(
                 argv,
@@ -297,27 +401,28 @@ def _run(
             timed_out=error.timed_out,
         ) from error
     except CommandInterruptedError as error:
+        cancellation.adopt(error)
         if not error.lifetime_uncertain:
             raise
-        cleanup_established = False
-        with suppress(KeyboardInterrupt):
+        with cancellation.guard():
             cleanup_established = _best_effort_started_process_cleanup(
                 process,
                 privileged_supervision,
                 tuple(started_readers),
                 stop_readers,
                 reader_errors,
+                cancellation,
             )
-        raise CommandInterruptedError(
-            subprocess.CompletedProcess(
-                argv,
-                process.returncode,
-                stdout_tail.value(),
-                stderr_tail.value(),
-            ),
-            error.detail,
-            lifetime_uncertain=not cleanup_established,
-        ) from error
+            raise CommandInterruptedError(
+                subprocess.CompletedProcess(
+                    argv,
+                    process.returncode,
+                    stdout_tail.value(),
+                    stderr_tail.value(),
+                ),
+                error.detail,
+                lifetime_uncertain=not cleanup_established,
+            ) from error
     except OSError as error:
         try:
             cleanup_established = _best_effort_started_process_cleanup(
@@ -326,21 +431,24 @@ def _run(
                 tuple(started_readers),
                 stop_readers,
                 reader_errors,
+                cancellation,
             )
         except KeyboardInterrupt as interruption:
-            raise CommandInterruptedError(
-                subprocess.CompletedProcess(
-                    argv,
-                    process.returncode,
-                    stdout_tail.value(),
-                    stderr_tail.value(),
-                ),
-                (
-                    "provider command launched, lifecycle handling failed, and "
-                    "cleanup was interrupted before quiescence could be established"
-                ),
-                lifetime_uncertain=True,
-            ) from interruption
+            cancellation.observe(interruption)
+            with cancellation.guard():
+                raise CommandInterruptedError(
+                    subprocess.CompletedProcess(
+                        argv,
+                        process.returncode,
+                        stdout_tail.value(),
+                        stderr_tail.value(),
+                    ),
+                    (
+                        "provider command launched, lifecycle handling failed, and "
+                        "cleanup was interrupted before quiescence could be established"
+                    ),
+                    lifetime_uncertain=True,
+                ) from interruption
         raise CommandLifecycleError(
             subprocess.CompletedProcess(
                 argv,
@@ -355,24 +463,26 @@ def _run(
             lifetime_uncertain=not cleanup_established,
         ) from error
     except KeyboardInterrupt as error:
-        with suppress(KeyboardInterrupt):
+        cancellation.observe(error)
+        with cancellation.guard():
             _best_effort_started_process_cleanup(
                 process,
                 privileged_supervision,
                 tuple(started_readers),
                 stop_readers,
                 reader_errors,
+                cancellation,
             )
-        raise CommandInterruptedError(
-            subprocess.CompletedProcess(
-                argv,
-                process.returncode,
-                stdout_tail.value(),
-                stderr_tail.value(),
-            ),
-            "provider command was interrupted after launch before cleanup could establish quiescence",
-            lifetime_uncertain=True,
-        ) from error
+            raise CommandInterruptedError(
+                subprocess.CompletedProcess(
+                    argv,
+                    process.returncode,
+                    stdout_tail.value(),
+                    stderr_tail.value(),
+                ),
+                "provider command was interrupted after launch before cleanup could establish quiescence",
+                lifetime_uncertain=True,
+            ) from error
 
 
 def _best_effort_started_process_cleanup(
@@ -381,6 +491,7 @@ def _best_effort_started_process_cleanup(
     readers: tuple[threading.Thread, ...],
     stop_readers: threading.Event,
     reader_errors: list[OSError],
+    cancellation: _CancellationContext,
 ) -> bool:
     """Return whether process and pipe quiescence were established after failure."""
 
@@ -391,7 +502,8 @@ def _best_effort_started_process_cleanup(
                 _terminate_privileged_supervisor(process)
             else:
                 _terminate_process_tree(process)
-        except KeyboardInterrupt:
+        except KeyboardInterrupt as interruption:
+            cancellation.observe(interruption)
             raise
         except Exception:
             process_quiesced = False
@@ -400,9 +512,10 @@ def _best_effort_started_process_cleanup(
     stop_readers.set()
     try:
         readers_clean = _join_output_readers(
-            readers, stop_readers, reader_errors
+            readers, stop_readers, reader_errors, cancellation
         )
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as interruption:
+        cancellation.observe(interruption)
         raise
     except Exception:
         readers_clean = False
@@ -429,6 +542,7 @@ def _supervise_started_process(
     stop_readers: threading.Event,
     reader_errors: list[OSError],
     started_readers: list[threading.Thread],
+    cancellation: _CancellationContext,
 ) -> subprocess.CompletedProcess[str]:
     """Supervise a process whose launch is already established as fact."""
 
@@ -450,6 +564,7 @@ def _supervise_started_process(
             stop_readers,
             reader_errors,
             error,
+            cancellation,
         )
         raise AssertionError("reader initialization cleanup must raise")
     try:
@@ -476,7 +591,9 @@ def _supervise_started_process(
                 timed_out=True,
             ) from error
         except ExecutionContractError:
-            _join_output_readers(readers, stop_readers, reader_errors)
+            _join_output_readers(
+                readers, stop_readers, reader_errors, cancellation
+            )
             raise _uncertain_output_error(
                 argv,
                 process.returncode,
@@ -490,7 +607,9 @@ def _supervise_started_process(
                 ),
                 timed_out=True,
             ) from None
-        if not _join_output_readers(readers, stop_readers, reader_errors):
+        if not _join_output_readers(
+            readers, stop_readers, reader_errors, cancellation
+        ):
             raise _uncertain_output_error(
                 argv,
                 process.returncode,
@@ -505,30 +624,93 @@ def _supervise_started_process(
             stderr=stderr_tail.value(),
         ) from None
     except BaseException as interruption:
-        try:
-            if privileged_supervision:
-                _terminate_privileged_supervisor(process)
-            else:
-                _terminate_process_tree(process)
-        except OSError as error:
-            if isinstance(interruption, KeyboardInterrupt):
-                raise CommandInterruptedError(
-                    subprocess.CompletedProcess(
-                        argv,
-                        process.returncode,
-                        stdout_tail.value(),
-                        stderr_tail.value(),
-                    ),
-                    (
-                        "provider command was interrupted after launch, but "
-                        f"termination or reaping failed: {error}"
-                    ),
-                    lifetime_uncertain=process.returncode is None,
-                ) from interruption
+        if isinstance(interruption, _ForceAbort):
             raise
-        except ExecutionContractError:
-            _join_output_readers(readers, stop_readers, reader_errors)
-            if isinstance(interruption, KeyboardInterrupt):
+        if isinstance(interruption, _ControlledCancellation):
+            cancellation.adopt(interruption)
+        elif isinstance(interruption, KeyboardInterrupt):
+            cancellation.observe(interruption)
+        guard = (
+            cancellation.guard()
+            if cancellation.phase is _CancellationPhase.CANCELLING
+            else nullcontext()
+        )
+        try:
+            with guard:
+                try:
+                    if privileged_supervision:
+                        _terminate_privileged_supervisor(process)
+                    else:
+                        _terminate_process_tree(process)
+                except OSError as error:
+                    if cancellation.phase is _CancellationPhase.CANCELLING:
+                        raise CommandInterruptedError(
+                            subprocess.CompletedProcess(
+                                argv,
+                                process.returncode,
+                                stdout_tail.value(),
+                                stderr_tail.value(),
+                            ),
+                            (
+                                "provider command was interrupted after launch, but "
+                                f"termination or reaping failed: {error}"
+                            ),
+                            lifetime_uncertain=process.returncode is None,
+                        ) from interruption
+                    raise
+                except ExecutionContractError:
+                    _join_output_readers(
+                        readers, stop_readers, reader_errors, cancellation
+                    )
+                    if cancellation.phase is _CancellationPhase.CANCELLING:
+                        raise CommandInterruptedError(
+                            subprocess.CompletedProcess(
+                                argv,
+                                process.returncode,
+                                stdout_tail.value(),
+                                stderr_tail.value(),
+                            ),
+                            (
+                                "provider command was interrupted after launch; termination "
+                                "could not establish quiescence"
+                            ),
+                            lifetime_uncertain=True,
+                        ) from interruption
+                    raise _uncertain_output_error(
+                        argv,
+                        process.returncode,
+                        stdout_tail,
+                        stderr_tail,
+                        detail=(
+                            "privileged supervisor termination could not be established after "
+                            "interruption; privileged package-related activity may still be "
+                            "running, Agent Tools could not establish quiescence, and provider/"
+                            "package state is uncertain"
+                        ),
+                    ) from None
+                readers_clean = _join_output_readers(
+                    readers, stop_readers, reader_errors, cancellation
+                )
+                if cancellation.phase is _CancellationPhase.CANCELLING:
+                    raise CommandInterruptedError(
+                        subprocess.CompletedProcess(
+                            argv,
+                            process.returncode,
+                            stdout_tail.value(),
+                            stderr_tail.value(),
+                        ),
+                        lifetime_uncertain=not readers_clean,
+                    ) from interruption
+                if not readers_clean:
+                    raise _uncertain_output_error(
+                        argv, process.returncode, stdout_tail, stderr_tail
+                    )
+                raise
+        except (_ControlledCancellation, _ForceAbort):
+            raise
+        except KeyboardInterrupt as later_interruption:
+            cancellation.observe(later_interruption)
+            with cancellation.guard():
                 raise CommandInterruptedError(
                     subprocess.CompletedProcess(
                         argv,
@@ -536,39 +718,12 @@ def _supervise_started_process(
                         stdout_tail.value(),
                         stderr_tail.value(),
                     ),
-                    (
-                        "provider command was interrupted after launch; termination "
-                        "could not establish quiescence"
-                    ),
+                    "provider command cleanup was interrupted before quiescence could be established",
                     lifetime_uncertain=True,
-                ) from interruption
-            raise _uncertain_output_error(
-                argv,
-                process.returncode,
-                stdout_tail,
-                stderr_tail,
-                detail=(
-                    "privileged supervisor termination could not be established after "
-                    "interruption; privileged package-related activity may still be "
-                    "running, Agent Tools could not establish quiescence, and provider/"
-                    "package state is uncertain"
-                ),
-            ) from None
-        if not _join_output_readers(readers, stop_readers, reader_errors):
-            raise _uncertain_output_error(
-                argv, process.returncode, stdout_tail, stderr_tail
-            )
-        if isinstance(interruption, KeyboardInterrupt):
-            raise CommandInterruptedError(
-                subprocess.CompletedProcess(
-                    argv,
-                    process.returncode,
-                    stdout_tail.value(),
-                    stderr_tail.value(),
-                )
-            ) from interruption
-        raise
-    if not _join_output_readers(readers, stop_readers, reader_errors):
+                ) from later_interruption
+    if not _join_output_readers(
+        readers, stop_readers, reader_errors, cancellation
+    ):
         raise _uncertain_output_error(
             argv, process.returncode, stdout_tail, stderr_tail
         )
@@ -632,14 +787,49 @@ def _cleanup_reader_initialization_failure(
     stop: threading.Event,
     errors: list[OSError],
     error: BaseException,
+    cancellation: _CancellationContext,
+) -> None:
+    initialization_error = (
+        error.error if isinstance(error, _OutputReaderInitializationError) else error
+    )
+    if isinstance(initialization_error, KeyboardInterrupt):
+        cancellation.observe(initialization_error)
+    guard = (
+        cancellation.guard()
+        if cancellation.phase is _CancellationPhase.CANCELLING
+        else nullcontext()
+    )
+    with guard:
+        _finish_reader_initialization_cleanup(
+            process,
+            argv,
+            privileged_supervision,
+            stdout_tail,
+            stderr_tail,
+            stop,
+            errors,
+            error,
+            initialization_error,
+            cancellation,
+        )
+
+
+def _finish_reader_initialization_cleanup(
+    process: subprocess.Popen[str],
+    argv: tuple[str, ...],
+    privileged_supervision: bool,
+    stdout_tail: _BoundedOutputTail,
+    stderr_tail: _BoundedOutputTail,
+    stop: threading.Event,
+    errors: list[OSError],
+    error: BaseException,
+    initialization_error: BaseException,
+    cancellation: _CancellationContext,
 ) -> None:
     started_readers = (
         error.started_readers
         if isinstance(error, _OutputReaderInitializationError)
         else ()
-    )
-    initialization_error = (
-        error.error if isinstance(error, _OutputReaderInitializationError) else error
     )
     termination_failed = False
     try:
@@ -650,7 +840,9 @@ def _cleanup_reader_initialization_failure(
     except (ExecutionContractError, OSError):
         termination_failed = True
     stop.set()
-    readers_clean = _join_output_readers(started_readers, stop, errors)
+    readers_clean = _join_output_readers(
+        started_readers, stop, errors, cancellation
+    )
     for stream in (process.stdout, process.stderr):
         with suppress(OSError, ValueError):
             if stream is not None:
@@ -805,19 +997,23 @@ def _join_output_readers(
     readers: tuple[threading.Thread, ...],
     stop: threading.Event,
     errors: list[OSError],
+    cancellation: _CancellationContext | None = None,
 ) -> bool:
     """Return whether output closed cleanly within the synchronous guard."""
 
+    cancellation = cancellation or _CancellationContext()
     deadline = time.monotonic() + OUTPUT_PIPE_CLOSURE_GUARD_SECONDS
     try:
         for reader in readers:
             reader.join(timeout=max(0, deadline - time.monotonic()))
-    except KeyboardInterrupt:
-        stop.set()
-        for reader in readers:
-            with suppress(RuntimeError):
-                reader.join(timeout=1)
-        raise
+    except KeyboardInterrupt as interruption:
+        cancellation.observe(interruption)
+        with cancellation.guard():
+            stop.set()
+            for reader in readers:
+                with suppress(RuntimeError):
+                    reader.join(timeout=1)
+        raise interruption
     except BaseException:
         stop.set()
         for reader in readers:
@@ -1431,9 +1627,11 @@ def _execute_provider_plan_unmanaged(
     supervisor_resolver: SupervisorResolver = _resolve_supervisor,
     privilege_preflight: PrivilegePreflight = _preflight_privilege,
     environment_refresher: EnvironmentRefresher = _refresh_environment,
+    _cancellation: _CancellationContext | None = None,
 ) -> PlanExecutionReport:
     """Internal executor primitive; callers must use the managed-state boundary."""
 
+    cancellation = _cancellation or _CancellationContext()
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
     with _provider_execution_transaction():
@@ -1451,6 +1649,7 @@ def _execute_provider_plan_unmanaged(
                 supervisor_resolver=supervisor_resolver,
                 privilege_preflight=privilege_preflight,
                 environment_refresher=environment_refresher,
+                cancellation=cancellation,
             )
         except _ProviderPartialReport as error:
             return error.report
@@ -1470,20 +1669,25 @@ def _execute_provider_plan(
     supervisor_resolver: SupervisorResolver,
     privilege_preflight: PrivilegePreflight,
     environment_refresher: EnvironmentRefresher,
+    cancellation: _CancellationContext,
 ) -> PlanExecutionReport:
     try:
         context = _validate_plan(plan, current_context())
     except KeyboardInterrupt as error:
-        raise ProviderPlanInterrupted(
-            _preflight_interrupted_report(plan, plan.context)
-        ) from error
+        cancellation.observe(error)
+        with cancellation.guard():
+            raise ProviderPlanInterrupted(
+                _preflight_interrupted_report(plan, plan.context)
+            ) from error
     if not plan.actions:
         try:
             failure = _omitted_request_failure(plan, context, detector)
         except KeyboardInterrupt as error:
-            raise ProviderPlanInterrupted(
-                _preflight_interrupted_report(plan, context)
-            ) from error
+            cancellation.observe(error)
+            with cancellation.guard():
+                raise ProviderPlanInterrupted(
+                    _preflight_interrupted_report(plan, context)
+                ) from error
         if failure:
             return PlanExecutionReport(
                 context,
@@ -1517,9 +1721,11 @@ def _execute_provider_plan(
     try:
         failure = _omitted_request_failure(plan, context, detector)
     except KeyboardInterrupt as error:
-        raise ProviderPlanInterrupted(
-            _preflight_interrupted_report(plan, context)
-        ) from error
+        cancellation.observe(error)
+        with cancellation.guard():
+            raise ProviderPlanInterrupted(
+                _preflight_interrupted_report(plan, context)
+            ) from error
     if failure:
         return PlanExecutionReport(
             context,
@@ -1551,23 +1757,25 @@ def _execute_provider_plan(
                 )
             validate_capability_state(before, expected_context=context)
         except KeyboardInterrupt as error:
-            reports.append(
-                _action_report(
-                    action,
-                    ActionOutcome.NOT_ATTEMPTED,
-                    detail="interrupted during pre-action detection; no command started for this action",
+            cancellation.observe(error)
+            with cancellation.guard():
+                reports.append(
+                    _action_report(
+                        action,
+                        ActionOutcome.NOT_ATTEMPTED,
+                        detail="interrupted during pre-action detection; no command started for this action",
+                    )
                 )
-            )
-            raise ProviderPlanInterrupted(
-                _failed_report(
-                    plan,
-                    context,
-                    reports,
-                    mutation_may_have_started=any(
-                        report.commands for report in reports
-                    ),
-                )
-            ) from error
+                raise ProviderPlanInterrupted(
+                    _failed_report(
+                        plan,
+                        context,
+                        reports,
+                        mutation_may_have_started=any(
+                            report.commands for report in reports
+                        ),
+                    )
+                ) from error
         except PlanningError as error:
             if not reports:
                 raise ExecutionContractError(
@@ -1609,26 +1817,28 @@ def _execute_provider_plan(
             try:
                 return operation()
             except KeyboardInterrupt as error:
-                reports.append(
-                    _action_report(
-                        action,
-                        ActionOutcome.NOT_ATTEMPTED,
-                        detail=(
-                            "interrupted during execution preflight; no command "
-                            "started for this action"
+                cancellation.observe(error)
+                with cancellation.guard():
+                    reports.append(
+                        _action_report(
+                            action,
+                            ActionOutcome.NOT_ATTEMPTED,
+                            detail=(
+                                "interrupted during execution preflight; no command "
+                                "started for this action"
+                            ),
                         ),
                     )
-                )
-                raise ProviderPlanInterrupted(
-                    _failed_report(
-                        plan,
-                        context,
-                        reports,
-                        mutation_may_have_started=any(
-                            report.commands for report in reports
-                        ),
-                    )
-                ) from error
+                    raise ProviderPlanInterrupted(
+                        _failed_report(
+                            plan,
+                            context,
+                            reports,
+                            mutation_may_have_started=any(
+                                report.commands for report in reports
+                            ),
+                        )
+                    ) from error
             except Exception as error:
                 if not any(report.commands for report in reports):
                     raise ExecutionContractError(
@@ -1772,9 +1982,12 @@ def _execute_provider_plan(
                         argv,
                         runner_timeout,
                         privileged_supervision=elevated_linux,
+                        _cancellation=cancellation,
                     )
                 else:
                     result = runner(argv, runner_timeout)
+            except _ForceAbort:
+                raise
             except UncertainSupervisionError as error:
                 retained_timeout = (
                     error.timed_out and error.result.returncode is None
@@ -1836,28 +2049,30 @@ def _execute_provider_plan(
                     uncertain_external_state=error.lifetime_uncertain,
                 )
             except CommandInterruptedError as error:
-                commands.append(_command_report(argv, error.result))
-                reports.append(
-                    _action_report(
-                        action,
-                        (
-                            ActionOutcome.SUPERVISOR_FAILED
-                            if error.lifetime_uncertain
-                            else ActionOutcome.INTERRUPTED
-                        ),
-                        tuple(commands),
-                        detail=error.detail,
+                cancellation.adopt(error)
+                with cancellation.guard():
+                    commands.append(_command_report(argv, error.result))
+                    reports.append(
+                        _action_report(
+                            action,
+                            (
+                                ActionOutcome.SUPERVISOR_FAILED
+                                if error.lifetime_uncertain
+                                else ActionOutcome.INTERRUPTED
+                            ),
+                            tuple(commands),
+                            detail=error.detail,
+                        )
                     )
-                )
-                raise ProviderPlanInterrupted(
-                    _failed_report(
-                        plan,
-                        context,
-                        reports,
-                        mutation_may_have_started=True,
-                        uncertain_external_state=error.lifetime_uncertain,
-                    )
-                ) from error
+                    raise ProviderPlanInterrupted(
+                        _failed_report(
+                            plan,
+                            context,
+                            reports,
+                            mutation_may_have_started=True,
+                            uncertain_external_state=error.lifetime_uncertain,
+                        )
+                    ) from error
             except subprocess.TimeoutExpired as error:
                 commands.append(
                     CommandReport(
@@ -1936,24 +2151,26 @@ def _execute_provider_plan(
                         mutation_may_have_started=True,
                     )
             except KeyboardInterrupt as error:
-                if len(commands) == command_count_before:
-                    commands.append(_command_report(argv, result))
-                reports.append(
-                    _action_report(
-                        action,
-                        ActionOutcome.INTERRUPTED,
-                        tuple(commands),
-                        detail=(
-                            "interrupted while classifying completed provider "
-                            "command evidence"
-                        ),
+                cancellation.observe(error)
+                with cancellation.guard():
+                    if len(commands) == command_count_before:
+                        commands.append(_command_report(argv, result))
+                    reports.append(
+                        _action_report(
+                            action,
+                            ActionOutcome.INTERRUPTED,
+                            tuple(commands),
+                            detail=(
+                                "interrupted while classifying completed provider "
+                                "command evidence"
+                            ),
+                        )
                     )
-                )
-                raise ProviderPlanInterrupted(
-                    _failed_report(
-                        plan, context, reports, mutation_may_have_started=True
-                    )
-                ) from error
+                    raise ProviderPlanInterrupted(
+                        _failed_report(
+                            plan, context, reports, mutation_may_have_started=True
+                        )
+                    ) from error
 
         observed_paths: tuple[str, ...] = ()
         try:
@@ -1970,22 +2187,24 @@ def _execute_provider_plan(
                 "package-manager success did not produce the planned verified provider"
             )
         except KeyboardInterrupt as error:
-            reports.append(
-                _action_report(
-                    action,
-                    ActionOutcome.INTERRUPTED,
-                    tuple(commands),
-                    detail=(
-                        "interrupted during post-action verification after the "
-                        "package-manager command completed"
-                    ),
+            cancellation.observe(error)
+            with cancellation.guard():
+                reports.append(
+                    _action_report(
+                        action,
+                        ActionOutcome.INTERRUPTED,
+                        tuple(commands),
+                        detail=(
+                            "interrupted during post-action verification after the "
+                            "package-manager command completed"
+                        ),
+                    )
                 )
-            )
-            raise ProviderPlanInterrupted(
-                _failed_report(
-                    plan, context, reports, mutation_may_have_started=True
-                )
-            ) from error
+                raise ProviderPlanInterrupted(
+                    _failed_report(
+                        plan, context, reports, mutation_may_have_started=True
+                    )
+                ) from error
         except PlanningError as error:
             final_paths = ()
             verification_detail = f"post-action detection is not authoritative: {error}"
