@@ -90,6 +90,11 @@ class ManagedExecutionInterrupted(KeyboardInterrupt):
         self.managed_result: ManagedExecutionResult | None = None
 
 
+_PERSISTENCE_ERROR_TYPE = PersistenceError
+_PERSISTENCE_INTERRUPTED_TYPE = PersistenceInterrupted
+_MANAGED_EXECUTION_INTERRUPTED_TYPE = ManagedExecutionInterrupted
+
+
 @dataclass(frozen=True)
 class ManagedExecutionResult:
     execution: PlanExecutionReport | None
@@ -660,7 +665,7 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
             if replace_attempted
             else PersistenceOutcome.FAILED
         )
-        failure = PersistenceError(
+        failure = _guarded_persistence_error(
             outcome, f"managed-state atomic persistence failed: {error}"
         )
         _best_effort_discard_temporary(temporary)
@@ -671,7 +676,7 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
             if replace_attempted
             else PersistenceOutcome.FAILED
         )
-        interruption = PersistenceInterrupted(
+        interruption = _guarded_persistence_interruption(
             outcome, "managed-state persistence was interrupted"
         )
         _best_effort_discard_temporary(temporary)
@@ -685,6 +690,35 @@ def _best_effort_discard_temporary(temporary: Path | None) -> None:
         _discard_temporary(temporary)
     except (OSError, KeyboardInterrupt):
         pass
+
+
+def _guarded_persistence_error(
+    outcome: PersistenceOutcome, detail: str
+) -> PersistenceError:
+    try:
+        return PersistenceError(outcome, detail)
+    except KeyboardInterrupt:
+        failure = _PERSISTENCE_ERROR_TYPE.__new__(_PERSISTENCE_ERROR_TYPE)
+        ManagedStateError.__init__(failure, detail)
+        failure.outcome = outcome
+        failure.detail = detail
+        return failure
+
+
+def _guarded_persistence_interruption(
+    outcome: PersistenceOutcome, detail: str
+) -> PersistenceInterrupted:
+    try:
+        return PersistenceInterrupted(outcome, detail)
+    except KeyboardInterrupt:
+        interruption = _PERSISTENCE_INTERRUPTED_TYPE.__new__(
+            _PERSISTENCE_INTERRUPTED_TYPE
+        )
+        KeyboardInterrupt.__init__(interruption, detail)
+        interruption.outcome = outcome
+        interruption.detail = detail
+        interruption.managed_result = None
+        return interruption
 
 
 def _discard_temporary(temporary: Path | None) -> None:
@@ -829,7 +863,7 @@ def execute_provider_plan(
                     pending_interruption = error
                     report = error.report
                 except KeyboardInterrupt as error:
-                    pending_interruption = ManagedExecutionInterrupted(error)
+                    pending_interruption = _guarded_managed_interruption(error)
                     report = _unknown_interrupted_report(plan)
 
                 prepared, result, pending_interruption = (
@@ -856,7 +890,7 @@ def execute_provider_plan(
                         finalization_interruption is not None
                         and pending_interruption is None
                     ):
-                        pending_interruption = ManagedExecutionInterrupted(
+                        pending_interruption = _guarded_managed_interruption(
                             finalization_interruption
                         )
                 elif result is None:
@@ -877,7 +911,7 @@ def execute_provider_plan(
                             finalization_interruption is not None
                             and pending_interruption is None
                         ):
-                            pending_interruption = ManagedExecutionInterrupted(
+                            pending_interruption = _guarded_managed_interruption(
                                 finalization_interruption
                             )
                     except KeyboardInterrupt as error:
@@ -889,7 +923,7 @@ def execute_provider_plan(
                                 "its exact replacement phase became uncertain"
                             ),
                         )
-                        pending_interruption = ManagedExecutionInterrupted(error)
+                        pending_interruption = _guarded_managed_interruption(error)
                     else:
                         result, finalization_interruption = _guarded_managed_result(
                             report, PersistenceOutcome.SUCCEEDED
@@ -898,7 +932,7 @@ def execute_provider_plan(
                             finalization_interruption is not None
                             and pending_interruption is None
                         ):
-                            pending_interruption = ManagedExecutionInterrupted(
+                            pending_interruption = _guarded_managed_interruption(
                                 finalization_interruption
                             )
                 if pending_interruption is not None:
@@ -911,7 +945,9 @@ def execute_provider_plan(
     ):
         raise
     except KeyboardInterrupt as error:
-        final_interruption = pending_interruption or ManagedExecutionInterrupted(error)
+        final_interruption = pending_interruption or _guarded_managed_interruption(
+            error
+        )
         _attach_managed_result(final_interruption, result)
         raise final_interruption
 
@@ -952,7 +988,7 @@ def _prepare_update_for_persistence(
         )
     except KeyboardInterrupt as error:
         if pending_interruption is None:
-            pending_interruption = ManagedExecutionInterrupted(error)
+            pending_interruption = _guarded_managed_interruption(error)
         try:
             return (
                 _prepare_update(document, plan, report, requested_at),
@@ -977,7 +1013,7 @@ def _prepare_update_for_persistence(
                 finalization_interruption is not None
                 and pending_interruption is None
             ):
-                pending_interruption = ManagedExecutionInterrupted(
+                pending_interruption = _guarded_managed_interruption(
                     finalization_interruption
                 )
             return None, result, pending_interruption
@@ -986,7 +1022,7 @@ def _prepare_update_for_persistence(
             report, construction_error
         )
         if finalization_interruption is not None and pending_interruption is None:
-            pending_interruption = ManagedExecutionInterrupted(
+            pending_interruption = _guarded_managed_interruption(
                 finalization_interruption
             )
         return None, result, pending_interruption
@@ -1059,11 +1095,44 @@ def _guarded_managed_result(
         )
     except KeyboardInterrupt as error:
         return (
-            _MANAGED_EXECUTION_RESULT_TYPE(
+            _new_managed_execution_result(
                 report, outcome, detail, recovery_guidance
             ),
             error,
         )
+
+
+def _new_managed_execution_result(
+    report: PlanExecutionReport,
+    outcome: PersistenceOutcome,
+    detail: str,
+    recovery_guidance: tuple[str, ...],
+) -> ManagedExecutionResult:
+    result = _MANAGED_EXECUTION_RESULT_TYPE.__new__(
+        _MANAGED_EXECUTION_RESULT_TYPE
+    )
+    object.__setattr__(result, "execution", report)
+    object.__setattr__(result, "persistence", outcome)
+    object.__setattr__(result, "persistence_detail", detail)
+    object.__setattr__(result, "recovery_guidance", recovery_guidance)
+    return result
+
+
+def _guarded_managed_interruption(
+    original: KeyboardInterrupt,
+) -> ManagedExecutionInterrupted:
+    try:
+        return ManagedExecutionInterrupted(original)
+    except KeyboardInterrupt:
+        interruption = _MANAGED_EXECUTION_INTERRUPTED_TYPE.__new__(
+            _MANAGED_EXECUTION_INTERRUPTED_TYPE
+        )
+        KeyboardInterrupt.__init__(
+            interruption, "managed provider execution interrupted"
+        )
+        interruption.original = original
+        interruption.managed_result = None
+        return interruption
 
 
 def _attach_managed_result(
@@ -1130,7 +1199,7 @@ def _fallback_persistence_failure_result(
     outcome: PersistenceOutcome,
     detail: str,
 ) -> ManagedExecutionResult:
-    return _MANAGED_EXECUTION_RESULT_TYPE(
+    return _new_managed_execution_result(
         report,
         outcome,
         detail,
