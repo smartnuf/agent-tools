@@ -70,6 +70,23 @@ uncertain, claim ownership, automatically retry mutation, or attempt uninstall
 or rollback. Any later mutation requires fresh rediscovery and a newly generated
 plan.
 
+The first `KeyboardInterrupt` observed by the supported managed mutation
+boundary is a request for controlled cancellation. That boundary preserves the
+strongest truthful execution evidence and monotonic persistence outcome that
+the executor and atomic-write phases have established, then attempts to publish
+a structured managed result. It never responds by rerunning provider mutation,
+retrying ambiguous persistence, or authorizing rollback, uninstall, or removal.
+
+Any later `KeyboardInterrupt` while that controlled cancellation, recovery, or
+result publication is active is an explicit force-abort. It propagates
+immediately; structured result construction or attachment is not guaranteed,
+and Agent Tools performs no recovery-of-recovery, further cleanup recovery,
+provenance preparation, persistence retry, or finalization retry. Already
+completed host mutation and already durable provenance remain as they are. In
+particular, absence of a durable provenance record after force-abort is not
+evidence that no host mutation occurred. A later Agent Tools mutation requires
+fresh machine-state rediscovery and a newly generated plan.
+
 Process-local serialization protects one read–execute–write transaction from
 lost updates within Agent Tools. Portable cross-process locking is outside
 issue #52; independent processes and unrelated package-manager users are not
@@ -87,6 +104,9 @@ interleave with another supported mutation in the same process.
   Agent Tools mutation requests without treating either as ownership.
 - A persistence error after successful mutation is a structured partial
   success with both outcomes retained.
+- One cancellation request receives controlled structured handling; another
+  interrupt during that handling is an immediate force-abort with no managed-
+  result guarantee.
 - Schema evolution requires an explicit, tested migration for each supported
   older version.
 - The document may grow without bound in v1; any compaction policy is a future
