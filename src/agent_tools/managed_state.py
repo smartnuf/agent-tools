@@ -9,7 +9,7 @@ import posixpath
 import tempfile
 import threading
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path, PureWindowsPath
@@ -96,6 +96,128 @@ class ManagedExecutionResult:
     persistence: PersistenceOutcome
     persistence_detail: str = ""
     recovery_guidance: tuple[str, ...] = ()
+
+
+class _InterruptionMode(str, Enum):
+    DIRECT = "direct"
+    MANAGED = "managed"
+    PERSISTENCE = "persistence"
+
+
+@dataclass(frozen=True)
+class _TransactionFacts:
+    execution: PlanExecutionReport | None = None
+    persistence: PersistenceOutcome | None = None
+    detail: str = ""
+    interruption: KeyboardInterrupt | None = None
+    interruption_mode: _InterruptionMode | None = None
+    terminal: bool = False
+
+
+@dataclass
+class _ManagedTransactionState:
+    facts: _TransactionFacts = _TransactionFacts()
+
+    @property
+    def execution(self) -> PlanExecutionReport | None:
+        return self.facts.execution
+
+    @property
+    def persistence(self) -> PersistenceOutcome | None:
+        return self.facts.persistence
+
+    @property
+    def detail(self) -> str:
+        return self.facts.detail
+
+    @property
+    def interruption(self) -> KeyboardInterrupt | None:
+        return self.facts.interruption
+
+    @property
+    def interruption_mode(self) -> _InterruptionMode | None:
+        return self.facts.interruption_mode
+
+    @property
+    def terminal(self) -> bool:
+        return self.facts.terminal
+
+    def record_execution(
+        self,
+        execution: PlanExecutionReport,
+        outcome: PersistenceOutcome,
+        detail: str = "",
+        *,
+        terminal: bool,
+        interruption: KeyboardInterrupt | None = None,
+        interruption_mode: _InterruptionMode | None = None,
+    ) -> None:
+        """Publish execution evidence with its initial persistence truth."""
+
+        if self.terminal:
+            return
+        self.facts = _TransactionFacts(
+            execution,
+            outcome,
+            detail,
+            self.interruption or interruption,
+            (
+                self.interruption_mode
+                if self.interruption is not None
+                else interruption_mode
+            ),
+            terminal,
+        )
+
+    def record_persistence(
+        self,
+        outcome: PersistenceOutcome,
+        detail: str = "",
+        *,
+        terminal: bool,
+        interruption: KeyboardInterrupt | None = None,
+        interruption_mode: _InterruptionMode | None = None,
+    ) -> None:
+        """Publish one indivisible, monotonic transaction snapshot."""
+
+        if self.terminal:
+            if outcome is self.persistence:
+                self.facts = replace(
+                    self.facts,
+                    detail=detail or self.detail,
+                    interruption=self.interruption or interruption,
+                    interruption_mode=(
+                        self.interruption_mode
+                        if self.interruption is not None
+                        else interruption_mode
+                    ),
+                )
+            return
+        self.facts = replace(
+            self.facts,
+            persistence=outcome,
+            detail=detail,
+            interruption=self.interruption or interruption,
+            interruption_mode=(
+                self.interruption_mode
+                if self.interruption is not None
+                else interruption_mode
+            ),
+            terminal=terminal,
+        )
+
+    def begin_cancellation(
+        self, interruption: KeyboardInterrupt, mode: _InterruptionMode
+    ) -> None:
+        """Record the first cancellation; a later interrupt is force-abort."""
+
+        if self.interruption is not None:
+            raise interruption
+        self.facts = replace(
+            self.facts,
+            interruption=interruption,
+            interruption_mode=mode,
+        )
 
 
 def managed_state_path(
@@ -627,10 +749,13 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return value
 
 
-def _atomic_write(path: Path, document: dict[str, Any]) -> None:
+def _atomic_write(
+    path: Path,
+    document: dict[str, Any],
+    transaction: _ManagedTransactionState,
+) -> None:
+    temporary: Path | None = None
     try:
-        temporary: Path | None = None
-        replace_attempted = False
         missing_directories = _missing_directories(path.parent)
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
@@ -645,34 +770,82 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
-        replace_attempted = True
+        transaction.record_persistence(
+            PersistenceOutcome.UNKNOWN,
+            "managed-state replacement or durability was not confirmed",
+            terminal=False,
+        )
         os.replace(temporary, path)
         temporary = None
         _sync_parent_directory(path.parent)
         for directory in reversed(missing_directories):
             _sync_parent_directory(directory.parent)
+        transaction.record_persistence(
+            PersistenceOutcome.SUCCEEDED, terminal=True
+        )
     except OSError as error:
-        temporary = locals().get("temporary")
-        replace_attempted = bool(locals().get("replace_attempted", False))
-        _discard_temporary(temporary)
         outcome = (
             PersistenceOutcome.UNKNOWN
-            if replace_attempted
+            if transaction.persistence is PersistenceOutcome.UNKNOWN
             else PersistenceOutcome.FAILED
         )
-        raise PersistenceError(outcome, f"managed-state atomic persistence failed: {error}") from error
+        base_detail = "managed-state atomic persistence failed"
+        transaction.record_persistence(outcome, base_detail, terminal=True)
+        try:
+            detail = _safe_exception_detail(
+                base_detail, error
+            )
+            transaction.record_persistence(outcome, detail, terminal=True)
+        except KeyboardInterrupt as detail_interruption:
+            transaction.begin_cancellation(
+                detail_interruption, _InterruptionMode.MANAGED
+            )
+        except Exception:
+            pass
+        try:
+            _best_effort_discard_temporary(temporary)
+        except KeyboardInterrupt as cleanup_interruption:
+            transaction.begin_cancellation(
+                cleanup_interruption, _InterruptionMode.MANAGED
+            )
+        except OSError:
+            pass
     except KeyboardInterrupt as error:
-        temporary = locals().get("temporary")
-        replace_attempted = bool(locals().get("replace_attempted", False))
-        _discard_temporary(temporary)
+        if transaction.terminal:
+            transaction.begin_cancellation(error, _InterruptionMode.MANAGED)
+            return
         outcome = (
             PersistenceOutcome.UNKNOWN
-            if replace_attempted
+            if transaction.persistence is PersistenceOutcome.UNKNOWN
             else PersistenceOutcome.FAILED
         )
-        raise PersistenceInterrupted(
-            outcome, "managed-state persistence was interrupted"
-        ) from error
+        transaction.begin_cancellation(
+            error, _InterruptionMode.PERSISTENCE
+        )
+        transaction.record_persistence(
+            outcome,
+            (
+                "managed-state persistence was interrupted after replacement "
+                "became possible; durable completion was not authoritatively "
+                "published"
+                if outcome is PersistenceOutcome.UNKNOWN
+                else "managed-state persistence was interrupted before replacement"
+            ),
+            terminal=True,
+        )
+        try:
+            _best_effort_discard_temporary(temporary)
+        except OSError:
+            pass
+
+
+def _best_effort_discard_temporary(temporary: Path | None) -> None:
+    """Discard secondary temporary state without replacing a primary outcome."""
+
+    try:
+        _discard_temporary(temporary)
+    except OSError:
+        pass
 
 
 def _discard_temporary(temporary: Path | None) -> None:
@@ -779,143 +952,271 @@ def execute_provider_plan(
 ) -> ManagedExecutionResult:
     """Preflight provenance, execute, then independently persist attempted mutations."""
 
-    if not plan.actions:
-        return ManagedExecutionResult(
-            executor(plan, **executor_arguments), PersistenceOutcome.NOT_REQUIRED
-        )
+    transaction = _ManagedTransactionState()
     mutation_authorized = executor_arguments.get("allow_provider_mutation") is True
-    if not mutation_authorized:
-        executor_arguments = {**executor_arguments, "allow_provider_mutation": False}
-        return ManagedExecutionResult(
-            executor(plan, **executor_arguments), PersistenceOutcome.NOT_REQUIRED
-        )
-    if plan.context is None:
+    if plan.actions and mutation_authorized and plan.context is None:
         raise ManagedStateError("mutating provider plan has no execution context")
-    result: ManagedExecutionResult | None = None
-    pending_interruption: (
-        ProviderPlanInterrupted
-        | ManagedExecutionInterrupted
-        | PersistenceInterrupted
-        | None
-    ) = None
+
     try:
-        with _MANAGED_STATE_LOCK, _provider_execution_transaction():
+        if not plan.actions or not mutation_authorized:
+            if plan.actions and not mutation_authorized:
+                executor_arguments = {
+                    **executor_arguments,
+                    "allow_provider_mutation": False,
+                }
             try:
-                path = state_path or managed_state_path(
-                    platform_name=plan.context.platform
+                execution = executor(plan, **executor_arguments)
+                transaction.record_execution(
+                    execution,
+                    PersistenceOutcome.NOT_REQUIRED,
+                    terminal=True,
                 )
-                document = load_document(path)
-            except ManagedStateError as error:
-                result = ManagedExecutionResult(
-                    None, PersistenceOutcome.BLOCKED, str(error)
+            except ProviderPlanInterrupted as error:
+                transaction.record_execution(
+                    error.report,
+                    PersistenceOutcome.NOT_REQUIRED,
+                    terminal=True,
+                    interruption=error,
+                    interruption_mode=_InterruptionMode.DIRECT,
+                )
+            except KeyboardInterrupt as error:
+                transaction.begin_cancellation(
+                    error, _InterruptionMode.MANAGED
+                )
+                transaction.record_execution(
+                    _nonmutating_interrupted_report(
+                        plan, mutation_authorized=mutation_authorized
+                    ),
+                    PersistenceOutcome.NOT_REQUIRED,
+                    terminal=True,
+                )
+        else:
+            with _MANAGED_STATE_LOCK, _provider_execution_transaction():
+                try:
+                    path = state_path or managed_state_path(
+                        platform_name=plan.context.platform
+                    )
+                    document = load_document(path)
+                except ManagedStateError as error:
+                    transaction.record_persistence(
+                        PersistenceOutcome.BLOCKED,
+                        str(error),
+                        terminal=True,
+                    )
+                else:
+                    requested_at = _timestamp()
+                    try:
+                        execution = executor(
+                            plan, **executor_arguments
+                        )
+                        transaction.record_execution(
+                            execution,
+                            PersistenceOutcome.FAILED,
+                            "managed-state persistence did not begin",
+                            terminal=False,
+                        )
+                    except ProviderPlanInterrupted as error:
+                        transaction.record_execution(
+                            error.report,
+                            PersistenceOutcome.FAILED,
+                            "managed-state persistence did not begin",
+                            terminal=False,
+                            interruption=error,
+                            interruption_mode=_InterruptionMode.DIRECT,
+                        )
+                    except KeyboardInterrupt as error:
+                        transaction.begin_cancellation(
+                            error, _InterruptionMode.MANAGED
+                        )
+                        if transaction.execution is None:
+                            transaction.record_execution(
+                                _unknown_interrupted_report(plan),
+                                PersistenceOutcome.FAILED,
+                                (
+                                    "completed provider execution evidence was "
+                                    "not authoritatively published before "
+                                    "cancellation; managed-state persistence did "
+                                    "not begin"
+                                ),
+                                terminal=False,
+                            )
+
+                    prepared = _prepare_update_for_persistence(
+                        document,
+                        plan,
+                        requested_at,
+                        transaction,
+                    )
+                    if not transaction.terminal:
+                        if prepared is None:
+                            raise RuntimeError(
+                                "provenance preparation produced no terminal state"
+                            )
+                        _, attempted_indexes, updated = prepared
+                        if attempted_indexes:
+                            try:
+                                _atomic_write(path, updated, transaction)
+                            except PersistenceInterrupted as error:
+                                transaction.begin_cancellation(
+                                    error, _InterruptionMode.DIRECT
+                                )
+                                transaction.record_persistence(
+                                    error.outcome,
+                                    error.detail,
+                                    terminal=True,
+                                )
+                            except PersistenceError as error:
+                                transaction.record_persistence(
+                                    error.outcome,
+                                    error.detail,
+                                    terminal=True,
+                                )
+                            except KeyboardInterrupt as error:
+                                transaction.begin_cancellation(
+                                    error, _InterruptionMode.MANAGED
+                                )
+                                if not transaction.terminal:
+                                    outcome = (
+                                        transaction.persistence
+                                        or PersistenceOutcome.UNKNOWN
+                                    )
+                                    detail = transaction.detail or (
+                                        "managed-state persistence was interrupted "
+                                        "after its exact replacement phase became "
+                                        "uncertain"
+                                    )
+                                    transaction.record_persistence(
+                                        outcome, detail, terminal=True
+                                    )
+                            else:
+                                if not transaction.terminal:
+                                    transaction.record_persistence(
+                                        PersistenceOutcome.SUCCEEDED,
+                                        terminal=True,
+                                    )
+    except KeyboardInterrupt as error:
+        transaction.begin_cancellation(error, _InterruptionMode.MANAGED)
+        if transaction.persistence is None:
+            outcome = (
+                PersistenceOutcome.UNKNOWN
+                if transaction.execution is not None
+                else PersistenceOutcome.BLOCKED
+            )
+            detail = (
+                "managed execution was interrupted after provider execution"
+                if transaction.execution is not None
+                else "managed execution was interrupted before provider evidence was available"
+            )
+            transaction.record_persistence(outcome, detail, terminal=True)
+        elif not transaction.terminal:
+            transaction.record_persistence(
+                transaction.persistence,
+                transaction.detail,
+                terminal=True,
+            )
+
+    if not transaction.terminal or transaction.persistence is None:
+        raise RuntimeError("managed provider execution produced no terminal state")
+    try:
+        result, interruption = _finalize_transaction(transaction)
+    except KeyboardInterrupt as error:
+        transaction.begin_cancellation(error, _InterruptionMode.MANAGED)
+        # A second interruption during this one controlled materialization is
+        # force-abort and intentionally propagates without another retry.
+        result, interruption = _finalize_transaction(transaction)
+    if interruption is not None:
+        raise interruption
+    return result
+
+
+_PreparedUpdate = tuple[str, tuple[int, ...], dict[str, Any]]
+
+
+def _prepare_update_for_persistence(
+    document: dict[str, Any],
+    plan: ProviderPlan,
+    requested_at: str,
+    transaction: _ManagedTransactionState,
+) -> _PreparedUpdate | None:
+    """Prepare one update, with one bounded recovery attempt after interruption."""
+
+    report = transaction.execution
+    if report is None:
+        raise RuntimeError("provenance preparation has no execution report")
+    try:
+        prepared = _prepare_update(document, plan, report, requested_at)
+        if not prepared[1]:
+            transaction.record_persistence(
+                PersistenceOutcome.NOT_REQUIRED, terminal=True
+            )
+        else:
+            transaction.record_persistence(
+                PersistenceOutcome.FAILED,
+                "managed-state persistence did not begin",
+                terminal=False,
+            )
+        return prepared
+    except KeyboardInterrupt as error:
+        transaction.begin_cancellation(error, _InterruptionMode.MANAGED)
+        try:
+            prepared = _prepare_update(document, plan, report, requested_at)
+            if not prepared[1]:
+                transaction.record_persistence(
+                    PersistenceOutcome.NOT_REQUIRED, terminal=True
                 )
             else:
-                requested_at = _timestamp()
-                interruption: (
-                    ProviderPlanInterrupted | ManagedExecutionInterrupted | None
-                ) = None
-                try:
-                    report = executor(plan, **executor_arguments)
-                except ProviderPlanInterrupted as error:
-                    interruption = error
-                    pending_interruption = error
-                    report = error.report
-                except KeyboardInterrupt as error:
-                    interruption = ManagedExecutionInterrupted(error)
-                    pending_interruption = interruption
-                    report = _unknown_interrupted_report(plan)
-                try:
-                    completed_at, attempted_indexes, updated = _prepare_update(
-                        document, plan, report, requested_at
-                    )
-                except KeyboardInterrupt as error:
-                    if interruption is None:
-                        interruption = ManagedExecutionInterrupted(error)
-                        pending_interruption = interruption
-                    try:
-                        completed_at, attempted_indexes, updated = _prepare_update(
-                            document, plan, report, requested_at
-                        )
-                    except Exception as construction_error:
-                        result, finalization_interruption = (
-                            _record_construction_failure_result(
-                                report, construction_error
-                            )
-                        )
-                        if (
-                            finalization_interruption is not None
-                            and pending_interruption is None
-                        ):
-                            pending_interruption = ManagedExecutionInterrupted(
-                                finalization_interruption
-                            )
-                except Exception as construction_error:
-                    result, finalization_interruption = (
-                        _record_construction_failure_result(
-                            report, construction_error
-                        )
-                    )
-                    if (
-                        finalization_interruption is not None
-                        and pending_interruption is None
-                    ):
-                        pending_interruption = ManagedExecutionInterrupted(
-                            finalization_interruption
-                        )
-
-                if result is None and not attempted_indexes:
-                    result = ManagedExecutionResult(
-                        report, PersistenceOutcome.NOT_REQUIRED
-                    )
-                elif result is None:
-                    try:
-                        _atomic_write(path, updated)
-                        result = ManagedExecutionResult(
-                            report, PersistenceOutcome.SUCCEEDED
-                        )
-                    except PersistenceInterrupted as error:
-                        result, _ = _guarded_persistence_failure_result(
-                            report, error.outcome, error.detail
-                        )
-                        pending_interruption = error
-                    except PersistenceError as error:
-                        result, finalization_interruption = (
-                            _guarded_persistence_failure_result(
-                                report, error.outcome, error.detail
-                            )
-                        )
-                        if (
-                            finalization_interruption is not None
-                            and pending_interruption is None
-                        ):
-                            pending_interruption = ManagedExecutionInterrupted(
-                                finalization_interruption
-                            )
-                    except KeyboardInterrupt as error:
-                        result = ManagedExecutionResult(
-                            report, PersistenceOutcome.SUCCEEDED
-                        )
-                        pending_interruption = ManagedExecutionInterrupted(error)
-
-                if interruption is not None and pending_interruption is None:
-                    pending_interruption = interruption
-                if pending_interruption is not None:
-                    pending_interruption.managed_result = result
-                    raise pending_interruption
-    except (
-        ProviderPlanInterrupted,
-        ManagedExecutionInterrupted,
-        PersistenceInterrupted,
-    ):
-        raise
-    except KeyboardInterrupt as error:
-        final_interruption = pending_interruption or ManagedExecutionInterrupted(error)
-        final_interruption.managed_result = result
-        raise final_interruption
-
-    if result is None:
-        raise RuntimeError("managed provider execution produced no result")
-    return result
+                transaction.record_persistence(
+                    PersistenceOutcome.FAILED,
+                    "managed-state persistence did not begin",
+                    terminal=False,
+                )
+            return prepared
+        except Exception as construction_error:
+            base_detail = (
+                "provenance record construction failed before persistence began"
+            )
+            transaction.record_persistence(
+                PersistenceOutcome.FAILED, base_detail, terminal=True
+            )
+            try:
+                detail = _safe_exception_detail(
+                    base_detail,
+                    construction_error,
+                    include_type=True,
+                )
+                transaction.record_persistence(
+                    PersistenceOutcome.FAILED, detail, terminal=True
+                )
+            except KeyboardInterrupt as detail_interruption:
+                transaction.begin_cancellation(
+                    detail_interruption, _InterruptionMode.MANAGED
+                )
+            except Exception:
+                pass
+            return None
+    except Exception as construction_error:
+        base_detail = (
+            "provenance record construction failed before persistence began"
+        )
+        transaction.record_persistence(
+            PersistenceOutcome.FAILED, base_detail, terminal=True
+        )
+        try:
+            detail = _safe_exception_detail(
+                base_detail,
+                construction_error,
+                include_type=True,
+            )
+            transaction.record_persistence(
+                PersistenceOutcome.FAILED, detail, terminal=True
+            )
+        except KeyboardInterrupt as detail_interruption:
+            transaction.begin_cancellation(
+                detail_interruption, _InterruptionMode.MANAGED
+            )
+        except Exception:
+            pass
+        return None
 
 
 def _prepare_update(
@@ -944,28 +1245,93 @@ def _prepare_update(
     return completed_at, attempted_indexes, updated
 
 
-def _record_construction_failure_result(
-    report: PlanExecutionReport, error: Exception
-) -> tuple[ManagedExecutionResult, KeyboardInterrupt | None]:
-    return _guarded_persistence_failure_result(
-        report,
-        PersistenceOutcome.FAILED,
-        (
-            "provenance record construction failed before persistence began: "
-            f"{type(error).__name__}: {error}"
-        ),
+def _safe_exception_detail(
+    prefix: str,
+    error: BaseException,
+    *,
+    include_type: bool = False,
+) -> str:
+    error_type = type(error).__name__
+    rendered = str(error)
+    if include_type:
+        return f"{prefix}: {error_type}: {rendered}"
+    return f"{prefix}: {rendered}"
+
+
+def _finalize_transaction(
+    transaction: _ManagedTransactionState,
+) -> tuple[
+    ManagedExecutionResult,
+    ProviderPlanInterrupted
+    | ManagedExecutionInterrupted
+    | PersistenceInterrupted
+    | None,
+]:
+    """Materialize one frozen transaction without changing its facts."""
+
+    if not transaction.terminal or transaction.persistence is None:
+        raise RuntimeError("cannot finalize a non-terminal managed transaction")
+    recovery_guidance = (
+        _persistence_failure_guidance(transaction.persistence)
+        if transaction.persistence
+        in {PersistenceOutcome.FAILED, PersistenceOutcome.UNKNOWN}
+        else ()
     )
+    result = ManagedExecutionResult(
+        transaction.execution,
+        transaction.persistence,
+        transaction.detail,
+        recovery_guidance,
+    )
+    interruption = _materialize_transaction_interruption(transaction)
+    if interruption is not None:
+        _attach_managed_result(interruption, result)
+    return result, interruption
 
 
-def _guarded_persistence_failure_result(
-    report: PlanExecutionReport,
-    outcome: PersistenceOutcome,
-    detail: str,
-) -> tuple[ManagedExecutionResult, KeyboardInterrupt | None]:
-    try:
-        return _persistence_failure_result(report, outcome, detail), None
-    except KeyboardInterrupt as error:
-        return _persistence_failure_result(report, outcome, detail), error
+def _materialize_transaction_interruption(
+    transaction: _ManagedTransactionState,
+) -> (
+    ProviderPlanInterrupted
+    | ManagedExecutionInterrupted
+    | PersistenceInterrupted
+    | None
+):
+    source = transaction.interruption
+    if source is None:
+        return None
+    if transaction.interruption_mode is _InterruptionMode.DIRECT:
+        if not isinstance(
+            source,
+            (
+                ProviderPlanInterrupted,
+                ManagedExecutionInterrupted,
+                PersistenceInterrupted,
+            ),
+        ):
+            raise RuntimeError("direct managed interruption has no public carrier")
+        return source
+    if transaction.interruption_mode is _InterruptionMode.PERSISTENCE:
+        if transaction.persistence not in {
+            PersistenceOutcome.FAILED,
+            PersistenceOutcome.UNKNOWN,
+        }:
+            raise RuntimeError("persistence interruption has no failure outcome")
+        return PersistenceInterrupted(
+            transaction.persistence, transaction.detail
+        )
+    return ManagedExecutionInterrupted(source)
+
+
+def _attach_managed_result(
+    interruption: (
+        ProviderPlanInterrupted
+        | ManagedExecutionInterrupted
+        | PersistenceInterrupted
+    ),
+    result: ManagedExecutionResult | None,
+) -> None:
+    interruption.managed_result = result
 
 
 def _unknown_interrupted_report(plan: ProviderPlan) -> PlanExecutionReport:
@@ -981,7 +1347,8 @@ def _unknown_interrupted_report(plan: ProviderPlan) -> PlanExecutionReport:
                 action.installation_unit,
                 ActionOutcome.INTERRUPTED,
                 detail=(
-                    "authorized execution was interrupted; exact per-action command "
+                    "authorized execution was interrupted or its completed report "
+                    "was not authoritatively published; exact per-action command "
                     "progress and resulting provider state are unknown"
                 ),
                 target_architecture=action.target_architecture,
@@ -993,30 +1360,64 @@ def _unknown_interrupted_report(plan: ProviderPlan) -> PlanExecutionReport:
             for action in plan.actions
         ),
         (
-            "provider mutation may have started or completed",
+            "provider mutation may have started or completed; stronger completion "
+            "evidence may not have been authoritatively published",
             "do not retry automatically or immediately and do not attempt rollback or removal",
             "rediscover current machine state and generate a fresh plan before any later mutation",
         ),
     )
 
 
-def _persistence_failure_result(
-    report: PlanExecutionReport,
-    outcome: PersistenceOutcome,
-    detail: str,
-) -> ManagedExecutionResult:
-    return ManagedExecutionResult(
-        report,
-        outcome,
-        detail,
+def _nonmutating_interrupted_report(
+    plan: ProviderPlan, *, mutation_authorized: bool
+) -> PlanExecutionReport:
+    """Describe a raw interruption where this boundary could not mutate."""
+
+    actions = tuple(
+        ActionReport(
+            action.capability_id,
+            action.provider_id,
+            action.manager,
+            action.installation_unit,
+            ActionOutcome.REFUSED,
+            detail=(
+                "provider mutation was not explicitly authorized; interruption "
+                "occurred without starting a provider command"
+            ),
+            target_architecture=action.target_architecture,
+            displaces_verified_paths=action.displaces_verified_paths,
+            translated_manager_fallback_authorized=(
+                action.translated_manager_fallback_authorized
+            ),
+        )
+        for action in plan.actions
+    )
+    return PlanExecutionReport(
+        plan.context,
+        plan.requested_capabilities,
+        PlanOutcome.REFUSED if actions else PlanOutcome.PREFLIGHT_FAILED,
+        actions,
         (
-            "provider execution evidence is preserved in this result",
-            "provenance was not durably recorded"
-            if outcome is PersistenceOutcome.FAILED
-            else "whether provenance became durable is unknown",
-            "do not rerun provider mutation automatically and do not uninstall or roll back",
-            "rediscover current machine state and generate a fresh plan before any later mutation",
+            "no provider command started; this attempt did not mutate provider state",
+            (
+                "provider mutation was not explicitly authorized"
+                if not mutation_authorized
+                else "the plan contained no provider actions"
+            ),
         ),
+    )
+
+
+def _persistence_failure_guidance(
+    outcome: PersistenceOutcome,
+) -> tuple[str, ...]:
+    return (
+        "provider execution evidence is preserved in this result",
+        "provenance was not durably recorded"
+        if outcome is PersistenceOutcome.FAILED
+        else "whether provenance became durable is unknown",
+        "do not rerun provider mutation automatically and do not uninstall or roll back",
+        "rediscover current machine state and generate a fresh plan before any later mutation",
     )
 
 
