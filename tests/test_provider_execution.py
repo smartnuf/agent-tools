@@ -1696,19 +1696,26 @@ class ProviderExecutionTests(unittest.TestCase):
             )
         )
         later = KeyboardInterrupt()
+        original_path = os.environ.get("PATH")
 
-        with (
-            patch.object(
-                provider_execution,
-                "_restore_environment",
-                side_effect=later,
-            ),
-            self.assertRaises(provider_execution._ForceAbort) as raised,
-        ):
-            with provider_execution._temporary_environment(
-                {"PATH": "/temporary"}, cancellation
+        try:
+            with (
+                patch.object(
+                    provider_execution,
+                    "_restore_environment",
+                    side_effect=later,
+                ),
+                self.assertRaises(provider_execution._ForceAbort) as raised,
             ):
-                raise structured
+                with provider_execution._temporary_environment(
+                    {"PATH": "/temporary"}, cancellation
+                ):
+                    raise structured
+        finally:
+            if original_path is None:
+                os.environ.pop("PATH", None)
+            else:
+                os.environ["PATH"] = original_path
 
         self.assertIs(cancellation.first_interruption, structured)
         self.assertEqual(
