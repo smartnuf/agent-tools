@@ -2859,6 +2859,163 @@ class ManagedStateTests(unittest.TestCase):
             atomic_write.assert_not_called()
             executor.assert_called_once()
 
+    def test_executor_publication_interrupt_uses_conservative_evidence(self) -> None:
+        original_record = managed_state._ManagedTransactionState.record_execution
+        completed = self.report()
+        interrupted = False
+
+        def interrupt_before_publish(
+            transaction, execution, outcome, detail="", **arguments
+        ):
+            nonlocal interrupted
+            if not interrupted and execution is completed:
+                interrupted = True
+                raise KeyboardInterrupt()
+            return original_record(
+                transaction, execution, outcome, detail, **arguments
+            )
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            executor = Mock(return_value=completed)
+            atomic_write = Mock(wraps=managed_state._atomic_write)
+            with (
+                patch.object(
+                    managed_state._ManagedTransactionState,
+                    "record_execution",
+                    new=interrupt_before_publish,
+                ),
+                patch.object(managed_state, "_atomic_write", atomic_write),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            result = raised.exception.managed_result
+            self.assertIsNot(result.execution, completed)
+            self.assertEqual(
+                result.execution.actions[0].outcome,
+                provider_execution.ActionOutcome.INTERRUPTED,
+            )
+            self.assertTrue(
+                any(
+                    "stronger completion evidence may not have been authoritatively published"
+                    in guidance
+                    for guidance in result.execution.recovery_guidance
+                )
+            )
+            self.assertNotIn(
+                "no provider command started",
+                result.execution.recovery_guidance,
+            )
+            executor.assert_called_once()
+            atomic_write.assert_called_once()
+
+    def test_published_executor_report_survives_later_cancellation(self) -> None:
+        original_record = managed_state._ManagedTransactionState.record_execution
+        completed = self.report()
+        interrupted = False
+
+        def publish_then_interrupt(
+            transaction, execution, outcome, detail="", **arguments
+        ):
+            nonlocal interrupted
+            original_record(
+                transaction, execution, outcome, detail, **arguments
+            )
+            if not interrupted and execution is completed:
+                interrupted = True
+                raise KeyboardInterrupt()
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            executor = Mock(return_value=completed)
+            atomic_write = Mock(wraps=managed_state._atomic_write)
+            with (
+                patch.object(
+                    managed_state._ManagedTransactionState,
+                    "record_execution",
+                    new=publish_then_interrupt,
+                ),
+                patch.object(managed_state, "_atomic_write", atomic_write),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            self.assertIs(raised.exception.managed_result.execution, completed)
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.SUCCEEDED,
+            )
+            executor.assert_called_once()
+            atomic_write.assert_called_once()
+
+    def test_durable_success_publication_race_remains_unknown(self) -> None:
+        original_record = managed_state._ManagedTransactionState.record_persistence
+        interrupted = False
+
+        def interrupt_before_success(
+            transaction, outcome, detail="", **arguments
+        ):
+            nonlocal interrupted
+            if (
+                not interrupted
+                and outcome is managed_state.PersistenceOutcome.SUCCEEDED
+                and arguments["terminal"]
+            ):
+                interrupted = True
+                raise KeyboardInterrupt()
+            return original_record(
+                transaction, outcome, detail, **arguments
+            )
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            completed = self.report()
+            executor = Mock(return_value=completed)
+            atomic_write = Mock(wraps=managed_state._atomic_write)
+            with (
+                patch.object(managed_state, "_atomic_write", atomic_write),
+                patch.object(
+                    managed_state._ManagedTransactionState,
+                    "record_persistence",
+                    new=interrupt_before_success,
+                ),
+            ):
+                with self.assertRaises(
+                    managed_state.PersistenceInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            result = raised.exception.managed_result
+            self.assertIs(result.execution, completed)
+            self.assertEqual(
+                result.persistence,
+                managed_state.PersistenceOutcome.UNKNOWN,
+            )
+            self.assertIn(
+                "durable completion was not authoritatively published",
+                result.persistence_detail,
+            )
+            self.assertEqual(len(managed_state.load_document(path)["records"]), 1)
+            executor.assert_called_once()
+            atomic_write.assert_called_once()
+
     def test_interrupt_after_success_snapshot_cannot_replace_success(self) -> None:
         original_record = managed_state._ManagedTransactionState.record_persistence
         interrupted = False

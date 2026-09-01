@@ -824,7 +824,13 @@ def _atomic_write(
         )
         transaction.record_persistence(
             outcome,
-            "managed-state persistence was interrupted",
+            (
+                "managed-state persistence was interrupted after replacement "
+                "became possible; durable completion was not authoritatively "
+                "published"
+                if outcome is PersistenceOutcome.UNKNOWN
+                else "managed-state persistence was interrupted before replacement"
+            ),
             terminal=True,
         )
         try:
@@ -1022,12 +1028,18 @@ def execute_provider_plan(
                         transaction.begin_cancellation(
                             error, _InterruptionMode.MANAGED
                         )
-                        transaction.record_execution(
-                            _unknown_interrupted_report(plan),
-                            PersistenceOutcome.FAILED,
-                            "managed-state persistence did not begin",
-                            terminal=False,
-                        )
+                        if transaction.execution is None:
+                            transaction.record_execution(
+                                _unknown_interrupted_report(plan),
+                                PersistenceOutcome.FAILED,
+                                (
+                                    "completed provider execution evidence was "
+                                    "not authoritatively published before "
+                                    "cancellation; managed-state persistence did "
+                                    "not begin"
+                                ),
+                                terminal=False,
+                            )
 
                     prepared = _prepare_update_for_persistence(
                         document,
@@ -1335,7 +1347,8 @@ def _unknown_interrupted_report(plan: ProviderPlan) -> PlanExecutionReport:
                 action.installation_unit,
                 ActionOutcome.INTERRUPTED,
                 detail=(
-                    "authorized execution was interrupted; exact per-action command "
+                    "authorized execution was interrupted or its completed report "
+                    "was not authoritatively published; exact per-action command "
                     "progress and resulting provider state are unknown"
                 ),
                 target_architecture=action.target_architecture,
@@ -1347,7 +1360,8 @@ def _unknown_interrupted_report(plan: ProviderPlan) -> PlanExecutionReport:
             for action in plan.actions
         ),
         (
-            "provider mutation may have started or completed",
+            "provider mutation may have started or completed; stronger completion "
+            "evidence may not have been authoritatively published",
             "do not retry automatically or immediately and do not attempt rollback or removal",
             "rediscover current machine state and generate a fresh plan before any later mutation",
         ),
