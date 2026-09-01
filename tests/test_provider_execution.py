@@ -904,6 +904,69 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(action.commands[0].stderr, "provider unavailable")
         runner.assert_called_once()
 
+    def test_injected_runner_output_is_bounded_for_completion_and_timeout(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        exact = "e" * provider_execution.MAX_CAPTURED_OUTPUT_CHARS
+        self.assertEqual(provider_execution._bounded_command_output(exact), exact)
+        self.assertEqual(
+            provider_execution._bounded_command_output(exact + "x"),
+            provider_execution.OUTPUT_TRUNCATION_MARKER + exact[1:] + "x",
+        )
+        oversized_stdout = "stdout-" + (
+            "x" * (provider_execution.MAX_CAPTURED_OUTPUT_CHARS + 17)
+        )
+        oversized_stderr = "stderr-" + (
+            "y" * (provider_execution.MAX_CAPTURED_OUTPUT_CHARS + 23)
+        )
+
+        def assert_bounded(command):
+            self.assertTrue(
+                command.stdout.startswith(
+                    provider_execution.OUTPUT_TRUNCATION_MARKER
+                )
+            )
+            self.assertTrue(
+                command.stderr.startswith(
+                    provider_execution.OUTPUT_TRUNCATION_MARKER
+                )
+            )
+            self.assertEqual(
+                len(command.stdout),
+                provider_execution.MAX_CAPTURED_OUTPUT_CHARS
+                + len(provider_execution.OUTPUT_TRUNCATION_MARKER),
+            )
+            self.assertEqual(
+                len(command.stderr),
+                provider_execution.MAX_CAPTURED_OUTPUT_CHARS
+                + len(provider_execution.OUTPUT_TRUNCATION_MARKER),
+            )
+            self.assertTrue(command.stdout.endswith("x" * 17))
+            self.assertTrue(command.stderr.endswith("y" * 23))
+
+        completed = self.execute(
+            self.plan(),
+            detector=lambda capability, machine: absent,
+            runner=lambda argv, timeout: subprocess.CompletedProcess(
+                argv, 1, oversized_stdout, oversized_stderr
+            ),
+        )
+        assert_bounded(completed.actions[0].commands[0])
+
+        def timeout(argv, seconds):
+            raise subprocess.TimeoutExpired(
+                argv,
+                seconds,
+                output=oversized_stdout,
+                stderr=oversized_stderr,
+            )
+
+        timed_out = self.execute(
+            self.plan(),
+            detector=lambda capability, machine: absent,
+            runner=timeout,
+        )
+        assert_bounded(timed_out.actions[0].commands[0])
+
     def test_command_start_failure_does_not_claim_partial_host_state(self):
         absent = self.state(capabilities.GHOSTSCRIPT)
 

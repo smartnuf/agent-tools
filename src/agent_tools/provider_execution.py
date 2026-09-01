@@ -50,6 +50,7 @@ from .python_selection import NativeStatus, normalize_architecture
 
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 300
 MAX_CAPTURED_OUTPUT_CHARS = 1024 * 1024
+OUTPUT_TRUNCATION_MARKER = "[earlier output truncated]\n"
 ELEVATED_TERM_TO_KILL_GRACE_SECONDS = 5
 ELEVATED_SUPERVISOR_GUARD_SECONDS = 10
 OUTPUT_PIPE_CLOSURE_GUARD_SECONDS = 1
@@ -465,7 +466,7 @@ class _BoundedOutputTail:
     def value(self) -> str:
         value = "".join(self._chunks)
         if self._truncated:
-            return "[earlier output truncated]\n" + value
+            return OUTPUT_TRUNCATION_MARKER + value
         return value
 
 
@@ -989,7 +990,11 @@ def _observed_verified_provider_paths(
     return tuple(
         item.path
         for item in provider.executables
-        if item.verified and item.path is not None
+        if (
+            item.verified
+            and item.path is not None
+            and _path_is_absolute(item.path, state.machine)
+        )
     )
 
 
@@ -999,9 +1004,15 @@ def _command_report(
     return CommandReport(
         argv,
         result.returncode,
-        result.stdout or "",
-        result.stderr or "",
+        _bounded_command_output(result.stdout or ""),
+        _bounded_command_output(result.stderr or ""),
     )
+
+
+def _bounded_command_output(value: str) -> str:
+    if len(value) <= MAX_CAPTURED_OUTPUT_CHARS:
+        return value
+    return OUTPUT_TRUNCATION_MARKER + value[-MAX_CAPTURED_OUTPUT_CHARS:]
 
 
 def _completed_command_failure(
@@ -1531,8 +1542,8 @@ def _execute_provider_plan(
                     CommandReport(
                         argv,
                         None,
-                        _timeout_text(error.stdout),
-                        _timeout_text(error.stderr),
+                        _bounded_command_output(_timeout_text(error.stdout)),
+                        _bounded_command_output(_timeout_text(error.stderr)),
                         timed_out=True,
                     )
                 )
@@ -1561,7 +1572,11 @@ def _execute_provider_plan(
                 )
             except OSError as error:
                 earlier_command_completed = bool(commands)
-                commands.append(CommandReport(argv, None, "", str(error)))
+                commands.append(
+                    CommandReport(
+                        argv, None, "", _bounded_command_output(str(error))
+                    )
+                )
                 reports.append(
                     _action_report(
                         action,

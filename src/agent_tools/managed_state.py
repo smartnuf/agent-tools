@@ -20,6 +20,8 @@ from .provider_execution import (
     ActionOutcome,
     ActionReport,
     ELEVATED_TERM_TO_KILL_GRACE_SECONDS,
+    MAX_CAPTURED_OUTPUT_CHARS,
+    OUTPUT_TRUNCATION_MARKER,
     PlanOutcome,
     PlanExecutionReport,
     ProviderPlanInterrupted,
@@ -406,6 +408,8 @@ def load_document(path: Path) -> dict[str, Any]:
                 )
                 and isinstance(evidence.get("stdout"), str)
                 and isinstance(evidence.get("stderr"), str)
+                and _command_output_is_bounded(evidence["stdout"])
+                and _command_output_is_bounded(evidence["stderr"])
                 and isinstance(evidence.get("timed_out"), bool)
             ):
                 raise ManagedStateError(f"managed-state record {index} has invalid command evidence")
@@ -464,6 +468,10 @@ def load_document(path: Path) -> dict[str, Any]:
                 )
             )
         terminal = evidence_items[-1] if evidence_items else None
+        supervised_linux = (
+            context["platform"] == "Linux"
+            and package_manager["name"] in {"apt", "dnf", "pacman"}
+        )
         if any(
             evidence["returncode"] != 0 or evidence["timed_out"]
             for evidence in evidence_items[:-1]
@@ -478,8 +486,7 @@ def load_document(path: Path) -> dict[str, Any]:
                 or terminal["returncode"] in {None, 0}
                 or terminal["timed_out"]
                 or (
-                    context["platform"] == "Linux"
-                    and package_manager["name"] in {"apt", "dnf", "pacman"}
+                    supervised_linux
                     and terminal["returncode"] in {125, 126, 127, 137, -9}
                 )
             )
@@ -489,17 +496,30 @@ def load_document(path: Path) -> dict[str, Any]:
                 terminal is None
                 or not terminal["timed_out"]
                 or terminal["returncode"] is not None
-                or (
-                    context["platform"] == "Linux"
-                    and package_manager["name"] in {"apt", "dnf", "pacman"}
-                )
+                or supervised_linux
             )
+        ) or (
+            outcome == ActionOutcome.COMMAND_START_FAILED.value
+            and (terminal is None or terminal["timed_out"])
         ) or (
             outcome == ActionOutcome.FORCED_KILL.value
             and (
                 terminal is None
                 or terminal["timed_out"]
                 or terminal["returncode"] not in {137, -9}
+                or not supervised_linux
+            )
+        ) or (
+            outcome == ActionOutcome.SUPERVISOR_FAILED.value
+            and (
+                terminal is None
+                or (
+                    terminal["timed_out"]
+                    and (
+                        terminal["returncode"] is not None
+                        or not supervised_linux
+                    )
+                )
             )
         ) or (
             outcome == ActionOutcome.INTERRUPTED.value
@@ -520,6 +540,24 @@ def load_document(path: Path) -> dict[str, Any]:
             raise ManagedStateError(
                 f"managed-state record {index} has inconsistent success evidence"
             )
+        if (
+            outcome == ActionOutcome.VERIFICATION_FAILED.value
+            and requested["kind"] == "install"
+            and (
+                (
+                    provider_spec.probe_policy is ProbePolicy.ANY
+                    and verification["verified_paths"]
+                )
+                or (
+                    provider_spec.probe_policy is ProbePolicy.ALL
+                    and len(verification["verified_paths"])
+                    == len(provider_spec.probes)
+                )
+            )
+        ):
+            raise ManagedStateError(
+                f"managed-state record {index} has inconsistent verification-failure evidence"
+            )
         if outcome not in {
             ActionOutcome.SUCCEEDED.value,
             ActionOutcome.VERIFICATION_FAILED.value,
@@ -536,6 +574,14 @@ def _is_absolute_for_platform(value: str, platform_name: object) -> bool:
     if platform_name in {"nt", "Windows"}:
         return PureWindowsPath(value).is_absolute()
     return posixpath.isabs(value)
+
+
+def _command_output_is_bounded(value: str) -> bool:
+    return len(value) <= MAX_CAPTURED_OUTPUT_CHARS or (
+        value.startswith(OUTPUT_TRUNCATION_MARKER)
+        and len(value)
+        <= MAX_CAPTURED_OUTPUT_CHARS + len(OUTPUT_TRUNCATION_MARKER)
+    )
 
 
 def _matches_recorded_command(
@@ -674,6 +720,14 @@ def _record(
 ) -> dict[str, Any]:
     action = plan.actions[index]
     observed = report.actions[index]
+    if any(
+        not _command_output_is_bounded(command.stdout)
+        or not _command_output_is_bounded(command.stderr)
+        for command in observed.commands
+    ):
+        raise ManagedStateError(
+            "provider execution report exceeds the managed command-output bound"
+        )
     capability = get_capability(action.capability_id)
     provider = next(
         item for item in capability.providers if item.provider_id == action.provider_id

@@ -80,11 +80,7 @@ class ManagedStateTests(unittest.TestCase):
         )
         final_verified_paths = (
             ("/tools/gs",)
-            if outcome
-            in {
-                provider_execution.ActionOutcome.SUCCEEDED,
-                provider_execution.ActionOutcome.VERIFICATION_FAILED,
-            }
+            if outcome is provider_execution.ActionOutcome.SUCCEEDED
             else ()
         )
         return provider_execution.PlanExecutionReport(
@@ -786,6 +782,215 @@ class ManagedStateTests(unittest.TestCase):
             record = managed_state.load_document(path)["records"][0]
             self.assertEqual(record["command_evidence"][0]["returncode"], 125)
 
+    def test_forced_kill_is_limited_to_supervised_linux_execution(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(
+                    return_value=self.report(
+                        provider_execution.ActionOutcome.FORCED_KILL
+                    )
+                ),
+                allow_provider_mutation=True,
+            )
+            supervised = managed_state.load_document(path)
+            root_argv = supervised["records"][0]["command_evidence"][0]["argv"]
+            for wrapper_argv in (
+                root_argv,
+                ["/usr/bin/sudo", "-n", "--", *root_argv],
+            ):
+                for returncode in (137, -9):
+                    with self.subTest(
+                        wrapper_length=len(wrapper_argv), returncode=returncode
+                    ):
+                        candidate = json.loads(json.dumps(supervised))
+                        terminal = candidate["records"][0]["command_evidence"][0]
+                        terminal["argv"] = wrapper_argv
+                        terminal["returncode"] = returncode
+                        path.write_text(json.dumps(candidate), encoding="utf-8")
+                        managed_state.load_document(path)
+
+            machine = capabilities.MachineState("Darwin", "arm64", "host")
+            manager = provider_plans.PackageManagerState(
+                "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+            )
+            absent = capabilities.detect_capability(
+                capabilities.GHOSTSCRIPT,
+                machine,
+                locator=lambda probe, context: None,
+            )
+            plan = provider_plans.generate_provider_plan(
+                (absent,), ("ghostscript",), package_managers=(manager,)
+            )
+            action = plan.actions[0]
+            for returncode in (137, -9):
+                with self.subTest(current_user_returncode=returncode):
+                    report = provider_execution.PlanExecutionReport(
+                        machine,
+                        plan.requested_capabilities,
+                        provider_execution.PlanOutcome.PARTIAL_FAILURE,
+                        (
+                            provider_execution.ActionReport(
+                                action.capability_id,
+                                action.provider_id,
+                                action.manager,
+                                action.installation_unit,
+                                provider_execution.ActionOutcome.COMMAND_FAILED,
+                                (
+                                    provider_execution.CommandReport(
+                                        action.commands[0], returncode, "output", ""
+                                    ),
+                                ),
+                            ),
+                        ),
+                    )
+                    path.unlink(missing_ok=True)
+                    managed_state.execute_provider_plan(
+                        plan,
+                        state_path=path,
+                        executor=Mock(return_value=report),
+                        allow_provider_mutation=True,
+                    )
+                    current_user = managed_state.load_document(path)
+                    current_user["records"][0]["verification"]["outcome"] = (
+                        "forced-kill"
+                    )
+                    path.write_text(json.dumps(current_user), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError,
+                        "terminal command evidence",
+                    ):
+                        managed_state.load_document(path)
+            current_user["records"][0]["verification"]["outcome"] = (
+                "supervisor-failed"
+            )
+            terminal = current_user["records"][0]["command_evidence"][-1]
+            terminal["returncode"] = None
+            terminal["timed_out"] = True
+            path.write_text(json.dumps(current_user), encoding="utf-8")
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError, "terminal command evidence"
+            ):
+                managed_state.load_document(path)
+
+    def test_terminal_timeout_relationships_match_writer_outcomes(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            for outcome in (
+                provider_execution.ActionOutcome.COMMAND_START_FAILED,
+                provider_execution.ActionOutcome.SUPERVISOR_FAILED,
+            ):
+                with self.subTest(outcome=outcome.value):
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=Mock(return_value=self.report(outcome)),
+                        allow_provider_mutation=True,
+                    )
+                    document = managed_state.load_document(path)
+                    terminal = document["records"][0]["command_evidence"][-1]
+                    terminal["timed_out"] = True
+                    terminal["returncode"] = None
+                    path.write_text(json.dumps(document), encoding="utf-8")
+                    if outcome is provider_execution.ActionOutcome.SUPERVISOR_FAILED:
+                        managed_state.load_document(path)
+                    else:
+                        with self.assertRaisesRegex(
+                            managed_state.ManagedStateError,
+                            "terminal command evidence",
+                        ):
+                            managed_state.load_document(path)
+                    path.unlink()
+
+    def test_command_output_bounds_apply_before_write_and_on_load(self) -> None:
+        oversized = "z" * (provider_execution.MAX_CAPTURED_OUTPUT_CHARS + 1)
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            absent = capabilities.detect_capability(
+                capabilities.GHOSTSCRIPT,
+                self.machine,
+                locator=lambda probe, context: None,
+            )
+            result = managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                allow_provider_mutation=True,
+                current_context=lambda: self.machine,
+                detector=lambda capability, context: absent,
+                manager_verifier=lambda state, context: True,
+                privilege_resolver=lambda action: "/usr/bin/sudo",
+                supervisor_resolver=lambda action: "/usr/bin/timeout",
+                privilege_preflight=lambda argv: True,
+                runner=lambda argv, timeout: subprocess.CompletedProcess(
+                    argv, 1, oversized, oversized
+                ),
+            )
+            self.assertEqual(
+                result.persistence, managed_state.PersistenceOutcome.SUCCEEDED
+            )
+            document = managed_state.load_document(path)
+            terminal = document["records"][0]["command_evidence"][-1]
+            for stream in ("stdout", "stderr"):
+                self.assertEqual(
+                    len(terminal[stream]),
+                    provider_execution.MAX_CAPTURED_OUTPUT_CHARS
+                    + len(provider_execution.OUTPUT_TRUNCATION_MARKER),
+                )
+                self.assertTrue(
+                    terminal[stream].startswith(
+                        provider_execution.OUTPUT_TRUNCATION_MARKER
+                    )
+                )
+
+            exact_limit = json.loads(json.dumps(document))
+            exact_limit["records"][0]["command_evidence"][-1]["stdout"] = (
+                "x" * provider_execution.MAX_CAPTURED_OUTPUT_CHARS
+            )
+            path.write_text(json.dumps(exact_limit), encoding="utf-8")
+            managed_state.load_document(path)
+
+            for value in (
+                oversized,
+                provider_execution.OUTPUT_TRUNCATION_MARKER + oversized,
+            ):
+                with self.subTest(length=len(value)):
+                    damaged = json.loads(json.dumps(document))
+                    damaged["records"][0]["command_evidence"][-1][
+                        "stdout"
+                    ] = value
+                    path.write_text(json.dumps(damaged), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError,
+                        "command evidence",
+                    ):
+                        managed_state.load_document(path)
+
+            overlarge_report = self.report()
+            overlarge_action = replace(
+                overlarge_report.actions[0],
+                commands=(
+                    replace(overlarge_report.actions[0].commands[0], stdout=oversized),
+                    *overlarge_report.actions[0].commands[1:],
+                ),
+            )
+            path.unlink()
+            blocked_write = managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(
+                    return_value=replace(
+                        overlarge_report, actions=(overlarge_action,)
+                    )
+                ),
+                allow_provider_mutation=True,
+            )
+            self.assertEqual(
+                blocked_write.persistence, managed_state.PersistenceOutcome.FAILED
+            )
+            self.assertFalse(path.exists())
+
     def test_all_probe_success_requires_complete_verified_paths(self) -> None:
         missing = capabilities.detect_capability(
             capabilities.POPPLER,
@@ -877,6 +1082,133 @@ class ManagedStateTests(unittest.TestCase):
                 managed_state.ManagedStateError, "verification evidence"
             ):
                 managed_state.load_document(path)
+
+    def test_verification_failure_paths_preserve_probe_policy_semantics(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            any_document = managed_state.load_document(path)
+            any_document["records"][0]["verification"]["outcome"] = (
+                "verification-failed"
+            )
+            path.write_text(json.dumps(any_document), encoding="utf-8")
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError,
+                "verification-failure evidence",
+            ):
+                managed_state.load_document(path)
+
+            missing = capabilities.detect_capability(
+                capabilities.POPPLER,
+                self.machine,
+                locator=lambda probe, context: None,
+            )
+            all_plan = provider_plans.generate_provider_plan(
+                (missing,),
+                ("poppler",),
+                package_managers=(self.plan.actions[0].manager_state,),
+            )
+            all_action = all_plan.actions[0]
+            all_commands = tuple(
+                provider_execution.CommandReport(
+                    (
+                        "/usr/bin/timeout",
+                        "--signal=TERM",
+                        "--kill-after=5s",
+                        "900s",
+                        *command,
+                    ),
+                    0,
+                    "installed",
+                    "",
+                )
+                for command in all_action.commands
+            )
+            all_report = provider_execution.PlanExecutionReport(
+                self.machine,
+                all_plan.requested_capabilities,
+                provider_execution.PlanOutcome.SUCCEEDED,
+                (
+                    provider_execution.ActionReport(
+                        all_action.capability_id,
+                        all_action.provider_id,
+                        all_action.manager,
+                        all_action.installation_unit,
+                        provider_execution.ActionOutcome.SUCCEEDED,
+                        all_commands,
+                        ("/tools/pdfinfo", "/tools/pdftotext", "/tools/pdftoppm"),
+                    ),
+                ),
+            )
+            path.unlink()
+            managed_state.execute_provider_plan(
+                all_plan,
+                state_path=path,
+                executor=Mock(return_value=all_report),
+                allow_provider_mutation=True,
+            )
+            all_document = managed_state.load_document(path)
+            all_record = all_document["records"][0]
+            all_record["verification"]["outcome"] = "verification-failed"
+            path.write_text(json.dumps(all_document), encoding="utf-8")
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError,
+                "verification-failure evidence",
+            ):
+                managed_state.load_document(path)
+
+            all_record["requested_action"]["kind"] = "native-replacement"
+            all_record["requested_action"]["target_architecture"] = "x86_64"
+            all_record["requested_action"]["displaces_verified_paths"] = [
+                "/translated/pdfinfo"
+            ]
+            path.write_text(json.dumps(all_document), encoding="utf-8")
+            managed_state.load_document(path)
+
+            all_record["requested_action"]["kind"] = "install"
+            all_record["requested_action"]["target_architecture"] = None
+            all_record["requested_action"]["displaces_verified_paths"] = []
+            all_record["verification"]["verified_paths"] = ["/tools/pdfinfo"]
+            path.write_text(json.dumps(all_document), encoding="utf-8")
+            managed_state.load_document(path)
+
+    def test_native_replacement_verification_failure_can_retain_wrong_arch_paths(self) -> None:
+        action = replace(
+            self.plan.actions[0],
+            target_architecture="x86_64",
+            displaces_verified_paths=("/translated/gs",),
+            reason="explicit native replacement",
+        )
+        plan = replace(self.plan, actions=(action,))
+        report_action = replace(
+            self.report(provider_execution.ActionOutcome.VERIFICATION_FAILED).actions[0],
+            final_verified_paths=("/translated/gs",),
+            target_architecture="x86_64",
+            displaces_verified_paths=("/translated/gs",),
+        )
+        report = provider_execution.PlanExecutionReport(
+            self.machine,
+            plan.requested_capabilities,
+            provider_execution.PlanOutcome.PARTIAL_FAILURE,
+            (report_action,),
+        )
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                plan,
+                state_path=path,
+                executor=Mock(return_value=report),
+                allow_provider_mutation=True,
+            )
+            record = managed_state.load_document(path)["records"][0]
+            self.assertEqual(
+                record["verification"]["verified_paths"], ["/translated/gs"]
+            )
 
     def test_translated_homebrew_authorization_evidence_is_structured(self) -> None:
         machine = capabilities.MachineState("Darwin", "arm64", "host")
@@ -1677,6 +2009,47 @@ class ManagedStateTests(unittest.TestCase):
             record = managed_state.load_document(path)["records"][0]
             self.assertEqual(record["verification"]["outcome"], "verification-failed")
             self.assertEqual(record["command_evidence"][0]["stdout"], "installed")
+
+    def test_relative_post_action_identity_cannot_corrupt_provenance(self) -> None:
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            self.machine,
+            locator=lambda probe, context: None,
+        )
+        relative = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            self.machine,
+            locator=lambda probe, context: "relative/gs",
+            version_reader=lambda probe, path: "1.0",
+            architecture_reader=lambda probe, path: "x86_64",
+        )
+        detector = Mock(side_effect=(absent, relative))
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            result = managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                allow_provider_mutation=True,
+                current_context=lambda: self.machine,
+                detector=detector,
+                manager_verifier=lambda state, context: True,
+                privilege_resolver=lambda action: "/usr/bin/sudo",
+                supervisor_resolver=lambda action: "/usr/bin/timeout",
+                privilege_preflight=lambda argv: True,
+                runner=lambda argv, timeout: subprocess.CompletedProcess(
+                    argv, 0, "installed", ""
+                ),
+            )
+            self.assertEqual(
+                result.execution.actions[0].outcome,
+                provider_execution.ActionOutcome.VERIFICATION_FAILED,
+            )
+            self.assertEqual(
+                result.execution.actions[0].final_verified_paths,
+                (),
+            )
+            record = managed_state.load_document(path)["records"][0]
+            self.assertEqual(record["verification"]["verified_paths"], [])
 
     def test_interrupted_attempt_is_persisted_before_interrupt_propagates(self) -> None:
         with TemporaryDirectory() as directory:
