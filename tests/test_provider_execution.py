@@ -1648,22 +1648,171 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(report.outcome, provider_execution.PlanOutcome.SUCCEEDED)
         self.assertEqual(os.environ.get("PATH"), original)
 
+    def test_detector_cancellation_is_classified_before_environment_restore(self):
+        original_path = os.environ.get("PATH")
+        first = KeyboardInterrupt()
+        cancellation = provider_execution._CancellationContext()
+        restore = provider_execution._restore_environment
+        observed_phases = []
+
+        def observe_restore(previous):
+            observed_phases.append(cancellation.phase)
+            restore(previous)
+
+        with (
+            patch.object(
+                provider_execution,
+                "_restore_environment",
+                side_effect=observe_restore,
+            ),
+            self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised,
+        ):
+            self.execute(
+                self.plan(),
+                detector=Mock(side_effect=first),
+                environment_refresher=lambda action: {"PATH": "/temporary"},
+                _cancellation=cancellation,
+            )
+
+        self.assertEqual(
+            observed_phases, [provider_execution._CancellationPhase.CANCELLING]
+        )
+        self.assertEqual(
+            cancellation.phase, provider_execution._CancellationPhase.CANCELLING
+        )
+        self.assertIs(cancellation.first_interruption, first)
+        self.assertIs(raised.exception.__cause__, first)
+        self.assertEqual(os.environ.get("PATH"), original_path)
+        self.assertEqual(
+            raised.exception.report.actions[0].outcome,
+            provider_execution.ActionOutcome.NOT_ATTEMPTED,
+        )
+
+    def test_structured_cancellation_is_adopted_before_environment_restore(self):
+        cancellation = provider_execution._CancellationContext()
+        structured = provider_execution.ProviderPlanInterrupted(
+            provider_execution._preflight_interrupted_report(
+                self.plan(), self.machine
+            )
+        )
+        later = KeyboardInterrupt()
+
+        with (
+            patch.object(
+                provider_execution,
+                "_restore_environment",
+                side_effect=later,
+            ),
+            self.assertRaises(provider_execution._ForceAbort) as raised,
+        ):
+            with provider_execution._temporary_environment(
+                {"PATH": "/temporary"}, cancellation
+            ):
+                raise structured
+
+        self.assertIs(cancellation.first_interruption, structured)
+        self.assertEqual(
+            cancellation.phase,
+            provider_execution._CancellationPhase.FORCE_ABORTED,
+        )
+        self.assertIs(raised.exception.interruption, later)
+        self.assertIs(raised.exception.__cause__, later)
+
+    def test_post_verification_restore_interrupt_force_aborts(self):
+        plan = self.plan()
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        first = KeyboardInterrupt()
+        later = KeyboardInterrupt()
+        cancellation = provider_execution._CancellationContext()
+        runner = Mock(
+            return_value=subprocess.CompletedProcess(("manager",), 0, "", "")
+        )
+        restore = provider_execution._restore_environment
+        restore_calls = 0
+        original_path = os.environ.get("PATH")
+
+        def interrupt_second_restore(previous):
+            nonlocal restore_calls
+            restore_calls += 1
+            if restore_calls == 2:
+                self.assertEqual(
+                    cancellation.phase,
+                    provider_execution._CancellationPhase.CANCELLING,
+                )
+                raise later
+            restore(previous)
+
+        try:
+            with (
+                patch.object(
+                    provider_execution,
+                    "_restore_environment",
+                    side_effect=interrupt_second_restore,
+                ),
+                patch.object(
+                    provider_execution,
+                    "_action_report",
+                    side_effect=AssertionError(
+                        "force-abort must not synthesize an action report"
+                    ),
+                ),
+                self.assertRaises(provider_execution._ForceAbort) as raised,
+            ):
+                self.execute(
+                    plan,
+                    detector=Mock(side_effect=(absent, first)),
+                    runner=runner,
+                    environment_refresher=lambda action: {"PATH": "/temporary"},
+                    _cancellation=cancellation,
+                )
+        finally:
+            if original_path is None:
+                os.environ.pop("PATH", None)
+            else:
+                os.environ["PATH"] = original_path
+
+        self.assertIs(raised.exception.interruption, later)
+        self.assertEqual(restore_calls, 2)
+        self.assertEqual(runner.call_count, len(plan.actions[0].commands))
+
+    def test_temporary_environment_restores_after_ordinary_exception(self):
+        original_path = os.environ.get("PATH")
+        cancellation = provider_execution._CancellationContext()
+
+        with self.assertRaisesRegex(RuntimeError, "detector failed"):
+            with provider_execution._temporary_environment(
+                {"PATH": "/temporary"}, cancellation
+            ):
+                self.assertEqual(os.environ.get("PATH"), "/temporary")
+                raise RuntimeError("detector failed")
+
+        self.assertEqual(os.environ.get("PATH"), original_path)
+        self.assertEqual(
+            cancellation.phase, provider_execution._CancellationPhase.RUNNING
+        )
+
     def test_temporary_environment_refreshes_are_serialized(self):
         original = os.environ.get("PATH")
         first_entered = threading.Event()
         release_first = threading.Event()
         second_entered = threading.Event()
         observed = []
+        first_cancellation = provider_execution._CancellationContext()
+        second_cancellation = provider_execution._CancellationContext()
 
         def first():
-            with provider_execution._temporary_environment({"PATH": "/first"}):
+            with provider_execution._temporary_environment(
+                {"PATH": "/first"}, first_cancellation
+            ):
                 first_entered.set()
                 release_first.wait(2)
                 observed.append(("first", os.environ.get("PATH")))
 
         def second():
             first_entered.wait(2)
-            with provider_execution._temporary_environment({"PATH": "/second"}):
+            with provider_execution._temporary_environment(
+                {"PATH": "/second"}, second_cancellation
+            ):
                 second_entered.set()
                 observed.append(("second", os.environ.get("PATH")))
 
@@ -1688,6 +1837,8 @@ class ProviderExecutionTests(unittest.TestCase):
         release_first = threading.Event()
         second_refreshed = threading.Event()
         observed = []
+        first_cancellation = provider_execution._CancellationContext()
+        second_cancellation = provider_execution._CancellationContext()
 
         def first_refresher(action):
             return {"PATH": "/first"}
@@ -1699,7 +1850,7 @@ class ProviderExecutionTests(unittest.TestCase):
 
         def first():
             with provider_execution._refreshed_environment(
-                self.plan().actions[0], first_refresher
+                self.plan().actions[0], first_refresher, first_cancellation
             ):
                 first_entered.set()
                 release_first.wait(2)
@@ -1707,7 +1858,7 @@ class ProviderExecutionTests(unittest.TestCase):
         def second():
             first_entered.wait(2)
             with provider_execution._refreshed_environment(
-                self.plan().actions[0], second_refresher
+                self.plan().actions[0], second_refresher, second_cancellation
             ):
                 observed.append(("applied", os.environ.get("PATH")))
 
