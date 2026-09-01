@@ -1648,6 +1648,97 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(report.outcome, provider_execution.PlanOutcome.SUCCEEDED)
         self.assertEqual(os.environ.get("PATH"), original)
 
+    def test_partial_environment_application_cancellation_restores_before_body(self):
+        first = KeyboardInterrupt()
+        cancellation = provider_execution._CancellationContext()
+        detector = Mock(
+            side_effect=AssertionError("detector must not run after entry cancellation")
+        )
+        runner = Mock(
+            side_effect=AssertionError("provider command must not run")
+        )
+        names = ("AGENT_TOOLS_TEST_ENV_ONE", "AGENT_TOOLS_TEST_ENV_TWO")
+        previous = {name: os.environ.get(name) for name in names}
+
+        def interrupt_partial_application(updates):
+            os.environ[names[0]] = updates[names[0]]
+            raise first
+
+        try:
+            os.environ[names[0]] = "original-one"
+            os.environ.pop(names[1], None)
+            with (
+                patch.object(
+                    provider_execution,
+                    "_apply_environment",
+                    side_effect=interrupt_partial_application,
+                ),
+                self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised,
+            ):
+                self.execute(
+                    self.plan(),
+                    detector=detector,
+                    runner=runner,
+                    environment_refresher=lambda action: {
+                        names[0]: "temporary-one",
+                        names[1]: "temporary-two",
+                    },
+                    _cancellation=cancellation,
+                )
+
+            self.assertEqual(os.environ.get(names[0]), "original-one")
+            self.assertNotIn(names[1], os.environ)
+        finally:
+            provider_execution._restore_environment(previous)
+
+        self.assertEqual(
+            cancellation.phase, provider_execution._CancellationPhase.CANCELLING
+        )
+        self.assertIs(cancellation.first_interruption, first)
+        self.assertIs(raised.exception.__cause__, first)
+        detector.assert_not_called()
+        runner.assert_not_called()
+
+    def test_partial_environment_application_ordinary_failure_restores(self):
+        cancellation = provider_execution._CancellationContext()
+        names = ("AGENT_TOOLS_TEST_ENV_ONE", "AGENT_TOOLS_TEST_ENV_TWO")
+        previous = {name: os.environ.get(name) for name in names}
+        body_entered = False
+
+        def fail_partial_application(updates):
+            os.environ[names[0]] = updates[names[0]]
+            raise RuntimeError("environment application failed")
+
+        try:
+            os.environ[names[0]] = "original-one"
+            os.environ.pop(names[1], None)
+            with (
+                patch.object(
+                    provider_execution,
+                    "_apply_environment",
+                    side_effect=fail_partial_application,
+                ),
+                self.assertRaisesRegex(RuntimeError, "environment application failed"),
+            ):
+                with provider_execution._temporary_environment(
+                    {
+                        names[0]: "temporary-one",
+                        names[1]: "temporary-two",
+                    },
+                    cancellation,
+                ):
+                    body_entered = True
+
+            self.assertEqual(os.environ.get(names[0]), "original-one")
+            self.assertNotIn(names[1], os.environ)
+        finally:
+            provider_execution._restore_environment(previous)
+
+        self.assertFalse(body_entered)
+        self.assertEqual(
+            cancellation.phase, provider_execution._CancellationPhase.RUNNING
+        )
+
     def test_detector_cancellation_is_classified_before_environment_restore(self):
         original_path = os.environ.get("PATH")
         first = KeyboardInterrupt()

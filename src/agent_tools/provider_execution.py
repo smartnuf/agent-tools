@@ -1247,14 +1247,30 @@ def _restore_environment(previous: Mapping[str, str | None]) -> None:
             os.environ[name] = value
 
 
+def _apply_environment(updates: Mapping[str, str]) -> None:
+    """Apply a known set of environment updates one entry at a time."""
+
+    for name, value in updates.items():
+        os.environ[name] = value
+
+
 @contextmanager
 def _temporary_environment(
     updates: Mapping[str, str], cancellation: _CancellationContext
 ):
     with _ENVIRONMENT_LOCK:
-        previous = {name: os.environ.get(name) for name in updates}
-        os.environ.update(updates)
         try:
+            previous = {name: os.environ.get(name) for name in updates}
+        except _ForceAbort:
+            raise
+        except _ControlledCancellation as interruption:
+            cancellation.adopt(interruption)
+            raise
+        except KeyboardInterrupt as interruption:
+            cancellation.observe(interruption)
+            raise
+        try:
+            _apply_environment(updates)
             yield
         except _ForceAbort:
             raise
