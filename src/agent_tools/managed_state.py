@@ -496,6 +496,13 @@ def load_document(path: Path) -> dict[str, Any]:
             raise ManagedStateError(
                 f"managed-state record {index} has inconsistent success evidence"
             )
+        if outcome not in {
+            ActionOutcome.SUCCEEDED.value,
+            ActionOutcome.VERIFICATION_FAILED.value,
+        } and verification["verified_paths"]:
+            raise ManagedStateError(
+                f"managed-state record {index} has impossible pre-verification paths"
+            )
     return value
 
 

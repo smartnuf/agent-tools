@@ -149,6 +149,57 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         self.assertEqual(report.actions[1].commands, ())
 
+    def test_later_capability_lookup_interrupt_preserves_completed_action(self):
+        ghostscript_absent = self.state(capabilities.GHOSTSCRIPT)
+        ghostscript_available = self.state(
+            capabilities.GHOSTSCRIPT, available=True
+        )
+        poppler_absent = self.state(capabilities.POPPLER)
+        plan = provider_plans.generate_provider_plan(
+            (ghostscript_absent, poppler_absent),
+            ("ghostscript", "poppler"),
+            package_managers=(self.manager,),
+        )
+        original = provider_execution.get_capability
+        poppler_lookups = 0
+
+        def interrupt_later_poppler_lookup(capability_id):
+            nonlocal poppler_lookups
+            if capability_id == "poppler":
+                poppler_lookups += 1
+                if poppler_lookups == 2:
+                    raise KeyboardInterrupt()
+            return original(capability_id)
+
+        with (
+            patch.object(
+                provider_execution,
+                "get_capability",
+                side_effect=interrupt_later_poppler_lookup,
+            ),
+            self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised,
+        ):
+            self.execute(
+                plan,
+                detector=self.detector_sequence(
+                    ghostscript_absent, ghostscript_available
+                ),
+                runner=lambda argv, timeout: subprocess.CompletedProcess(
+                    argv, 0, "installed", ""
+                ),
+            )
+        report = raised.exception.report
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.SUCCEEDED,
+        )
+        self.assertEqual(report.actions[0].commands[0].stdout, "installed")
+        self.assertEqual(
+            report.actions[1].outcome,
+            provider_execution.ActionOutcome.NOT_ATTEMPTED,
+        )
+        self.assertEqual(report.actions[1].commands, ())
+
     def test_execution_preflight_interrupt_never_marks_current_action_attempted(self):
         absent = self.state(capabilities.GHOSTSCRIPT)
         phases = (

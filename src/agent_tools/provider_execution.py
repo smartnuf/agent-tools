@@ -1188,8 +1188,8 @@ def _execute_provider_plan(
 
     reports: list[ActionReport] = []
     for action in plan.actions:
-        capability = get_capability(action.capability_id)
         try:
+            capability = get_capability(action.capability_id)
             with _refreshed_environment(action, environment_refresher):
                 before = detector(capability, context)
             if before.capability != capability:

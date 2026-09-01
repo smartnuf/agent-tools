@@ -69,6 +69,15 @@ class ManagedStateTests(unittest.TestCase):
             if commands
             else ()
         )
+        final_verified_paths = (
+            ("/tools/gs",)
+            if outcome
+            in {
+                provider_execution.ActionOutcome.SUCCEEDED,
+                provider_execution.ActionOutcome.VERIFICATION_FAILED,
+            }
+            else ()
+        )
         return provider_execution.PlanExecutionReport(
             self.machine,
             self.plan.requested_capabilities,
@@ -81,7 +90,7 @@ class ManagedStateTests(unittest.TestCase):
                     action.installation_unit,
                     outcome,
                     command_reports,
-                    ("/tools/gs",),
+                    final_verified_paths,
                     "verified",
                 ),
             ),
@@ -505,6 +514,7 @@ class ManagedStateTests(unittest.TestCase):
                 managed_state.load_document(path)
 
             record["command_evidence"][0]["returncode"] = 0
+            record["verification"]["verified_paths"] = []
             path.write_text(json.dumps(document), encoding="utf-8")
             managed_state.load_document(path)
 
@@ -515,6 +525,7 @@ class ManagedStateTests(unittest.TestCase):
             action = replace(
                 report.actions[0],
                 outcome=provider_execution.ActionOutcome.COMMAND_START_FAILED,
+                final_verified_paths=(),
             )
             report = replace(
                 report,
@@ -537,6 +548,26 @@ class ManagedStateTests(unittest.TestCase):
                     for evidence in record["command_evidence"]
                 )
             )
+
+    def test_preverification_outcomes_cannot_claim_verified_paths(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            report = self.report(provider_execution.ActionOutcome.COMMAND_FAILED)
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=report),
+                allow_provider_mutation=True,
+            )
+            document = managed_state.load_document(path)
+            document["records"][0]["verification"]["verified_paths"] = [
+                "/tools/gs"
+            ]
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError, "pre-verification paths"
+            ):
+                managed_state.load_document(path)
 
     def test_translated_homebrew_authorization_evidence_is_structured(self) -> None:
         machine = capabilities.MachineState("Darwin", "arm64", "host")
@@ -1153,6 +1184,7 @@ class ManagedStateTests(unittest.TestCase):
             action = replace(
                 self.report().actions[0],
                 outcome=provider_execution.ActionOutcome.INTERRUPTED,
+                final_verified_paths=(),
                 detail="interrupted",
             )
             report = provider_execution.PlanExecutionReport(
