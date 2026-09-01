@@ -72,10 +72,24 @@ plan.
 
 The first `KeyboardInterrupt` observed by the supported managed mutation
 boundary is a request for controlled cancellation. That boundary preserves the
-strongest truthful execution evidence and monotonic persistence outcome that
-the executor and atomic-write phases have established, then attempts to publish
-a structured managed result. It never responds by rerunning provider mutation,
-retrying ambiguous persistence, or authorizing rollback, uninstall, or removal.
+strongest authoritatively published execution evidence and monotonic
+persistence outcome, then attempts to publish a structured managed result. A
+transaction fact becomes authoritative to this boundary only when it has been
+successfully published to the managed transaction snapshot. If cancellation
+races publication of a stronger fact, the strongest predecessor fact already
+in that snapshot remains truthful and may be conservatively terminalized.
+
+Consequently, exact completed executor evidence is not guaranteed when
+cancellation prevents its publication; mutation-uncertain evidence must not
+claim that no provider command started and provider mutation is never rerun.
+Similarly, `succeeded` means durable completion was published as the terminal
+transaction fact. When replacement has occurred and durability work may have
+physically completed but cancellation prevents that publication, the last
+authoritative post-replacement fact may remain `unknown`. `Unknown` does not
+assert physical non-durability. Neither uncertainty authorizes automatic
+mutation or persistence retry, ownership, rollback, uninstall, or removal. Any
+later mutation requires fresh machine-state rediscovery and a newly generated
+plan.
 
 Any later `KeyboardInterrupt` while that controlled cancellation, recovery, or
 result publication is active is an explicit force-abort. It propagates
