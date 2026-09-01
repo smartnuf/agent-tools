@@ -174,6 +174,51 @@ class ProviderExecutionTests(unittest.TestCase):
                 )
                 self.assertEqual(report.actions[0].commands, ())
 
+    def test_later_execution_preflight_exception_preserves_completed_action(self):
+        ghostscript_absent = self.state(capabilities.GHOSTSCRIPT)
+        ghostscript_available = self.state(
+            capabilities.GHOSTSCRIPT, available=True
+        )
+        poppler_absent = self.state(capabilities.POPPLER)
+        plan = provider_plans.generate_provider_plan(
+            (ghostscript_absent, poppler_absent),
+            ("ghostscript", "poppler"),
+            package_managers=(self.manager,),
+        )
+        detector = Mock(
+            side_effect=(
+                ghostscript_absent,
+                ghostscript_available,
+                poppler_absent,
+            )
+        )
+        manager_calls = 0
+
+        def verify_manager(state, machine):
+            nonlocal manager_calls
+            manager_calls += 1
+            if manager_calls == 2:
+                raise RuntimeError("manager verification broke")
+            return True
+
+        report = self.execute(
+            plan,
+            detector=detector,
+            manager_verifier=verify_manager,
+            runner=lambda argv, timeout: subprocess.CompletedProcess(
+                argv, 0, "installed", ""
+            ),
+        )
+        self.assertEqual(report.outcome, provider_execution.PlanOutcome.PARTIAL_FAILURE)
+        self.assertEqual(report.actions[0].outcome, provider_execution.ActionOutcome.SUCCEEDED)
+        self.assertEqual(report.actions[0].commands[0].stdout, "installed")
+        self.assertEqual(
+            report.actions[1].outcome,
+            provider_execution.ActionOutcome.PREFLIGHT_FAILED,
+        )
+        self.assertEqual(report.actions[1].commands, ())
+        self.assertIn("RuntimeError", report.actions[1].detail)
+
     def test_zero_action_plan_revalidates_unknown_and_stale_requests(self):
         available = self.state(capabilities.GHOSTSCRIPT, available=True)
         plan = provider_plans.generate_provider_plan(

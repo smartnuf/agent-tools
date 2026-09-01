@@ -296,6 +296,23 @@ class ManagedStateTests(unittest.TestCase):
                     evidence["returncode"] = 0
                     path.write_text(json.dumps(document), encoding="utf-8")
 
+    def test_completed_outcome_requires_command_evidence(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            document = managed_state.load_document(path)
+            document["records"][0]["command_evidence"] = []
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError, "command evidence"
+            ):
+                managed_state.load_document(path)
+
     def test_capability_provider_origin_relationship_is_validated(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"

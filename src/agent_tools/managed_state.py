@@ -299,6 +299,13 @@ def load_document(path: Path) -> dict[str, Any]:
             and isinstance(verification.get("detail"), str)
         ):
             raise ManagedStateError(f"managed-state record {index} has invalid verification evidence")
+        if (
+            verification["outcome"] != ActionOutcome.INTERRUPTED.value
+            and not record["command_evidence"]
+        ):
+            raise ManagedStateError(
+                f"managed-state record {index} lacks required command evidence"
+            )
         for evidence in record["command_evidence"]:
             if not (
                 isinstance(evidence, dict)

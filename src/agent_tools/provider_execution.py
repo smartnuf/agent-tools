@@ -109,6 +109,14 @@ class ProviderPlanInterrupted(KeyboardInterrupt):
         self.managed_result: object | None = None
 
 
+class _ProviderPartialReport(RuntimeError):
+    """Internal control flow for returning evidence after a later preflight fails."""
+
+    def __init__(self, report: PlanExecutionReport) -> None:
+        super().__init__("provider execution produced a partial report")
+        self.report = report
+
+
 class PlanOutcome(str, Enum):
     NO_CHANGES = "no-changes"
     REFUSED = "refused"
@@ -1076,20 +1084,23 @@ def _execute_provider_plan_unmanaged(
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
     with _provider_execution_transaction():
-        return _execute_provider_plan(
-            plan,
-            allow_provider_mutation=allow_provider_mutation,
-            timeout_seconds=timeout_seconds,
-            runner=runner,
-            detector=detector,
-            current_context=current_context,
-            manager_verifier=manager_verifier,
-            manager_architecture_reader=manager_architecture_reader,
-            privilege_resolver=privilege_resolver,
-            supervisor_resolver=supervisor_resolver,
-            privilege_preflight=privilege_preflight,
-            environment_refresher=environment_refresher,
-        )
+        try:
+            return _execute_provider_plan(
+                plan,
+                allow_provider_mutation=allow_provider_mutation,
+                timeout_seconds=timeout_seconds,
+                runner=runner,
+                detector=detector,
+                current_context=current_context,
+                manager_verifier=manager_verifier,
+                manager_architecture_reader=manager_architecture_reader,
+                privilege_resolver=privilege_resolver,
+                supervisor_resolver=supervisor_resolver,
+                privilege_preflight=privilege_preflight,
+                environment_refresher=environment_refresher,
+            )
+        except _ProviderPartialReport as error:
+            return error.report
 
 
 def _execute_provider_plan(
@@ -1263,6 +1274,30 @@ def _execute_provider_plan(
                         mutation_may_have_started=any(
                             report.commands for report in reports
                         ),
+                    )
+                ) from error
+            except Exception as error:
+                if not any(report.commands for report in reports):
+                    raise ExecutionContractError(
+                        "execution preflight failed before any provider command: "
+                        f"{type(error).__name__}: {error}"
+                    ) from error
+                reports.append(
+                    _action_report(
+                        action,
+                        ActionOutcome.PREFLIGHT_FAILED,
+                        detail=(
+                            "execution preflight failed after an earlier action may "
+                            f"have mutated state: {type(error).__name__}: {error}"
+                        ),
+                    )
+                )
+                raise _ProviderPartialReport(
+                    _failed_report(
+                        plan,
+                        context,
+                        reports,
+                        mutation_may_have_started=True,
                     )
                 ) from error
 
