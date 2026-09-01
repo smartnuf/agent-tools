@@ -9,7 +9,7 @@ import posixpath
 import tempfile
 import threading
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path, PureWindowsPath
@@ -105,30 +105,69 @@ class _InterruptionMode(str, Enum):
 
 
 @dataclass(frozen=True)
-class _PersistenceFact:
-    outcome: PersistenceOutcome | None = None
+class _TransactionFacts:
+    execution: PlanExecutionReport | None = None
+    persistence: PersistenceOutcome | None = None
     detail: str = ""
+    interruption: KeyboardInterrupt | None = None
+    interruption_mode: _InterruptionMode | None = None
     terminal: bool = False
 
 
 @dataclass
 class _ManagedTransactionState:
-    execution: PlanExecutionReport | None = None
-    persistence_fact: _PersistenceFact = _PersistenceFact()
-    interruption: KeyboardInterrupt | None = None
-    interruption_mode: _InterruptionMode | None = None
+    facts: _TransactionFacts = _TransactionFacts()
+
+    @property
+    def execution(self) -> PlanExecutionReport | None:
+        return self.facts.execution
 
     @property
     def persistence(self) -> PersistenceOutcome | None:
-        return self.persistence_fact.outcome
+        return self.facts.persistence
 
     @property
     def detail(self) -> str:
-        return self.persistence_fact.detail
+        return self.facts.detail
+
+    @property
+    def interruption(self) -> KeyboardInterrupt | None:
+        return self.facts.interruption
+
+    @property
+    def interruption_mode(self) -> _InterruptionMode | None:
+        return self.facts.interruption_mode
 
     @property
     def terminal(self) -> bool:
-        return self.persistence_fact.terminal
+        return self.facts.terminal
+
+    def record_execution(
+        self,
+        execution: PlanExecutionReport,
+        outcome: PersistenceOutcome,
+        detail: str = "",
+        *,
+        terminal: bool,
+        interruption: KeyboardInterrupt | None = None,
+        interruption_mode: _InterruptionMode | None = None,
+    ) -> None:
+        """Publish execution evidence with its initial persistence truth."""
+
+        if self.terminal:
+            return
+        self.facts = _TransactionFacts(
+            execution,
+            outcome,
+            detail,
+            self.interruption or interruption,
+            (
+                self.interruption_mode
+                if self.interruption is not None
+                else interruption_mode
+            ),
+            terminal,
+        )
 
     def record_persistence(
         self,
@@ -136,10 +175,48 @@ class _ManagedTransactionState:
         detail: str = "",
         *,
         terminal: bool,
+        interruption: KeyboardInterrupt | None = None,
+        interruption_mode: _InterruptionMode | None = None,
     ) -> None:
-        """Publish one indivisible persistence fact snapshot."""
+        """Publish one indivisible, monotonic transaction snapshot."""
 
-        self.persistence_fact = _PersistenceFact(outcome, detail, terminal)
+        if self.terminal:
+            if outcome is self.persistence:
+                self.facts = replace(
+                    self.facts,
+                    detail=detail or self.detail,
+                    interruption=self.interruption or interruption,
+                    interruption_mode=(
+                        self.interruption_mode
+                        if self.interruption is not None
+                        else interruption_mode
+                    ),
+                )
+            return
+        self.facts = replace(
+            self.facts,
+            persistence=outcome,
+            detail=detail,
+            interruption=self.interruption or interruption,
+            interruption_mode=(
+                self.interruption_mode
+                if self.interruption is not None
+                else interruption_mode
+            ),
+            terminal=terminal,
+        )
+
+    def record_interruption(
+        self, interruption: KeyboardInterrupt, mode: _InterruptionMode
+    ) -> None:
+        """Retain the first authoritative or deferred interruption."""
+
+        if self.interruption is None:
+            self.facts = replace(
+                self.facts,
+                interruption=interruption,
+                interruption_mode=mode,
+            )
 
 
 def managed_state_path(
@@ -719,20 +796,23 @@ def _atomic_write(
             )
             transaction.record_persistence(outcome, detail, terminal=True)
         except KeyboardInterrupt as detail_interruption:
-            if transaction.interruption is None:
-                transaction.interruption = detail_interruption
-                transaction.interruption_mode = _InterruptionMode.MANAGED
+            transaction.record_interruption(
+                detail_interruption, _InterruptionMode.MANAGED
+            )
         except Exception:
             pass
         try:
             _best_effort_discard_temporary(temporary)
         except KeyboardInterrupt as cleanup_interruption:
-            if transaction.interruption is None:
-                transaction.interruption = cleanup_interruption
-                transaction.interruption_mode = _InterruptionMode.MANAGED
+            transaction.record_interruption(
+                cleanup_interruption, _InterruptionMode.MANAGED
+            )
         except OSError:
             pass
     except KeyboardInterrupt as error:
+        if transaction.terminal:
+            transaction.record_interruption(error, _InterruptionMode.MANAGED)
+            return
         outcome = (
             PersistenceOutcome.UNKNOWN
             if transaction.persistence is PersistenceOutcome.UNKNOWN
@@ -742,10 +822,9 @@ def _atomic_write(
             outcome,
             "managed-state persistence was interrupted",
             terminal=True,
+            interruption=error,
+            interruption_mode=_InterruptionMode.PERSISTENCE,
         )
-        if transaction.interruption is None:
-            transaction.interruption = error
-            transaction.interruption_mode = _InterruptionMode.PERSISTENCE
         try:
             _best_effort_discard_temporary(temporary)
         except KeyboardInterrupt:
@@ -880,20 +959,30 @@ def execute_provider_plan(
                     "allow_provider_mutation": False,
                 }
             try:
-                transaction.execution = executor(plan, **executor_arguments)
-            except ProviderPlanInterrupted as error:
-                transaction.execution = error.report
-                transaction.interruption = error
-                transaction.interruption_mode = _InterruptionMode.DIRECT
-            except KeyboardInterrupt as error:
-                transaction.execution = _nonmutating_interrupted_report(
-                    plan, mutation_authorized=mutation_authorized
+                execution = executor(plan, **executor_arguments)
+                transaction.record_execution(
+                    execution,
+                    PersistenceOutcome.NOT_REQUIRED,
+                    terminal=True,
                 )
-                transaction.interruption = error
-                transaction.interruption_mode = _InterruptionMode.MANAGED
-            transaction.record_persistence(
-                PersistenceOutcome.NOT_REQUIRED, terminal=True
-            )
+            except ProviderPlanInterrupted as error:
+                transaction.record_execution(
+                    error.report,
+                    PersistenceOutcome.NOT_REQUIRED,
+                    terminal=True,
+                    interruption=error,
+                    interruption_mode=_InterruptionMode.DIRECT,
+                )
+            except KeyboardInterrupt as error:
+                transaction.record_execution(
+                    _nonmutating_interrupted_report(
+                        plan, mutation_authorized=mutation_authorized
+                    ),
+                    PersistenceOutcome.NOT_REQUIRED,
+                    terminal=True,
+                    interruption=error,
+                    interruption_mode=_InterruptionMode.MANAGED,
+                )
         else:
             with _MANAGED_STATE_LOCK, _provider_execution_transaction():
                 try:
@@ -910,20 +999,32 @@ def execute_provider_plan(
                 else:
                     requested_at = _timestamp()
                     try:
-                        transaction.execution = executor(
+                        execution = executor(
                             plan, **executor_arguments
                         )
+                        transaction.record_execution(
+                            execution,
+                            PersistenceOutcome.FAILED,
+                            "managed-state persistence did not begin",
+                            terminal=False,
+                        )
                     except ProviderPlanInterrupted as error:
-                        transaction.execution = error.report
-                        transaction.interruption = error
-                        transaction.interruption_mode = (
-                            _InterruptionMode.DIRECT
+                        transaction.record_execution(
+                            error.report,
+                            PersistenceOutcome.FAILED,
+                            "managed-state persistence did not begin",
+                            terminal=False,
+                            interruption=error,
+                            interruption_mode=_InterruptionMode.DIRECT,
                         )
                     except KeyboardInterrupt as error:
-                        transaction.execution = _unknown_interrupted_report(plan)
-                        transaction.interruption = error
-                        transaction.interruption_mode = (
-                            _InterruptionMode.MANAGED
+                        transaction.record_execution(
+                            _unknown_interrupted_report(plan),
+                            PersistenceOutcome.FAILED,
+                            "managed-state persistence did not begin",
+                            terminal=False,
+                            interruption=error,
+                            interruption_mode=_InterruptionMode.MANAGED,
                         )
 
                     prepared = _prepare_update_for_persistence(
@@ -947,11 +1048,9 @@ def execute_provider_plan(
                                     error.detail,
                                     terminal=True,
                                 )
-                                if transaction.interruption is None:
-                                    transaction.interruption = error
-                                    transaction.interruption_mode = (
-                                        _InterruptionMode.DIRECT
-                                    )
+                                transaction.record_interruption(
+                                    error, _InterruptionMode.DIRECT
+                                )
                             except PersistenceError as error:
                                 transaction.record_persistence(
                                     error.outcome,
@@ -972,11 +1071,9 @@ def execute_provider_plan(
                                     transaction.record_persistence(
                                         outcome, detail, terminal=True
                                     )
-                                if transaction.interruption is None:
-                                    transaction.interruption = error
-                                    transaction.interruption_mode = (
-                                        _InterruptionMode.MANAGED
-                                    )
+                                transaction.record_interruption(
+                                    error, _InterruptionMode.MANAGED
+                                )
                             else:
                                 if not transaction.terminal:
                                     transaction.record_persistence(
@@ -1002,9 +1099,7 @@ def execute_provider_plan(
                 transaction.detail,
                 terminal=True,
             )
-        if transaction.interruption is None:
-            transaction.interruption = error
-            transaction.interruption_mode = _InterruptionMode.MANAGED
+        transaction.record_interruption(error, _InterruptionMode.MANAGED)
 
     if not transaction.terminal or transaction.persistence is None:
         raise RuntimeError("managed provider execution produced no terminal state")
@@ -1012,9 +1107,7 @@ def execute_provider_plan(
         try:
             result, interruption = _finalize_transaction(transaction)
         except KeyboardInterrupt as error:
-            if transaction.interruption is None:
-                transaction.interruption = error
-                transaction.interruption_mode = _InterruptionMode.MANAGED
+            transaction.record_interruption(error, _InterruptionMode.MANAGED)
             continue
         break
     if interruption is not None:
@@ -1050,9 +1143,7 @@ def _prepare_update_for_persistence(
             )
         return prepared
     except KeyboardInterrupt as error:
-        if transaction.interruption is None:
-            transaction.interruption = error
-            transaction.interruption_mode = _InterruptionMode.MANAGED
+        transaction.record_interruption(error, _InterruptionMode.MANAGED)
         try:
             prepared = _prepare_update(document, plan, report, requested_at)
             if not prepared[1]:
@@ -1093,9 +1184,9 @@ def _prepare_update_for_persistence(
                     PersistenceOutcome.FAILED, detail, terminal=True
                 )
             except KeyboardInterrupt as detail_interruption:
-                if transaction.interruption is None:
-                    transaction.interruption = detail_interruption
-                    transaction.interruption_mode = _InterruptionMode.MANAGED
+                transaction.record_interruption(
+                    detail_interruption, _InterruptionMode.MANAGED
+                )
             except Exception:
                 pass
             return None
@@ -1116,9 +1207,9 @@ def _prepare_update_for_persistence(
                 PersistenceOutcome.FAILED, detail, terminal=True
             )
         except KeyboardInterrupt as detail_interruption:
-            if transaction.interruption is None:
-                transaction.interruption = detail_interruption
-                transaction.interruption_mode = _InterruptionMode.MANAGED
+            transaction.record_interruption(
+                detail_interruption, _InterruptionMode.MANAGED
+            )
         except Exception:
             pass
         return None

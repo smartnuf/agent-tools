@@ -2583,6 +2583,36 @@ class ManagedStateTests(unittest.TestCase):
             atomic_write.assert_called_once()
             executor.assert_called_once()
 
+    def test_transaction_snapshot_never_replaces_first_interruption(self) -> None:
+        report = self.report()
+        provider_interruption = provider_execution.ProviderPlanInterrupted(report)
+        persistence_interruption = KeyboardInterrupt()
+        transaction = managed_state._ManagedTransactionState()
+        transaction.record_execution(
+            report,
+            managed_state.PersistenceOutcome.FAILED,
+            "managed-state persistence did not begin",
+            terminal=False,
+            interruption=provider_interruption,
+            interruption_mode=managed_state._InterruptionMode.DIRECT,
+        )
+        transaction.record_persistence(
+            managed_state.PersistenceOutcome.UNKNOWN,
+            "managed-state persistence was interrupted",
+            terminal=True,
+            interruption=persistence_interruption,
+            interruption_mode=managed_state._InterruptionMode.PERSISTENCE,
+        )
+        self.assertIs(transaction.interruption, provider_interruption)
+        self.assertIs(
+            transaction.interruption_mode,
+            managed_state._InterruptionMode.DIRECT,
+        )
+        self.assertEqual(
+            transaction.persistence,
+            managed_state.PersistenceOutcome.UNKNOWN,
+        )
+
     def test_durable_success_is_frozen_before_result_retries(self) -> None:
         result_type = managed_state.ManagedExecutionResult
         observed_outcomes = []
@@ -2848,6 +2878,156 @@ class ManagedStateTests(unittest.TestCase):
                 managed_state.load_document(path),
                 managed_state.empty_document(),
             )
+
+    def test_interrupt_before_preparation_keeps_prewrite_failed_snapshot(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            execution = self.report()
+            executor = Mock(return_value=execution)
+            atomic_write = Mock(
+                side_effect=AssertionError("persistence must not begin")
+            )
+            with (
+                patch.object(
+                    managed_state,
+                    "_prepare_update_for_persistence",
+                    side_effect=KeyboardInterrupt(),
+                ),
+                patch.object(managed_state, "_atomic_write", atomic_write),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            self.assertIs(raised.exception.managed_result.execution, execution)
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.FAILED,
+            )
+            self.assertIn(
+                "provenance was not durably recorded",
+                raised.exception.managed_result.recovery_guidance,
+            )
+            atomic_write.assert_not_called()
+            executor.assert_called_once()
+
+    def test_interrupt_after_success_snapshot_cannot_replace_success(self) -> None:
+        original_record = managed_state._ManagedTransactionState.record_persistence
+        interrupted = False
+
+        def record_then_interrupt(transaction, outcome, detail="", **arguments):
+            nonlocal interrupted
+            original_record(transaction, outcome, detail, **arguments)
+            if (
+                not interrupted
+                and outcome is managed_state.PersistenceOutcome.SUCCEEDED
+                and arguments["terminal"]
+            ):
+                interrupted = True
+                raise KeyboardInterrupt()
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            execution = self.report()
+            executor = Mock(return_value=execution)
+            atomic_write = Mock(wraps=managed_state._atomic_write)
+            with (
+                patch.object(managed_state, "_atomic_write", atomic_write),
+                patch.object(
+                    managed_state._ManagedTransactionState,
+                    "record_persistence",
+                    new=record_then_interrupt,
+                ),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            self.assertIs(raised.exception.managed_result.execution, execution)
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.SUCCEEDED,
+            )
+            self.assertEqual(len(managed_state.load_document(path)["records"]), 1)
+            atomic_write.assert_called_once()
+            executor.assert_called_once()
+
+    def test_retry_not_required_snapshot_survives_call_interruption(self) -> None:
+        execution = self.report(
+            provider_execution.ActionOutcome.ALREADY_SATISFIED,
+            commands=False,
+        )
+        original_prepare = managed_state._prepare_update
+        original_record = managed_state._ManagedTransactionState.record_persistence
+        prepare_calls = 0
+        interrupted = False
+
+        def interrupt_prepare_once(*arguments):
+            nonlocal prepare_calls
+            prepare_calls += 1
+            if prepare_calls == 1:
+                raise KeyboardInterrupt()
+            return original_prepare(*arguments)
+
+        def record_then_interrupt(transaction, outcome, detail="", **arguments):
+            nonlocal interrupted
+            original_record(transaction, outcome, detail, **arguments)
+            if (
+                not interrupted
+                and outcome is managed_state.PersistenceOutcome.NOT_REQUIRED
+                and arguments["terminal"]
+            ):
+                interrupted = True
+                raise KeyboardInterrupt()
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            executor = Mock(return_value=execution)
+            atomic_write = Mock(
+                side_effect=AssertionError("persistence must not begin")
+            )
+            with (
+                patch.object(
+                    managed_state,
+                    "_prepare_update",
+                    side_effect=interrupt_prepare_once,
+                ),
+                patch.object(
+                    managed_state._ManagedTransactionState,
+                    "record_persistence",
+                    new=record_then_interrupt,
+                ),
+                patch.object(managed_state, "_atomic_write", atomic_write),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            self.assertIs(raised.exception.managed_result.execution, execution)
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.NOT_REQUIRED,
+            )
+            self.assertEqual(prepare_calls, 2)
+            atomic_write.assert_not_called()
+            executor.assert_called_once()
 
     def test_process_local_transactions_do_not_lose_records(self) -> None:
         with TemporaryDirectory() as directory:
