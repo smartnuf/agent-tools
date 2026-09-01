@@ -78,10 +78,16 @@ class PersistenceError(ManagedStateError):
 class PersistenceInterrupted(_ControlledCancellation):
     """Carry durability classification when state persistence is interrupted."""
 
-    def __init__(self, outcome: PersistenceOutcome, detail: str) -> None:
+    def __init__(
+        self,
+        outcome: PersistenceOutcome,
+        detail: str,
+        original: KeyboardInterrupt | None = None,
+    ) -> None:
         super().__init__(detail)
         self.outcome = outcome
         self.detail = detail
+        self.original = original
         self.managed_result: ManagedExecutionResult | None = None
 
 
@@ -1169,24 +1175,20 @@ def execute_provider_plan(
                     terminal=True,
                 )
 
-    if not transaction.terminal or transaction.persistence is None:
-        raise RuntimeError("managed provider execution produced no terminal state")
-    if cancellation.phase is _CancellationPhase.CANCELLING:
-        with cancellation.guard():
-            result, interruption = _finalize_transaction(transaction)
-    else:
-        try:
-            result, interruption = _finalize_transaction(transaction)
-        except KeyboardInterrupt as error:
-            cancellation.observe(error)
+    try:
+        if cancellation.phase is _CancellationPhase.CANCELLING:
             with cancellation.guard():
-                transaction.record_cancellation(
-                    error, _InterruptionMode.MANAGED
-                )
-                result, interruption = _finalize_transaction(transaction)
-    if interruption is not None:
-        raise interruption
-    return result
+                return _publish_transaction(transaction)
+        return _publish_transaction(transaction)
+    except _ForceAbort:
+        raise
+    except _ControlledCancellation:
+        raise
+    except KeyboardInterrupt as error:
+        cancellation.observe(error)
+        with cancellation.guard():
+            transaction.record_cancellation(error, _InterruptionMode.MANAGED)
+            return _publish_transaction(transaction)
 
 
 _PreparedUpdate = tuple[str, tuple[int, ...], dict[str, Any]]
@@ -1347,6 +1349,19 @@ def _finalize_transaction(
     return result, interruption
 
 
+def _publish_transaction(
+    transaction: _ManagedTransactionState,
+) -> ManagedExecutionResult:
+    """Materialize and publish terminal facts inside one cancellation boundary."""
+
+    if not transaction.terminal or transaction.persistence is None:
+        raise RuntimeError("managed provider execution produced no terminal state")
+    result, interruption = _finalize_transaction(transaction)
+    if interruption is not None:
+        raise interruption
+    return result
+
+
 def _materialize_transaction_interruption(
     transaction: _ManagedTransactionState,
 ) -> (
@@ -1376,7 +1391,9 @@ def _materialize_transaction_interruption(
         }:
             raise RuntimeError("persistence interruption has no failure outcome")
         return PersistenceInterrupted(
-            transaction.persistence, transaction.detail
+            transaction.persistence,
+            transaction.detail,
+            original=source,
         )
     return ManagedExecutionInterrupted(source)
 

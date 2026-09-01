@@ -2304,7 +2304,7 @@ class ManagedStateTests(unittest.TestCase):
             force_abort = KeyboardInterrupt()
             calls = 0
 
-            def interrupt_carrier(*arguments):
+            def interrupt_carrier(*arguments, **keywords):
                 nonlocal calls
                 calls += 1
                 raise force_abort
@@ -2594,6 +2594,46 @@ class ManagedStateTests(unittest.TestCase):
             self.assertFalse(hasattr(raised.exception, "managed_result"))
             self.assertEqual(len(managed_state.load_document(path)["records"]), 1)
             atomic_write.assert_called_once()
+            executor.assert_called_once()
+
+    def test_first_interrupt_at_terminal_publication_is_managed(self) -> None:
+        original_publish = managed_state._publish_transaction
+        first = KeyboardInterrupt()
+        calls = 0
+
+        def interrupt_once(transaction):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise first
+            return original_publish(transaction)
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            execution = self.report()
+            executor = Mock(return_value=execution)
+            with patch.object(
+                managed_state,
+                "_publish_transaction",
+                side_effect=interrupt_once,
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+
+            self.assertIs(raised.exception.original, first)
+            self.assertIs(raised.exception.managed_result.execution, execution)
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.SUCCEEDED,
+            )
+            self.assertEqual(calls, 2)
             executor.assert_called_once()
 
     def test_second_interrupt_during_result_attachment_is_force_abort(self) -> None:

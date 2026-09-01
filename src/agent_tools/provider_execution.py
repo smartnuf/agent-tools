@@ -157,7 +157,7 @@ class _CancellationContext:
             if current is self.first_interruption:
                 return True
             seen.add(id(current))
-            current = current.__cause__
+            current = current.__cause__ or getattr(current, "original", None)
         return False
 
     def observe(self, interruption: KeyboardInterrupt) -> None:
