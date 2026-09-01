@@ -1570,6 +1570,79 @@ class ManagedStateTests(unittest.TestCase):
             self.assertEqual(managed_state.load_document(path), original)
             executor.assert_called_once()
 
+    def test_repeated_record_construction_interrupt_is_structured_prewrite_failure(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            original = managed_state.empty_document()
+            path.write_text(json.dumps(original), encoding="utf-8")
+            execution = self.report()
+            executor = Mock(return_value=execution)
+            with patch.object(
+                managed_state,
+                "_record",
+                side_effect=(KeyboardInterrupt(), KeyboardInterrupt()),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            result = raised.exception.managed_result
+            self.assertIs(result.execution, execution)
+            self.assertEqual(
+                result.persistence, managed_state.PersistenceOutcome.FAILED
+            )
+            self.assertIn("repeatedly interrupted", result.persistence_detail)
+            self.assertIn(
+                "do not rerun provider mutation automatically and do not uninstall or roll back",
+                result.recovery_guidance,
+            )
+            self.assertEqual(managed_state.load_document(path), original)
+            executor.assert_called_once()
+
+    def test_repeated_interruption_while_building_prewrite_failure_is_structured(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            execution = self.report()
+            executor = Mock(return_value=execution)
+            with (
+                patch.object(
+                    managed_state,
+                    "_prepare_update",
+                    side_effect=OSError("assembly failed"),
+                ),
+                patch.object(
+                    managed_state,
+                    "_persistence_failure_result",
+                    side_effect=KeyboardInterrupt(),
+                ),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            result = raised.exception.managed_result
+            self.assertIs(result.execution, execution)
+            self.assertEqual(
+                result.persistence, managed_state.PersistenceOutcome.FAILED
+            )
+            self.assertIn("before persistence began", result.persistence_detail)
+            self.assertFalse(path.exists())
+            executor.assert_called_once()
+
     def test_lock_exit_interrupt_preserves_successful_result(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
@@ -1778,6 +1851,178 @@ class ManagedStateTests(unittest.TestCase):
             )
             self.assertFalse(path.exists())
 
+    def test_pre_replace_failures_are_failed_and_do_not_rerun_provider(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            cases = (
+                (
+                    "mkdir",
+                    root / "mkdir" / "managed-state.json",
+                    patch.object(
+                        managed_state.Path,
+                        "mkdir",
+                        side_effect=OSError("mkdir failed"),
+                    ),
+                ),
+                (
+                    "temporary creation",
+                    root / "temporary.json",
+                    patch.object(
+                        managed_state.tempfile,
+                        "NamedTemporaryFile",
+                        side_effect=OSError("temporary creation failed"),
+                    ),
+                ),
+                (
+                    "write",
+                    root / "write.json",
+                    patch.object(
+                        managed_state.json,
+                        "dump",
+                        side_effect=OSError("write failed"),
+                    ),
+                ),
+                (
+                    "fsync",
+                    root / "fsync.json",
+                    patch.object(
+                        managed_state.os,
+                        "fsync",
+                        side_effect=OSError("fsync failed"),
+                    ),
+                ),
+            )
+            for name, path, injected_failure in cases:
+                with self.subTest(phase=name):
+                    executor = Mock(return_value=self.report())
+                    with injected_failure:
+                        result = managed_state.execute_provider_plan(
+                            self.plan,
+                            state_path=path,
+                            executor=executor,
+                            allow_provider_mutation=True,
+                        )
+                    self.assertEqual(
+                        result.persistence, managed_state.PersistenceOutcome.FAILED
+                    )
+                    self.assertIs(result.execution, executor.return_value)
+                    self.assertIn(
+                        "do not rerun provider mutation automatically and do not uninstall or roll back",
+                        result.recovery_guidance,
+                    )
+                    executor.assert_called_once()
+
+    def test_cleanup_cannot_replace_failed_or_unknown_primary_outcome(self) -> None:
+        cases = (
+            (
+                "pre-replacement error",
+                patch.object(
+                    managed_state.json,
+                    "dump",
+                    side_effect=OSError("write failed"),
+                ),
+                managed_state.PersistenceOutcome.FAILED,
+            ),
+            (
+                "replacement error",
+                patch.object(
+                    managed_state.os,
+                    "replace",
+                    side_effect=OSError("replace failed"),
+                ),
+                managed_state.PersistenceOutcome.UNKNOWN,
+            ),
+        )
+        for primary_name, primary_failure, expected in cases:
+            for cleanup_error in (OSError("cleanup failed"), KeyboardInterrupt()):
+                with self.subTest(
+                    primary=primary_name,
+                    cleanup=type(cleanup_error).__name__,
+                ), TemporaryDirectory() as directory:
+                    executor = Mock(return_value=self.report())
+                    with (
+                        primary_failure,
+                        patch.object(
+                            managed_state,
+                            "_discard_temporary",
+                            side_effect=cleanup_error,
+                        ),
+                    ):
+                        result = managed_state.execute_provider_plan(
+                            self.plan,
+                            state_path=Path(directory) / "managed-state.json",
+                            executor=executor,
+                            allow_provider_mutation=True,
+                        )
+                    self.assertEqual(result.persistence, expected)
+                    self.assertIs(result.execution, executor.return_value)
+                    executor.assert_called_once()
+
+    def test_cleanup_interrupt_preserves_primary_persistence_interrupt(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            executor = Mock(return_value=self.report())
+            with (
+                patch.object(
+                    managed_state.json,
+                    "dump",
+                    side_effect=KeyboardInterrupt(),
+                ),
+                patch.object(
+                    managed_state,
+                    "_discard_temporary",
+                    side_effect=KeyboardInterrupt(),
+                ),
+            ):
+                with self.assertRaises(
+                    managed_state.PersistenceInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.FAILED,
+            )
+            self.assertIs(
+                raised.exception.managed_result.execution, executor.return_value
+            )
+            executor.assert_called_once()
+
+    def test_unclassified_atomic_interrupt_is_conservatively_unknown(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            executor = Mock(return_value=self.report())
+            with patch.object(
+                managed_state,
+                "_atomic_write",
+                side_effect=KeyboardInterrupt(),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.UNKNOWN,
+            )
+            self.assertIs(
+                raised.exception.managed_result.execution, executor.return_value
+            )
+            self.assertIn(
+                "whether provenance became durable is unknown",
+                raised.exception.managed_result.recovery_guidance,
+            )
+            executor.assert_called_once()
+
     def test_interrupt_during_persistence_failure_result_is_structured(self) -> None:
         original = managed_state._persistence_failure_result
         calls = 0
@@ -1906,6 +2151,47 @@ class ManagedStateTests(unittest.TestCase):
                 managed_state.PersistenceOutcome.UNKNOWN,
             )
             self.assertEqual(len(managed_state.load_document(path)["records"]), 1)
+
+    def test_cleanup_interrupt_after_replacement_ambiguity_remains_unknown(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            original_replace = managed_state.os.replace
+
+            def replace_then_error(source: Path, destination: Path) -> None:
+                original_replace(source, destination)
+                raise OSError("replacement completion is ambiguous")
+
+            executor = Mock(return_value=self.report())
+            with (
+                patch.object(
+                    managed_state.os,
+                    "replace",
+                    side_effect=replace_then_error,
+                ),
+                patch.object(
+                    managed_state,
+                    "_discard_temporary",
+                    side_effect=KeyboardInterrupt(),
+                ),
+            ):
+                result = managed_state.execute_provider_plan(
+                    self.plan,
+                    state_path=path,
+                    executor=executor,
+                    allow_provider_mutation=True,
+                )
+            self.assertEqual(
+                result.persistence,
+                managed_state.PersistenceOutcome.UNKNOWN,
+            )
+            self.assertEqual(len(managed_state.load_document(path)["records"]), 1)
+            self.assertIn(
+                "whether provenance became durable is unknown",
+                result.recovery_guidance,
+            )
+            executor.assert_called_once()
 
     def test_process_local_transactions_do_not_lose_records(self) -> None:
         with TemporaryDirectory() as directory:

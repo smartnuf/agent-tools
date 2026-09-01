@@ -98,6 +98,9 @@ class ManagedExecutionResult:
     recovery_guidance: tuple[str, ...] = ()
 
 
+_MANAGED_EXECUTION_RESULT_TYPE = ManagedExecutionResult
+
+
 def managed_state_path(
     *,
     platform_name: str | None = None,
@@ -628,9 +631,9 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _atomic_write(path: Path, document: dict[str, Any]) -> None:
+    temporary: Path | None = None
+    replace_attempted = False
     try:
-        temporary: Path | None = None
-        replace_attempted = False
         missing_directories = _missing_directories(path.parent)
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
@@ -652,27 +655,36 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
         for directory in reversed(missing_directories):
             _sync_parent_directory(directory.parent)
     except OSError as error:
-        temporary = locals().get("temporary")
-        replace_attempted = bool(locals().get("replace_attempted", False))
-        _discard_temporary(temporary)
         outcome = (
             PersistenceOutcome.UNKNOWN
             if replace_attempted
             else PersistenceOutcome.FAILED
         )
-        raise PersistenceError(outcome, f"managed-state atomic persistence failed: {error}") from error
+        failure = PersistenceError(
+            outcome, f"managed-state atomic persistence failed: {error}"
+        )
+        _best_effort_discard_temporary(temporary)
+        raise failure from error
     except KeyboardInterrupt as error:
-        temporary = locals().get("temporary")
-        replace_attempted = bool(locals().get("replace_attempted", False))
-        _discard_temporary(temporary)
         outcome = (
             PersistenceOutcome.UNKNOWN
             if replace_attempted
             else PersistenceOutcome.FAILED
         )
-        raise PersistenceInterrupted(
+        interruption = PersistenceInterrupted(
             outcome, "managed-state persistence was interrupted"
-        ) from error
+        )
+        _best_effort_discard_temporary(temporary)
+        raise interruption from error
+
+
+def _best_effort_discard_temporary(temporary: Path | None) -> None:
+    """Discard secondary temporary state without replacing a primary outcome."""
+
+    try:
+        _discard_temporary(temporary)
+    except (OSError, KeyboardInterrupt):
+        pass
 
 
 def _discard_temporary(temporary: Path | None) -> None:
@@ -811,49 +823,34 @@ def execute_provider_plan(
                 )
             else:
                 requested_at = _timestamp()
-                interruption: (
-                    ProviderPlanInterrupted | ManagedExecutionInterrupted | None
-                ) = None
                 try:
                     report = executor(plan, **executor_arguments)
                 except ProviderPlanInterrupted as error:
-                    interruption = error
                     pending_interruption = error
                     report = error.report
                 except KeyboardInterrupt as error:
-                    interruption = ManagedExecutionInterrupted(error)
-                    pending_interruption = interruption
+                    pending_interruption = ManagedExecutionInterrupted(error)
                     report = _unknown_interrupted_report(plan)
-                try:
-                    completed_at, attempted_indexes, updated = _prepare_update(
-                        document, plan, report, requested_at
+
+                prepared, result, pending_interruption = (
+                    _prepare_update_for_persistence(
+                        document,
+                        plan,
+                        report,
+                        requested_at,
+                        pending_interruption,
                     )
-                except KeyboardInterrupt as error:
-                    if interruption is None:
-                        interruption = ManagedExecutionInterrupted(error)
-                        pending_interruption = interruption
-                    try:
-                        completed_at, attempted_indexes, updated = _prepare_update(
-                            document, plan, report, requested_at
+                )
+
+                if result is None:
+                    if prepared is None:
+                        raise RuntimeError(
+                            "provenance preparation produced no result"
                         )
-                    except Exception as construction_error:
-                        result, finalization_interruption = (
-                            _record_construction_failure_result(
-                                report, construction_error
-                            )
-                        )
-                        if (
-                            finalization_interruption is not None
-                            and pending_interruption is None
-                        ):
-                            pending_interruption = ManagedExecutionInterrupted(
-                                finalization_interruption
-                            )
-                except Exception as construction_error:
-                    result, finalization_interruption = (
-                        _record_construction_failure_result(
-                            report, construction_error
-                        )
+                    _, attempted_indexes, updated = prepared
+                if result is None and not attempted_indexes:
+                    result, finalization_interruption = _guarded_managed_result(
+                        report, PersistenceOutcome.NOT_REQUIRED
                     )
                     if (
                         finalization_interruption is not None
@@ -862,17 +859,9 @@ def execute_provider_plan(
                         pending_interruption = ManagedExecutionInterrupted(
                             finalization_interruption
                         )
-
-                if result is None and not attempted_indexes:
-                    result = ManagedExecutionResult(
-                        report, PersistenceOutcome.NOT_REQUIRED
-                    )
                 elif result is None:
                     try:
                         _atomic_write(path, updated)
-                        result = ManagedExecutionResult(
-                            report, PersistenceOutcome.SUCCEEDED
-                        )
                     except PersistenceInterrupted as error:
                         result, _ = _guarded_persistence_failure_result(
                             report, error.outcome, error.detail
@@ -892,15 +881,28 @@ def execute_provider_plan(
                                 finalization_interruption
                             )
                     except KeyboardInterrupt as error:
-                        result = ManagedExecutionResult(
-                            report, PersistenceOutcome.SUCCEEDED
+                        result, _ = _guarded_persistence_failure_result(
+                            report,
+                            PersistenceOutcome.UNKNOWN,
+                            (
+                                "managed-state persistence was interrupted after "
+                                "its exact replacement phase became uncertain"
+                            ),
                         )
                         pending_interruption = ManagedExecutionInterrupted(error)
-
-                if interruption is not None and pending_interruption is None:
-                    pending_interruption = interruption
+                    else:
+                        result, finalization_interruption = _guarded_managed_result(
+                            report, PersistenceOutcome.SUCCEEDED
+                        )
+                        if (
+                            finalization_interruption is not None
+                            and pending_interruption is None
+                        ):
+                            pending_interruption = ManagedExecutionInterrupted(
+                                finalization_interruption
+                            )
                 if pending_interruption is not None:
-                    pending_interruption.managed_result = result
+                    _attach_managed_result(pending_interruption, result)
                     raise pending_interruption
     except (
         ProviderPlanInterrupted,
@@ -910,12 +912,84 @@ def execute_provider_plan(
         raise
     except KeyboardInterrupt as error:
         final_interruption = pending_interruption or ManagedExecutionInterrupted(error)
-        final_interruption.managed_result = result
+        _attach_managed_result(final_interruption, result)
         raise final_interruption
 
     if result is None:
         raise RuntimeError("managed provider execution produced no result")
     return result
+
+
+_PreparedUpdate = tuple[str, tuple[int, ...], dict[str, Any]]
+
+
+def _prepare_update_for_persistence(
+    document: dict[str, Any],
+    plan: ProviderPlan,
+    report: PlanExecutionReport,
+    requested_at: str,
+    pending_interruption: (
+        ProviderPlanInterrupted
+        | ManagedExecutionInterrupted
+        | PersistenceInterrupted
+        | None
+    ),
+) -> tuple[
+    _PreparedUpdate | None,
+    ManagedExecutionResult | None,
+    ProviderPlanInterrupted
+    | ManagedExecutionInterrupted
+    | PersistenceInterrupted
+    | None,
+]:
+    """Prepare one update, with one bounded recovery attempt after interruption."""
+
+    try:
+        return (
+            _prepare_update(document, plan, report, requested_at),
+            None,
+            pending_interruption,
+        )
+    except KeyboardInterrupt as error:
+        if pending_interruption is None:
+            pending_interruption = ManagedExecutionInterrupted(error)
+        try:
+            return (
+                _prepare_update(document, plan, report, requested_at),
+                None,
+                pending_interruption,
+            )
+        except KeyboardInterrupt as repeated_interruption:
+            result, _ = _record_construction_failure_result(
+                report,
+                repeated_interruption,
+                detail=(
+                    "provenance record construction was repeatedly interrupted "
+                    "before persistence began"
+                ),
+            )
+            return None, result, pending_interruption
+        except Exception as construction_error:
+            result, finalization_interruption = (
+                _record_construction_failure_result(report, construction_error)
+            )
+            if (
+                finalization_interruption is not None
+                and pending_interruption is None
+            ):
+                pending_interruption = ManagedExecutionInterrupted(
+                    finalization_interruption
+                )
+            return None, result, pending_interruption
+    except Exception as construction_error:
+        result, finalization_interruption = _record_construction_failure_result(
+            report, construction_error
+        )
+        if finalization_interruption is not None and pending_interruption is None:
+            pending_interruption = ManagedExecutionInterrupted(
+                finalization_interruption
+            )
+        return None, result, pending_interruption
 
 
 def _prepare_update(
@@ -945,12 +1019,16 @@ def _prepare_update(
 
 
 def _record_construction_failure_result(
-    report: PlanExecutionReport, error: Exception
+    report: PlanExecutionReport,
+    error: BaseException,
+    *,
+    detail: str | None = None,
 ) -> tuple[ManagedExecutionResult, KeyboardInterrupt | None]:
     return _guarded_persistence_failure_result(
         report,
         PersistenceOutcome.FAILED,
-        (
+        detail
+        or (
             "provenance record construction failed before persistence began: "
             f"{type(error).__name__}: {error}"
         ),
@@ -965,7 +1043,41 @@ def _guarded_persistence_failure_result(
     try:
         return _persistence_failure_result(report, outcome, detail), None
     except KeyboardInterrupt as error:
-        return _persistence_failure_result(report, outcome, detail), error
+        return _fallback_persistence_failure_result(report, outcome, detail), error
+
+
+def _guarded_managed_result(
+    report: PlanExecutionReport,
+    outcome: PersistenceOutcome,
+    detail: str = "",
+    recovery_guidance: tuple[str, ...] = (),
+) -> tuple[ManagedExecutionResult, KeyboardInterrupt | None]:
+    try:
+        return (
+            ManagedExecutionResult(report, outcome, detail, recovery_guidance),
+            None,
+        )
+    except KeyboardInterrupt as error:
+        return (
+            _MANAGED_EXECUTION_RESULT_TYPE(
+                report, outcome, detail, recovery_guidance
+            ),
+            error,
+        )
+
+
+def _attach_managed_result(
+    interruption: (
+        ProviderPlanInterrupted
+        | ManagedExecutionInterrupted
+        | PersistenceInterrupted
+    ),
+    result: ManagedExecutionResult | None,
+) -> None:
+    try:
+        interruption.managed_result = result
+    except KeyboardInterrupt:
+        object.__setattr__(interruption, "managed_result", result)
 
 
 def _unknown_interrupted_report(plan: ProviderPlan) -> PlanExecutionReport:
@@ -1009,14 +1121,33 @@ def _persistence_failure_result(
         report,
         outcome,
         detail,
-        (
-            "provider execution evidence is preserved in this result",
-            "provenance was not durably recorded"
-            if outcome is PersistenceOutcome.FAILED
-            else "whether provenance became durable is unknown",
-            "do not rerun provider mutation automatically and do not uninstall or roll back",
-            "rediscover current machine state and generate a fresh plan before any later mutation",
-        ),
+        _persistence_failure_guidance(outcome),
+    )
+
+
+def _fallback_persistence_failure_result(
+    report: PlanExecutionReport,
+    outcome: PersistenceOutcome,
+    detail: str,
+) -> ManagedExecutionResult:
+    return _MANAGED_EXECUTION_RESULT_TYPE(
+        report,
+        outcome,
+        detail,
+        _persistence_failure_guidance(outcome),
+    )
+
+
+def _persistence_failure_guidance(
+    outcome: PersistenceOutcome,
+) -> tuple[str, ...]:
+    return (
+        "provider execution evidence is preserved in this result",
+        "provenance was not durably recorded"
+        if outcome is PersistenceOutcome.FAILED
+        else "whether provenance became durable is unknown",
+        "do not rerun provider mutation automatically and do not uninstall or roll back",
+        "rediscover current machine state and generate a fresh plan before any later mutation",
     )
 
 
