@@ -60,6 +60,129 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
         self.assertEqual(raised.exception.result.returncode, -9)
         self.assertIn("launched", raised.exception.detail)
 
+    def test_lifecycle_result_materialization_interrupt_preserves_launch(self):
+        process = self._mock_started_process()
+        process.returncode = -9
+        ordinary = provider_execution.CommandLifecycleError(
+            subprocess.CompletedProcess(
+                ("manager", "install"), -9, "partial-out", "partial-err"
+            ),
+            "provider command launched, but supervision failed",
+            lifetime_uncertain=False,
+        )
+        first = KeyboardInterrupt()
+        materializations = 0
+
+        def materialize(argv, started, stdout_tail, stderr_tail):
+            nonlocal materializations
+            materializations += 1
+            if materializations == 1:
+                raise first
+            return subprocess.CompletedProcess(
+                argv, started.returncode, "partial-out", "partial-err"
+            )
+
+        with mock.patch.object(
+            provider_execution.subprocess, "Popen", return_value=process
+        ) as popen, mock.patch.object(
+            provider_execution, "_supervise_started_process", side_effect=ordinary
+        ), mock.patch.object(
+            provider_execution,
+            "_best_effort_started_process_cleanup",
+            return_value=True,
+        ) as cleanup, mock.patch.object(
+            provider_execution,
+            "_started_process_result",
+            side_effect=materialize,
+        ):
+            with self.assertRaises(
+                provider_execution.CommandInterruptedError
+            ) as raised:
+                provider_execution._run(("manager", "install"), 1)
+
+        self.assertIs(raised.exception.__cause__, first)
+        self.assertFalse(raised.exception.lifetime_uncertain)
+        self.assertEqual(raised.exception.result.returncode, -9)
+        self.assertEqual(raised.exception.result.stdout, "partial-out")
+        self.assertIn("launched", raised.exception.detail)
+        self.assertEqual(materializations, 2)
+        popen.assert_called_once()
+        cleanup.assert_called_once()
+
+    def test_post_start_oserror_materialization_interrupt_preserves_launch(self):
+        process = self._mock_started_process()
+        first = KeyboardInterrupt()
+        materializations = 0
+
+        def materialize(argv, started, stdout_tail, stderr_tail):
+            nonlocal materializations
+            materializations += 1
+            if materializations == 1:
+                raise first
+            return subprocess.CompletedProcess(argv, None, "partial", "wait failed")
+
+        with mock.patch.object(
+            provider_execution.subprocess, "Popen", return_value=process
+        ) as popen, mock.patch.object(
+            provider_execution,
+            "_supervise_started_process",
+            side_effect=OSError("wait failed"),
+        ), mock.patch.object(
+            provider_execution,
+            "_best_effort_started_process_cleanup",
+            return_value=False,
+        ) as cleanup, mock.patch.object(
+            provider_execution,
+            "_started_process_result",
+            side_effect=materialize,
+        ):
+            with self.assertRaises(
+                provider_execution.CommandInterruptedError
+            ) as raised:
+                provider_execution._run(("manager", "install"), 1)
+
+        self.assertIs(raised.exception.__cause__, first)
+        self.assertTrue(raised.exception.lifetime_uncertain)
+        self.assertIsNone(raised.exception.result.returncode)
+        self.assertIn("launched", raised.exception.detail)
+        self.assertEqual(materializations, 2)
+        popen.assert_called_once()
+        cleanup.assert_called_once()
+
+    def test_second_lifecycle_materialization_interrupt_force_aborts(self):
+        process = self._mock_started_process()
+        ordinary = provider_execution.CommandLifecycleError(
+            subprocess.CompletedProcess(
+                ("manager", "install"), None, "partial", "failed"
+            ),
+            "provider command launched, but supervision failed",
+            lifetime_uncertain=True,
+        )
+        first = KeyboardInterrupt()
+        later = KeyboardInterrupt()
+        materialize = mock.Mock(side_effect=(first, later))
+        cleanup = mock.Mock(return_value=False)
+
+        with mock.patch.object(
+            provider_execution.subprocess, "Popen", return_value=process
+        ), mock.patch.object(
+            provider_execution, "_supervise_started_process", side_effect=ordinary
+        ), mock.patch.object(
+            provider_execution,
+            "_best_effort_started_process_cleanup",
+            cleanup,
+        ), mock.patch.object(
+            provider_execution,
+            "_started_process_result",
+            materialize,
+        ):
+            with self.assertRaises(provider_execution._ForceAbort) as raised:
+                provider_execution._run(("manager", "install"), 1)
+
+        self.assertIs(raised.exception.interruption, later)
+        self.assertEqual(materialize.call_count, 2)
+        cleanup.assert_called_once()
+
     def test_reader_initialization_cleanup_oserror_finishes_bounded_local_cleanup(self):
         process = self._mock_started_process()
         process.stdout = mock.Mock()
