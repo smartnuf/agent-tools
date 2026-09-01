@@ -3356,6 +3356,86 @@ class ManagedStateTests(unittest.TestCase):
             else:
                 os.environ["PATH"] = original_path
 
+    def test_environment_entry_force_abort_bypasses_managed_persistence(
+        self,
+    ) -> None:
+        first = KeyboardInterrupt()
+        later = KeyboardInterrupt()
+        detector = Mock(
+            side_effect=AssertionError("detector must not run after entry cancellation")
+        )
+        runner = Mock(
+            side_effect=AssertionError("provider command must not run")
+        )
+        prepare = Mock(
+            side_effect=AssertionError("force-abort must not prepare provenance")
+        )
+        write = Mock(
+            side_effect=AssertionError("force-abort must not persist provenance")
+        )
+        names = ("AGENT_TOOLS_TEST_ENV_ONE", "AGENT_TOOLS_TEST_ENV_TWO")
+        previous = {name: os.environ.get(name) for name in names}
+        restore_calls = 0
+
+        def interrupt_partial_application(updates):
+            os.environ[names[0]] = updates[names[0]]
+            raise first
+
+        def interrupt_restoration(previous_environment):
+            nonlocal restore_calls
+            restore_calls += 1
+            raise later
+
+        try:
+            os.environ[names[0]] = "original-one"
+            os.environ.pop(names[1], None)
+            with TemporaryDirectory() as directory:
+                path = Path(directory) / "managed-state.json"
+                with (
+                    patch.object(
+                        provider_execution,
+                        "_apply_environment",
+                        side_effect=interrupt_partial_application,
+                    ),
+                    patch.object(
+                        provider_execution,
+                        "_restore_environment",
+                        side_effect=interrupt_restoration,
+                    ),
+                    patch.object(
+                        managed_state, "_prepare_update_for_persistence", prepare
+                    ),
+                    patch.object(managed_state, "_atomic_write", write),
+                    self.assertRaises(provider_execution._ForceAbort) as raised,
+                ):
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        allow_provider_mutation=True,
+                        current_context=lambda: self.machine,
+                        detector=detector,
+                        manager_verifier=lambda state, context: True,
+                        privilege_resolver=lambda action: "/usr/bin/sudo",
+                        supervisor_resolver=lambda action: "/usr/bin/timeout",
+                        privilege_preflight=lambda argv: True,
+                        environment_refresher=lambda action: {
+                            names[0]: "temporary-one",
+                            names[1]: "temporary-two",
+                        },
+                        runner=runner,
+                    )
+
+                self.assertIs(raised.exception.interruption, later)
+                self.assertIs(raised.exception.__cause__, later)
+                self.assertEqual(restore_calls, 1)
+                detector.assert_not_called()
+                runner.assert_not_called()
+                prepare.assert_not_called()
+                write.assert_not_called()
+                self.assertFalse(path.exists())
+        finally:
+            provider_execution._restore_environment(previous)
+
     def test_second_interrupt_during_provider_interruption_publication_force_aborts(
         self,
     ) -> None:
