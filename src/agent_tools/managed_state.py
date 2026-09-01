@@ -106,6 +106,12 @@ class ManagedExecutionResult:
 _MANAGED_EXECUTION_RESULT_TYPE = ManagedExecutionResult
 
 
+@dataclass
+class _PersistencePhaseState:
+    outcome: PersistenceOutcome | None = None
+    detail: str = ""
+
+
 def managed_state_path(
     *,
     platform_name: str | None = None,
@@ -635,7 +641,11 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return value
 
 
-def _atomic_write(path: Path, document: dict[str, Any]) -> None:
+def _atomic_write(
+    path: Path,
+    document: dict[str, Any],
+    phase: _PersistencePhaseState,
+) -> None:
     temporary: Path | None = None
     replace_attempted = False
     try:
@@ -665,7 +675,10 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
             if replace_attempted
             else PersistenceOutcome.FAILED
         )
-        failure = _guarded_persistence_error(outcome, error)
+        phase.outcome = outcome
+        phase.detail = "managed-state atomic persistence failed"
+        phase.detail = _safe_exception_detail(phase.detail, error)
+        failure = _guarded_persistence_error(outcome, phase.detail)
         _best_effort_discard_temporary(temporary)
         raise failure from error
     except KeyboardInterrupt as error:
@@ -674,8 +687,10 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
             if replace_attempted
             else PersistenceOutcome.FAILED
         )
+        phase.outcome = outcome
+        phase.detail = "managed-state persistence was interrupted"
         interruption = _guarded_persistence_interruption(
-            outcome, "managed-state persistence was interrupted"
+            outcome, phase.detail
         )
         _best_effort_discard_temporary(temporary)
         raise interruption from error
@@ -691,11 +706,8 @@ def _best_effort_discard_temporary(temporary: Path | None) -> None:
 
 
 def _guarded_persistence_error(
-    outcome: PersistenceOutcome, error: OSError
+    outcome: PersistenceOutcome, detail: str
 ) -> PersistenceError:
-    detail = _safe_exception_detail(
-        "managed-state atomic persistence failed", error
-    )
     try:
         return PersistenceError(outcome, detail)
     except KeyboardInterrupt:
@@ -857,6 +869,7 @@ def execute_provider_plan(
                     None, PersistenceOutcome.BLOCKED, str(error)
                 )
             else:
+                persistence_phase = _PersistencePhaseState()
                 requested_at = _timestamp()
                 try:
                     report = executor(plan, **executor_arguments)
@@ -896,7 +909,7 @@ def execute_provider_plan(
                         )
                 elif result is None:
                     try:
-                        _atomic_write(path, updated)
+                        _atomic_write(path, updated, persistence_phase)
                     except PersistenceInterrupted as error:
                         result, _ = _guarded_persistence_failure_result(
                             report, error.outcome, error.detail
@@ -916,10 +929,15 @@ def execute_provider_plan(
                                 finalization_interruption
                             )
                     except KeyboardInterrupt as error:
+                        outcome = (
+                            persistence_phase.outcome
+                            or PersistenceOutcome.UNKNOWN
+                        )
                         result, _ = _guarded_persistence_failure_result(
                             report,
-                            PersistenceOutcome.UNKNOWN,
-                            (
+                            outcome,
+                            persistence_phase.detail
+                            or (
                                 "managed-state persistence was interrupted after "
                                 "its exact replacement phase became uncertain"
                             ),

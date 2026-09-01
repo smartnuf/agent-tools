@@ -2057,6 +2057,59 @@ class ManagedStateTests(unittest.TestCase):
             self.assertFalse(path.exists())
             executor.assert_called_once()
 
+    def test_phase_state_preserves_failed_across_later_call_boundaries(self) -> None:
+        cases = (
+            patch.object(
+                managed_state,
+                "_safe_exception_detail",
+                side_effect=KeyboardInterrupt(),
+            ),
+            patch.object(
+                managed_state,
+                "_guarded_persistence_error",
+                side_effect=KeyboardInterrupt(),
+            ),
+            patch.object(
+                managed_state,
+                "_best_effort_discard_temporary",
+                side_effect=KeyboardInterrupt(),
+            ),
+        )
+        for interrupted_boundary in cases:
+            with self.subTest(
+                boundary=interrupted_boundary.attribute
+            ), TemporaryDirectory() as directory:
+                path = Path(directory) / "managed-state.json"
+                execution = self.report()
+                executor = Mock(return_value=execution)
+                with (
+                    patch.object(
+                        managed_state.json,
+                        "dump",
+                        side_effect=OSError("write failed"),
+                    ),
+                    interrupted_boundary,
+                ):
+                    with self.assertRaises(
+                        managed_state.ManagedExecutionInterrupted
+                    ) as raised:
+                        managed_state.execute_provider_plan(
+                            self.plan,
+                            state_path=path,
+                            executor=executor,
+                            allow_provider_mutation=True,
+                        )
+                self.assertIs(raised.exception.managed_result.execution, execution)
+                self.assertEqual(
+                    raised.exception.managed_result.persistence,
+                    managed_state.PersistenceOutcome.FAILED,
+                )
+                self.assertIn(
+                    "provenance was not durably recorded",
+                    raised.exception.managed_result.recovery_guidance,
+                )
+                executor.assert_called_once()
+
     def test_preparation_error_detail_interrupt_remains_structured_failed(
         self,
     ) -> None:
@@ -2396,6 +2449,45 @@ class ManagedStateTests(unittest.TestCase):
             self.assertIn(
                 "whether provenance became durable is unknown",
                 result.recovery_guidance,
+            )
+            executor.assert_called_once()
+
+    def test_phase_state_preserves_unknown_across_cleanup_call_boundary(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            execution = self.report()
+            executor = Mock(return_value=execution)
+            with (
+                patch.object(
+                    managed_state.os,
+                    "replace",
+                    side_effect=OSError("replacement is ambiguous"),
+                ),
+                patch.object(
+                    managed_state,
+                    "_best_effort_discard_temporary",
+                    side_effect=KeyboardInterrupt(),
+                ),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            self.assertIs(raised.exception.managed_result.execution, execution)
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.UNKNOWN,
+            )
+            self.assertIn(
+                "whether provenance became durable is unknown",
+                raised.exception.managed_result.recovery_guidance,
             )
             executor.assert_called_once()
 
