@@ -206,7 +206,8 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
         ):
             with self.assertRaises(KeyboardInterrupt) as raised:
                 provider_execution._run(("manager", "install"), 1)
-        self.assertIs(raised.exception, force_abort)
+        self.assertIsInstance(raised.exception, provider_execution._ForceAbort)
+        self.assertIs(raised.exception.interruption, force_abort)
         popen.assert_called_once()
         supervise.assert_called_once()
         cleanup.assert_called_once()
@@ -226,7 +227,8 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
         ):
             with self.assertRaises(KeyboardInterrupt) as raised:
                 provider_execution._run(("manager", "install"), 1)
-        self.assertIs(raised.exception, force_abort)
+        self.assertIsInstance(raised.exception, provider_execution._ForceAbort)
+        self.assertIs(raised.exception.interruption, force_abort)
         popen.assert_called_once()
         supervise.assert_called_once()
         cleanup.assert_called_once()
@@ -265,6 +267,60 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
                 popen.assert_called_once()
                 supervise.assert_called_once()
                 cleanup.assert_called_once()
+
+    def test_second_interrupt_during_real_supervision_recovery_force_aborts(self):
+        process = self._mock_started_process()
+        first = KeyboardInterrupt()
+        later = KeyboardInterrupt()
+        process.wait.side_effect = first
+        terminate = mock.Mock(side_effect=later)
+        outer_cleanup = mock.Mock(
+            side_effect=AssertionError("force-abort must not start another cleanup")
+        )
+        with mock.patch.object(
+            provider_execution.subprocess, "Popen", return_value=process
+        ) as popen, mock.patch.object(
+            provider_execution, "_start_output_readers", return_value=()
+        ), mock.patch.object(
+            provider_execution, "_terminate_process_tree", terminate
+        ), mock.patch.object(
+            provider_execution, "_best_effort_started_process_cleanup", outer_cleanup
+        ):
+            with self.assertRaises(provider_execution._ForceAbort) as raised:
+                provider_execution._run(("manager", "install"), 1)
+        self.assertIs(raised.exception.interruption, later)
+        self.assertIs(raised.exception.__cause__, later)
+        popen.assert_called_once()
+        terminate.assert_called_once_with(process)
+        outer_cleanup.assert_not_called()
+
+    def test_second_interrupt_during_reader_initialization_cleanup_force_aborts(self):
+        process = self._mock_started_process()
+        first = KeyboardInterrupt()
+        later = KeyboardInterrupt()
+        initialization = provider_execution._OutputReaderInitializationError(
+            (), first
+        )
+        terminate = mock.Mock(side_effect=later)
+        outer_cleanup = mock.Mock(
+            side_effect=AssertionError("force-abort must not start another cleanup")
+        )
+        with mock.patch.object(
+            provider_execution.subprocess, "Popen", return_value=process
+        ) as popen, mock.patch.object(
+            provider_execution, "_start_output_readers", side_effect=initialization
+        ), mock.patch.object(
+            provider_execution, "_terminate_process_tree", terminate
+        ), mock.patch.object(
+            provider_execution, "_best_effort_started_process_cleanup", outer_cleanup
+        ):
+            with self.assertRaises(provider_execution._ForceAbort) as raised:
+                provider_execution._run(("manager", "install"), 1)
+        self.assertIs(raised.exception.interruption, later)
+        self.assertIs(raised.exception.__cause__, later)
+        popen.assert_called_once()
+        terminate.assert_called_once_with(process)
+        outer_cleanup.assert_not_called()
 
     def test_real_subprocess_install_rediscovery_and_repeat(self):
         machine = capabilities.MachineState("Linux", "x86_64")

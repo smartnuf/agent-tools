@@ -25,6 +25,7 @@ from .provider_execution import (
     PlanOutcome,
     PlanExecutionReport,
     ProviderPlanInterrupted,
+    _ForceAbort,
     _execute_provider_plan_unmanaged,
     _provider_execution_transaction,
 )
@@ -971,6 +972,8 @@ def execute_provider_plan(
                     PersistenceOutcome.NOT_REQUIRED,
                     terminal=True,
                 )
+            except _ForceAbort:
+                raise
             except ProviderPlanInterrupted as error:
                 transaction.record_execution(
                     error.report,
@@ -1015,6 +1018,8 @@ def execute_provider_plan(
                             "managed-state persistence did not begin",
                             terminal=False,
                         )
+                    except _ForceAbort:
+                        raise
                     except ProviderPlanInterrupted as error:
                         transaction.record_execution(
                             error.report,
@@ -1094,6 +1099,8 @@ def execute_provider_plan(
                                         PersistenceOutcome.SUCCEEDED,
                                         terminal=True,
                                     )
+    except _ForceAbort:
+        raise
     except KeyboardInterrupt as error:
         transaction.begin_cancellation(error, _InterruptionMode.MANAGED)
         if transaction.persistence is None:

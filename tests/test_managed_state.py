@@ -3199,6 +3199,61 @@ class ManagedStateTests(unittest.TestCase):
             self.assertEqual(record["verification"]["outcome"], "command-failed")
             self.assertFalse(record["ownership"])
 
+    def test_executor_force_abort_bypasses_managed_recovery_and_persistence(self) -> None:
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            self.machine,
+            locator=lambda probe, context: None,
+        )
+        process = Mock()
+        process.stdout = None
+        process.stderr = None
+        process.returncode = None
+        first = KeyboardInterrupt()
+        later = KeyboardInterrupt()
+        process.wait.side_effect = first
+        terminate = Mock(side_effect=later)
+        prepare = Mock(
+            side_effect=AssertionError("force-abort must not prepare provenance")
+        )
+        write = Mock(
+            side_effect=AssertionError("force-abort must not persist provenance")
+        )
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            with patch.object(
+                provider_execution.subprocess, "Popen", return_value=process
+            ) as popen, patch.object(
+                provider_execution, "_start_output_readers", return_value=()
+            ), patch.object(
+                provider_execution,
+                "_terminate_privileged_supervisor",
+                terminate,
+            ), patch.object(
+                managed_state, "_prepare_update_for_persistence", prepare
+            ), patch.object(managed_state, "_atomic_write", write):
+                with self.assertRaises(provider_execution._ForceAbort) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        allow_provider_mutation=True,
+                        current_context=lambda: self.machine,
+                        detector=lambda capability, context: absent,
+                        manager_verifier=lambda state, context: True,
+                        privilege_resolver=lambda action: "/usr/bin/sudo",
+                        supervisor_resolver=lambda action: "/usr/bin/timeout",
+                        privilege_preflight=lambda argv: True,
+                    )
+
+            self.assertIs(raised.exception.interruption, later)
+            self.assertIs(raised.exception.__cause__, later)
+            popen.assert_called_once()
+            terminate.assert_called_once_with(process)
+            prepare.assert_not_called()
+            write.assert_not_called()
+            self.assertFalse(path.exists())
+
     def test_post_command_verification_exception_is_persisted(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"

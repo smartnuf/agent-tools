@@ -98,6 +98,20 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         self.assertEqual(report.actions[0].commands[0].stdout, "partial output")
 
+    def test_force_abort_from_runner_is_not_translated_by_provider_plan(self):
+        later = KeyboardInterrupt()
+        force_abort = provider_execution._ForceAbort(later)
+        runner = Mock(side_effect=force_abort)
+        detector = Mock(return_value=self.state(capabilities.GHOSTSCRIPT))
+
+        with self.assertRaises(provider_execution._ForceAbort) as raised:
+            self.execute(self.plan(), detector=detector, runner=runner)
+
+        self.assertIs(raised.exception, force_abort)
+        self.assertIs(raised.exception.interruption, later)
+        runner.assert_called_once()
+        detector.assert_called_once()
+
     def test_post_command_verification_exception_returns_partial_evidence(self):
         absent = self.state(capabilities.GHOSTSCRIPT)
         detector = Mock(side_effect=(absent, RuntimeError("verification broke")))
