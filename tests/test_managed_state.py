@@ -227,6 +227,65 @@ class ManagedStateTests(unittest.TestCase):
         )
         self.assertEqual(result.persistence, managed_state.PersistenceOutcome.NOT_REQUIRED)
 
+    def test_raw_interrupt_without_mutation_authority_has_no_mutation_uncertainty(
+        self,
+    ) -> None:
+        executor = Mock(side_effect=KeyboardInterrupt())
+        with self.assertRaises(
+            managed_state.ManagedExecutionInterrupted
+        ) as raised:
+            managed_state.execute_provider_plan(self.plan, executor=executor)
+        result = raised.exception.managed_result
+        self.assertEqual(
+            result.persistence, managed_state.PersistenceOutcome.NOT_REQUIRED
+        )
+        self.assertEqual(
+            result.execution.outcome, provider_execution.PlanOutcome.REFUSED
+        )
+        self.assertTrue(
+            all(
+                action.outcome is provider_execution.ActionOutcome.REFUSED
+                for action in result.execution.actions
+            )
+        )
+        self.assertIn(
+            "no provider command started; this attempt did not mutate provider state",
+            result.execution.recovery_guidance,
+        )
+        self.assertNotIn(
+            "provider mutation may have started or completed",
+            result.execution.recovery_guidance,
+        )
+        executor.assert_called_once_with(
+            self.plan, allow_provider_mutation=False
+        )
+
+    def test_raw_interrupt_for_empty_plan_has_no_mutation_uncertainty(self) -> None:
+        plan = provider_plans.generate_provider_plan((), (), package_managers=())
+        executor = Mock(side_effect=KeyboardInterrupt())
+        with self.assertRaises(
+            managed_state.ManagedExecutionInterrupted
+        ) as raised:
+            managed_state.execute_provider_plan(
+                plan,
+                executor=executor,
+                allow_provider_mutation=True,
+            )
+        report = raised.exception.managed_result.execution
+        self.assertEqual(
+            raised.exception.managed_result.persistence,
+            managed_state.PersistenceOutcome.NOT_REQUIRED,
+        )
+        self.assertEqual(
+            report.outcome, provider_execution.PlanOutcome.PREFLIGHT_FAILED
+        )
+        self.assertEqual(report.actions, ())
+        self.assertIn(
+            "no provider command started; this attempt did not mutate provider state",
+            report.recovery_guidance,
+        )
+        executor.assert_called_once_with(plan, allow_provider_mutation=True)
+
     def test_absent_document_is_empty_and_unknown_or_corrupt_state_fails(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
@@ -2739,6 +2798,56 @@ class ManagedStateTests(unittest.TestCase):
                 raised.exception.managed_result.recovery_guidance,
             )
             executor.assert_called_once()
+
+    def test_replacement_phase_is_unknown_before_interruptible_replace(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            transaction = managed_state._ManagedTransactionState()
+            transaction.record_persistence(
+                managed_state.PersistenceOutcome.FAILED,
+                "managed-state persistence did not begin",
+                terminal=False,
+            )
+            original_replace = managed_state.os.replace
+
+            def replace_then_fail(source: Path, destination: Path) -> None:
+                self.assertEqual(
+                    transaction.persistence,
+                    managed_state.PersistenceOutcome.UNKNOWN,
+                )
+                self.assertFalse(transaction.terminal)
+                original_replace(source, destination)
+                raise OSError("directory durability failed")
+
+            with (
+                patch.object(
+                    managed_state.os,
+                    "replace",
+                    side_effect=replace_then_fail,
+                ),
+                patch.object(
+                    managed_state,
+                    "_safe_exception_detail",
+                    side_effect=KeyboardInterrupt(),
+                ),
+            ):
+                managed_state._atomic_write(
+                    path, managed_state.empty_document(), transaction
+                )
+            self.assertEqual(
+                transaction.persistence,
+                managed_state.PersistenceOutcome.UNKNOWN,
+            )
+            self.assertTrue(transaction.terminal)
+            self.assertIsInstance(
+                transaction.interruption, KeyboardInterrupt
+            )
+            self.assertEqual(
+                managed_state.load_document(path),
+                managed_state.empty_document(),
+            )
 
     def test_process_local_transactions_do_not_lose_records(self) -> None:
         with TemporaryDirectory() as directory:
