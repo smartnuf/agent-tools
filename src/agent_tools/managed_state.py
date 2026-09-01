@@ -382,6 +382,8 @@ def load_document(path: Path) -> dict[str, Any]:
                 _is_absolute_for_platform(item, context["platform"])
                 for item in verification["verified_paths"]
             )
+            and len(verification["verified_paths"])
+            <= len(provider_spec.probes)
             and isinstance(verification.get("detail"), str)
         ):
             raise ManagedStateError(f"managed-state record {index} has invalid verification evidence")
@@ -496,7 +498,6 @@ def load_document(path: Path) -> dict[str, Any]:
             )
         if outcome == ActionOutcome.SUCCEEDED.value and (
             not verification["verified_paths"]
-            or len(verification["verified_paths"]) > len(provider_spec.probes)
             or (
                 provider_spec.probe_policy is ProbePolicy.ALL
                 and len(verification["verified_paths"])

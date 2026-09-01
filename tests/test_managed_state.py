@@ -657,6 +657,32 @@ class ManagedStateTests(unittest.TestCase):
             ):
                 managed_state.load_document(path)
 
+    def test_verification_failure_paths_cannot_exceed_provider_probes(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(
+                    return_value=self.report(
+                        provider_execution.ActionOutcome.VERIFICATION_FAILED
+                    )
+                ),
+                allow_provider_mutation=True,
+            )
+            document = managed_state.load_document(path)
+            document["records"][0]["verification"]["verified_paths"] = [
+                "/tools/one",
+                "/tools/two",
+                "/tools/three",
+                "/tools/four",
+            ]
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError, "verification evidence"
+            ):
+                managed_state.load_document(path)
+
     def test_translated_homebrew_authorization_evidence_is_structured(self) -> None:
         machine = capabilities.MachineState("Darwin", "arm64", "host")
         missing = capabilities.detect_capability(
@@ -790,7 +816,7 @@ class ManagedStateTests(unittest.TestCase):
                         target[fields[-1]] = value
                     path.write_text(json.dumps(document), encoding="utf-8")
                     with self.assertRaisesRegex(
-                        managed_state.ManagedStateError, "success evidence"
+                        managed_state.ManagedStateError, "evidence"
                     ):
                         managed_state.load_document(path)
                     path.unlink()
