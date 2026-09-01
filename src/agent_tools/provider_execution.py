@@ -74,31 +74,47 @@ class UncertainSupervisionError(ExecutionContractError):
             "descendant or package-related activity may still be running, Agent Tools "
             "could not establish quiescence, and provider/package state is uncertain"
         ),
+        *,
+        timed_out: bool = False,
     ) -> None:
         super().__init__(detail)
         self.result = result
         self.detail = detail
+        self.timed_out = timed_out
 
 
-class CommandInitializationError(ExecutionContractError):
-    """Raised after a command starts but local output setup fails cleanly."""
+class CommandLifecycleError(ExecutionContractError):
+    """Carry evidence for a failure after process creation succeeded."""
 
     def __init__(
         self,
         result: subprocess.CompletedProcess[str],
         detail: str,
+        *,
+        lifetime_uncertain: bool,
+        timed_out: bool = False,
     ) -> None:
         super().__init__(detail)
         self.result = result
         self.detail = detail
+        self.lifetime_uncertain = lifetime_uncertain
+        self.timed_out = timed_out
 
 
 class CommandInterruptedError(KeyboardInterrupt):
-    """Raised after an interrupted command is terminated and reaped."""
+    """Carry post-start command evidence through an interruption."""
 
-    def __init__(self, result: subprocess.CompletedProcess[str]) -> None:
-        super().__init__("provider command interrupted after bounded cleanup")
+    def __init__(
+        self,
+        result: subprocess.CompletedProcess[str],
+        detail: str = "provider command interrupted after bounded cleanup",
+        *,
+        lifetime_uncertain: bool = False,
+    ) -> None:
+        super().__init__(detail)
         self.result = result
+        self.detail = detail
+        self.lifetime_uncertain = lifetime_uncertain
 
 
 class ProviderPlanInterrupted(KeyboardInterrupt):
@@ -225,18 +241,206 @@ def _run(
     stderr_tail = _BoundedOutputTail(MAX_CAPTURED_OUTPUT_CHARS)
     stop_readers = threading.Event()
     reader_errors: list[OSError] = []
+    started_readers: list[threading.Thread] = []
+    # Keep creation outside the post-start boundary: only this operation can prove
+    # that no provider process was launched.
     process = subprocess.Popen(
         argv,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         **process_options,
     )
+    try:
+        return _supervise_started_process(
+            process,
+            argv,
+            timeout,
+            privileged_supervision,
+            stdout_tail,
+            stderr_tail,
+            stop_readers,
+            reader_errors,
+            started_readers,
+        )
+    except CommandLifecycleError as error:
+        try:
+            cleanup_established = _best_effort_started_process_cleanup(
+                process,
+                privileged_supervision,
+                tuple(started_readers),
+                stop_readers,
+                reader_errors,
+            )
+        except KeyboardInterrupt as interruption:
+            raise CommandInterruptedError(
+                subprocess.CompletedProcess(
+                    argv,
+                    process.returncode,
+                    stdout_tail.value(),
+                    stderr_tail.value(),
+                ),
+                (
+                    "provider command launched, lifecycle handling failed, and "
+                    "cleanup was interrupted before quiescence could be established"
+                ),
+                lifetime_uncertain=True,
+            ) from interruption
+        raise CommandLifecycleError(
+            subprocess.CompletedProcess(
+                argv,
+                process.returncode,
+                stdout_tail.value(),
+                stderr_tail.value(),
+            ),
+            error.detail,
+            lifetime_uncertain=not cleanup_established,
+            timed_out=error.timed_out,
+        ) from error
+    except CommandInterruptedError as error:
+        if not error.lifetime_uncertain:
+            raise
+        cleanup_established = False
+        with suppress(KeyboardInterrupt):
+            cleanup_established = _best_effort_started_process_cleanup(
+                process,
+                privileged_supervision,
+                tuple(started_readers),
+                stop_readers,
+                reader_errors,
+            )
+        raise CommandInterruptedError(
+            subprocess.CompletedProcess(
+                argv,
+                process.returncode,
+                stdout_tail.value(),
+                stderr_tail.value(),
+            ),
+            error.detail,
+            lifetime_uncertain=not cleanup_established,
+        ) from error
+    except OSError as error:
+        try:
+            cleanup_established = _best_effort_started_process_cleanup(
+                process,
+                privileged_supervision,
+                tuple(started_readers),
+                stop_readers,
+                reader_errors,
+            )
+        except KeyboardInterrupt as interruption:
+            raise CommandInterruptedError(
+                subprocess.CompletedProcess(
+                    argv,
+                    process.returncode,
+                    stdout_tail.value(),
+                    stderr_tail.value(),
+                ),
+                (
+                    "provider command launched, lifecycle handling failed, and "
+                    "cleanup was interrupted before quiescence could be established"
+                ),
+                lifetime_uncertain=True,
+            ) from interruption
+        raise CommandLifecycleError(
+            subprocess.CompletedProcess(
+                argv,
+                process.returncode,
+                stdout_tail.value(),
+                stderr_tail.value(),
+            ),
+            (
+                "provider command launched, but post-start lifecycle handling failed: "
+                f"{error}"
+            ),
+            lifetime_uncertain=not cleanup_established,
+        ) from error
+    except KeyboardInterrupt as error:
+        with suppress(KeyboardInterrupt):
+            _best_effort_started_process_cleanup(
+                process,
+                privileged_supervision,
+                tuple(started_readers),
+                stop_readers,
+                reader_errors,
+            )
+        raise CommandInterruptedError(
+            subprocess.CompletedProcess(
+                argv,
+                process.returncode,
+                stdout_tail.value(),
+                stderr_tail.value(),
+            ),
+            "provider command was interrupted after launch before cleanup could establish quiescence",
+            lifetime_uncertain=True,
+        ) from error
+
+
+def _best_effort_started_process_cleanup(
+    process: subprocess.Popen[str],
+    privileged_supervision: bool,
+    readers: tuple[threading.Thread, ...],
+    stop_readers: threading.Event,
+    reader_errors: list[OSError],
+) -> bool:
+    """Return whether process and pipe quiescence were established after failure."""
+
+    process_quiesced = process.returncode is not None
+    if not process_quiesced:
+        try:
+            if privileged_supervision:
+                _terminate_privileged_supervisor(process)
+            else:
+                _terminate_process_tree(process)
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            process_quiesced = False
+        else:
+            process_quiesced = process.returncode is not None
+    stop_readers.set()
+    try:
+        readers_clean = _join_output_readers(
+            readers, stop_readers, reader_errors
+        )
+    except KeyboardInterrupt:
+        raise
+    except Exception:
+        readers_clean = False
+    handles_clean = True
+    for stream in (process.stdout, process.stderr):
+        if stream is None:
+            continue
+        try:
+            stream.close()
+        except ValueError:
+            pass
+        except OSError:
+            handles_clean = False
+    return process_quiesced and readers_clean and handles_clean
+
+
+def _supervise_started_process(
+    process: subprocess.Popen[str],
+    argv: tuple[str, ...],
+    timeout: int,
+    privileged_supervision: bool,
+    stdout_tail: _BoundedOutputTail,
+    stderr_tail: _BoundedOutputTail,
+    stop_readers: threading.Event,
+    reader_errors: list[OSError],
+    started_readers: list[threading.Thread],
+) -> subprocess.CompletedProcess[str]:
+    """Supervise a process whose launch is already established as fact."""
+
     readers: tuple[threading.Thread, ...]
     try:
         readers = _start_output_readers(
             process, stdout_tail, stderr_tail, stop_readers, reader_errors
         )
+        started_readers.extend(readers)
     except BaseException as error:
+        if isinstance(error, _OutputReaderInitializationError):
+            started_readers.extend(error.started_readers)
         _cleanup_reader_initialization_failure(
             process,
             argv,
@@ -256,6 +460,21 @@ def _run(
                 _terminate_privileged_supervisor(process)
             else:
                 _terminate_process_tree(process)
+        except OSError as error:
+            raise CommandLifecycleError(
+                subprocess.CompletedProcess(
+                    argv,
+                    process.returncode,
+                    stdout_tail.value(),
+                    stderr_tail.value(),
+                ),
+                (
+                    "provider command launched and exceeded its timeout, but "
+                    f"termination or reaping failed: {error}"
+                ),
+                lifetime_uncertain=process.returncode is None,
+                timed_out=True,
+            ) from error
         except ExecutionContractError:
             _join_output_readers(readers, stop_readers, reader_errors)
             raise _uncertain_output_error(
@@ -269,10 +488,15 @@ def _run(
                     "Tools could not establish quiescence, and provider/package state "
                     "is uncertain"
                 ),
+                timed_out=True,
             ) from None
         if not _join_output_readers(readers, stop_readers, reader_errors):
             raise _uncertain_output_error(
-                argv, process.returncode, stdout_tail, stderr_tail
+                argv,
+                process.returncode,
+                stdout_tail,
+                stderr_tail,
+                timed_out=True,
             )
         raise subprocess.TimeoutExpired(
             argv,
@@ -286,8 +510,38 @@ def _run(
                 _terminate_privileged_supervisor(process)
             else:
                 _terminate_process_tree(process)
+        except OSError as error:
+            if isinstance(interruption, KeyboardInterrupt):
+                raise CommandInterruptedError(
+                    subprocess.CompletedProcess(
+                        argv,
+                        process.returncode,
+                        stdout_tail.value(),
+                        stderr_tail.value(),
+                    ),
+                    (
+                        "provider command was interrupted after launch, but "
+                        f"termination or reaping failed: {error}"
+                    ),
+                    lifetime_uncertain=process.returncode is None,
+                ) from interruption
+            raise
         except ExecutionContractError:
             _join_output_readers(readers, stop_readers, reader_errors)
+            if isinstance(interruption, KeyboardInterrupt):
+                raise CommandInterruptedError(
+                    subprocess.CompletedProcess(
+                        argv,
+                        process.returncode,
+                        stdout_tail.value(),
+                        stderr_tail.value(),
+                    ),
+                    (
+                        "provider command was interrupted after launch; termination "
+                        "could not establish quiescence"
+                    ),
+                    lifetime_uncertain=True,
+                ) from interruption
             raise _uncertain_output_error(
                 argv,
                 process.returncode,
@@ -366,6 +620,7 @@ class _OutputReaderInitializationError(RuntimeError):
     ) -> None:
         super().__init__(str(error))
         self.started_readers = started_readers
+        self.error = error
 
 
 def _cleanup_reader_initialization_failure(
@@ -383,13 +638,16 @@ def _cleanup_reader_initialization_failure(
         if isinstance(error, _OutputReaderInitializationError)
         else ()
     )
+    initialization_error = (
+        error.error if isinstance(error, _OutputReaderInitializationError) else error
+    )
     termination_failed = False
     try:
         if privileged_supervision:
             _terminate_privileged_supervisor(process)
         else:
             _terminate_process_tree(process)
-    except ExecutionContractError:
+    except (ExecutionContractError, OSError):
         termination_failed = True
     stop.set()
     readers_clean = _join_output_readers(started_readers, stop, errors)
@@ -400,6 +658,24 @@ def _cleanup_reader_initialization_failure(
     detail = (
         "output reader initialization failed after the command may have started"
     )
+    if isinstance(initialization_error, KeyboardInterrupt):
+        raise CommandInterruptedError(
+            subprocess.CompletedProcess(
+                argv,
+                process.returncode,
+                stdout_tail.value(),
+                stderr_tail.value(),
+            ),
+            (
+                f"{detail}; interruption occurred after launch and cleanup "
+                + (
+                    "could not establish quiescence"
+                    if termination_failed or not readers_clean
+                    else "terminated and reaped the process"
+                )
+            ),
+            lifetime_uncertain=termination_failed or not readers_clean,
+        ) from initialization_error
     if termination_failed or not readers_clean:
         raise _uncertain_output_error(
             argv,
@@ -411,7 +687,7 @@ def _cleanup_reader_initialization_failure(
                 "quiescence, and provider/package state is uncertain"
             ),
         ) from error
-    raise CommandInitializationError(
+    raise CommandLifecycleError(
         subprocess.CompletedProcess(
             argv,
             process.returncode,
@@ -419,6 +695,7 @@ def _cleanup_reader_initialization_failure(
             stderr_tail.value(),
         ),
         f"{detail}; the process was terminated and reaped, but it may have mutated state before cleanup",
+        lifetime_uncertain=False,
     ) from error
 
 
@@ -428,17 +705,19 @@ def _uncertain_output_error(
     stdout_tail: _BoundedOutputTail,
     stderr_tail: _BoundedOutputTail,
     detail: str | None = None,
+    *,
+    timed_out: bool = False,
 ) -> UncertainSupervisionError:
     result = subprocess.CompletedProcess(
-            argv,
-            returncode,
-            stdout_tail.value(),
-            stderr_tail.value(),
-        )
+        argv,
+        returncode,
+        stdout_tail.value(),
+        stderr_tail.value(),
+    )
     return (
-        UncertainSupervisionError(result, detail)
+        UncertainSupervisionError(result, detail, timed_out=timed_out)
         if detail is not None
-        else UncertainSupervisionError(result)
+        else UncertainSupervisionError(result, timed_out=timed_out)
     )
 
 
@@ -533,6 +812,12 @@ def _join_output_readers(
     try:
         for reader in readers:
             reader.join(timeout=max(0, deadline - time.monotonic()))
+    except KeyboardInterrupt:
+        stop.set()
+        for reader in readers:
+            with suppress(RuntimeError):
+                reader.join(timeout=1)
+        raise
     except BaseException:
         stop.set()
         for reader in readers:
@@ -999,13 +1284,17 @@ def _observed_verified_provider_paths(
 
 
 def _command_report(
-    argv: tuple[str, ...], result: subprocess.CompletedProcess[str]
+    argv: tuple[str, ...],
+    result: subprocess.CompletedProcess[str],
+    *,
+    timed_out: bool = False,
 ) -> CommandReport:
     return CommandReport(
         argv,
         result.returncode,
         _bounded_command_output(result.stdout or ""),
         _bounded_command_output(result.stderr or ""),
+        timed_out,
     )
 
 
@@ -1487,11 +1776,22 @@ def _execute_provider_plan(
                 else:
                     result = runner(argv, runner_timeout)
             except UncertainSupervisionError as error:
-                commands.append(_command_report(argv, error.result))
+                retained_timeout = (
+                    error.timed_out and error.result.returncode is None
+                )
+                commands.append(
+                    _command_report(
+                        argv, error.result, timed_out=retained_timeout
+                    )
+                )
                 reports.append(
                     _action_report(
                         action,
-                        ActionOutcome.SUPERVISOR_FAILED,
+                        (
+                            ActionOutcome.TIMED_OUT
+                            if retained_timeout and not elevated_linux
+                            else ActionOutcome.SUPERVISOR_FAILED
+                        ),
                         tuple(commands),
                         detail=error.detail,
                     )
@@ -1503,12 +1803,27 @@ def _execute_provider_plan(
                     mutation_may_have_started=True,
                     uncertain_external_state=True,
                 )
-            except CommandInitializationError as error:
-                commands.append(_command_report(argv, error.result))
+            except CommandLifecycleError as error:
+                retained_timeout = (
+                    error.timed_out and error.result.returncode is None
+                )
+                commands.append(
+                    _command_report(
+                        argv, error.result, timed_out=retained_timeout
+                    )
+                )
                 reports.append(
                     _action_report(
                         action,
-                        ActionOutcome.COMMAND_START_FAILED,
+                        (
+                            ActionOutcome.TIMED_OUT
+                            if retained_timeout and not elevated_linux
+                            else (
+                                ActionOutcome.SUPERVISOR_FAILED
+                                if error.lifetime_uncertain or elevated_linux
+                                else ActionOutcome.COMMAND_FAILED
+                            )
+                        ),
                         tuple(commands),
                         detail=error.detail,
                     )
@@ -1518,15 +1833,20 @@ def _execute_provider_plan(
                     context,
                     reports,
                     mutation_may_have_started=True,
+                    uncertain_external_state=error.lifetime_uncertain,
                 )
             except CommandInterruptedError as error:
                 commands.append(_command_report(argv, error.result))
                 reports.append(
                     _action_report(
                         action,
-                        ActionOutcome.INTERRUPTED,
+                        (
+                            ActionOutcome.SUPERVISOR_FAILED
+                            if error.lifetime_uncertain
+                            else ActionOutcome.INTERRUPTED
+                        ),
                         tuple(commands),
-                        detail="provider command interrupted after bounded cleanup",
+                        detail=error.detail,
                     )
                 )
                 raise ProviderPlanInterrupted(
@@ -1535,6 +1855,7 @@ def _execute_provider_plan(
                         context,
                         reports,
                         mutation_may_have_started=True,
+                        uncertain_external_state=error.lifetime_uncertain,
                     )
                 ) from error
             except subprocess.TimeoutExpired as error:
