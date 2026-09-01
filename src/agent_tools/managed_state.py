@@ -19,6 +19,7 @@ from .capabilities import MachineState, get_capability
 from .provider_execution import (
     ActionOutcome,
     ActionReport,
+    ELEVATED_TERM_TO_KILL_GRACE_SECONDS,
     PlanOutcome,
     PlanExecutionReport,
     ProviderPlanInterrupted,
@@ -31,6 +32,16 @@ from .python_selection import normalize_architecture
 
 SCHEMA_VERSION = 1
 _MANAGED_STATE_LOCK = threading.RLock()
+_PERSISTED_ATTEMPT_OUTCOMES = {
+    ActionOutcome.SUCCEEDED.value,
+    ActionOutcome.COMMAND_FAILED.value,
+    ActionOutcome.COMMAND_START_FAILED.value,
+    ActionOutcome.TIMED_OUT.value,
+    ActionOutcome.FORCED_KILL.value,
+    ActionOutcome.SUPERVISOR_FAILED.value,
+    ActionOutcome.INTERRUPTED.value,
+    ActionOutcome.VERIFICATION_FAILED.value,
+}
 
 
 class ManagedStateError(RuntimeError):
@@ -246,6 +257,12 @@ def load_document(path: Path) -> dict[str, Any]:
             raise ManagedStateError(
                 f"managed-state record {index} has inconsistent package or context evidence"
             )
+        if not _is_absolute_for_platform(
+            package_manager["executable"], context["platform"]
+        ):
+            raise ManagedStateError(
+                f"managed-state record {index} has a non-absolute package-manager executable"
+            )
         commands = requested.get("commands")
         if (
             not isinstance(requested.get("kind"), str)
@@ -311,9 +328,13 @@ def load_document(path: Path) -> dict[str, Any]:
         if not (
             isinstance(verification.get("outcome"), str)
             and verification["outcome"]
-            in {outcome.value for outcome in ActionOutcome}
+            in _PERSISTED_ATTEMPT_OUTCOMES
             and isinstance(verification.get("verified_paths"), list)
             and all(isinstance(item, str) for item in verification["verified_paths"])
+            and all(
+                _is_absolute_for_platform(item, context["platform"])
+                for item in verification["verified_paths"]
+            )
             and isinstance(verification.get("detail"), str)
         ):
             raise ManagedStateError(f"managed-state record {index} has invalid verification evidence")
@@ -339,18 +360,129 @@ def load_document(path: Path) -> dict[str, Any]:
                 and isinstance(evidence.get("timed_out"), bool)
             ):
                 raise ManagedStateError(f"managed-state record {index} has invalid command evidence")
-        if verification["outcome"] == ActionOutcome.SUCCEEDED.value and (
-            not verification["verified_paths"]
-            or len(record["command_evidence"]) != len(expected_commands)
+        outcome = verification["outcome"]
+        evidence_items = record["command_evidence"]
+        if len(evidence_items) > len(expected_commands) or (
+            outcome != ActionOutcome.INTERRUPTED.value and not evidence_items
+        ):
+            raise ManagedStateError(
+                f"managed-state record {index} has inconsistent command evidence count"
+            )
+        for evidence, reviewed_command in zip(
+            evidence_items, expected_commands
+        ):
+            if not _matches_recorded_command(
+                evidence["argv"],
+                reviewed_command,
+                platform_name=context["platform"],
+                manager_name=package_manager["name"],
+            ):
+                raise ManagedStateError(
+                    f"managed-state record {index} has unreviewed command evidence"
+                )
+        if (
+            context["platform"] == "Linux"
+            and package_manager["name"] in {"apt", "dnf", "pacman"}
+            and len(
+                {
+                    tuple(evidence["argv"][: -len(reviewed_command)])
+                    for evidence, reviewed_command in zip(
+                        evidence_items, expected_commands
+                    )
+                }
+            )
+            > 1
+        ):
+            raise ManagedStateError(
+                f"managed-state record {index} has inconsistent supervisor evidence"
+            )
+        if outcome in {
+            ActionOutcome.SUCCEEDED.value,
+            ActionOutcome.VERIFICATION_FAILED.value,
+        } and (
+            len(evidence_items) != len(expected_commands)
             or any(
                 evidence["returncode"] != 0 or evidence["timed_out"]
-                for evidence in record["command_evidence"]
+                for evidence in evidence_items
             )
+        ):
+            raise ManagedStateError(
+                f"managed-state record {index} has inconsistent "
+                + (
+                    "success evidence"
+                    if outcome == ActionOutcome.SUCCEEDED.value
+                    else "completed command evidence"
+                )
+            )
+        terminal = evidence_items[-1] if evidence_items else None
+        if (
+            outcome == ActionOutcome.COMMAND_FAILED.value
+            and (
+                terminal is None
+                or terminal["returncode"] in {None, 0}
+                or terminal["timed_out"]
+            )
+        ) or (
+            outcome == ActionOutcome.TIMED_OUT.value
+            and (terminal is None or not terminal["timed_out"])
+        ) or (
+            outcome == ActionOutcome.FORCED_KILL.value
+            and (
+                terminal is None
+                or terminal["timed_out"]
+                or terminal["returncode"] not in {137, -9}
+            )
+        ):
+            raise ManagedStateError(
+                f"managed-state record {index} has inconsistent terminal command evidence"
+            )
+        if outcome == ActionOutcome.SUCCEEDED.value and (
+            not verification["verified_paths"]
         ):
             raise ManagedStateError(
                 f"managed-state record {index} has inconsistent success evidence"
             )
     return value
+
+
+def _is_absolute_for_platform(value: str, platform_name: object) -> bool:
+    if not value:
+        return False
+    if platform_name in {"nt", "Windows"}:
+        return PureWindowsPath(value).is_absolute()
+    return posixpath.isabs(value)
+
+
+def _matches_recorded_command(
+    observed: list[str],
+    reviewed: list[str],
+    *,
+    platform_name: str,
+    manager_name: str,
+) -> bool:
+    if platform_name != "Linux" or manager_name not in {"apt", "dnf", "pacman"}:
+        return observed == reviewed
+    prefix_length = len(observed) - len(reviewed)
+    if prefix_length not in {4, 7} or observed[prefix_length:] != reviewed:
+        return False
+    supervisor_index = 0
+    if prefix_length == 7:
+        if (
+            not _is_absolute_for_platform(observed[0], platform_name)
+            or observed[1:3] != ["-n", "--"]
+        ):
+            return False
+        supervisor_index = 3
+    supervisor = observed[supervisor_index : supervisor_index + 4]
+    return (
+        _is_absolute_for_platform(supervisor[0], platform_name)
+        and supervisor[1] == "--signal=TERM"
+        and supervisor[2]
+        == f"--kill-after={ELEVATED_TERM_TO_KILL_GRACE_SECONDS}s"
+        and supervisor[3].endswith("s")
+        and supervisor[3][:-1].isdigit()
+        and int(supervisor[3][:-1]) > 0
+    )
 
 
 def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

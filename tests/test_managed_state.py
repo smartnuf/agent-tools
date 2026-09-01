@@ -32,9 +32,26 @@ class ManagedStateTests(unittest.TestCase):
         commands: bool = True,
     ) -> provider_execution.PlanExecutionReport:
         action = self.plan.actions[0]
+        returncode = {
+            provider_execution.ActionOutcome.COMMAND_FAILED: 1,
+            provider_execution.ActionOutcome.COMMAND_START_FAILED: None,
+            provider_execution.ActionOutcome.FORCED_KILL: 137,
+        }.get(outcome, 0)
         command_reports = (
             tuple(
-                provider_execution.CommandReport(command, 0, "installed", "")
+                provider_execution.CommandReport(
+                    (
+                        "/usr/bin/timeout",
+                        "--signal=TERM",
+                        "--kill-after=5s",
+                        "900s",
+                        *command,
+                    ),
+                    returncode,
+                    "installed",
+                    "",
+                    outcome is provider_execution.ActionOutcome.TIMED_OUT,
+                )
                 for command in action.commands
             )
             if commands
@@ -344,6 +361,116 @@ class ManagedStateTests(unittest.TestCase):
                     managed_state.ManagedStateError, "adapter semantics"
                 ):
                     managed_state.load_document(path)
+
+    def test_recorded_manager_and_success_paths_are_platform_absolute(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            original = managed_state.load_document(path)
+            for fields, value, message in (
+                (("package_manager", "executable"), "apt-get", "package-manager"),
+                (
+                    ("verification", "verified_paths"),
+                    ["relative/gs"],
+                    "verification evidence",
+                ),
+            ):
+                with self.subTest(fields=fields):
+                    document = json.loads(json.dumps(original))
+                    document["records"][0][fields[0]][fields[1]] = value
+                    if fields[0] == "package_manager":
+                        document["records"][0]["requested_action"]["commands"] = [
+                            list(command)
+                            for command in provider_plans.adapter_commands(
+                                "apt", "ghostscript", executable_path=value
+                            )
+                        ]
+                    path.write_text(json.dumps(document), encoding="utf-8")
+                    with self.assertRaisesRegex(managed_state.ManagedStateError, message):
+                        managed_state.load_document(path)
+
+    def test_command_evidence_must_match_reviewed_or_authorized_wrapper(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            original = managed_state.load_document(path)
+            for argv in (
+                [],
+                ["/bin/sh", "-c", "unreviewed"],
+                [
+                    "/usr/bin/sudo", "--", "/usr/bin/timeout",
+                    "--signal=TERM", "--kill-after=5s", "900s",
+                    *self.plan.actions[0].commands[0],
+                ],
+                [
+                    "/usr/bin/timeout", "--foreground", "--kill-after=5s", "900s",
+                    *self.plan.actions[0].commands[0],
+                ],
+            ):
+                with self.subTest(argv=argv):
+                    document = json.loads(json.dumps(original))
+                    document["records"][0]["command_evidence"][0]["argv"] = argv
+                    path.write_text(json.dumps(document), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError, "command evidence"
+                    ):
+                        managed_state.load_document(path)
+            document = json.loads(json.dumps(original))
+            for evidence in document["records"][0]["command_evidence"]:
+                evidence["argv"] = [
+                    "/usr/bin/sudo",
+                    "-n",
+                    "--",
+                    *evidence["argv"],
+                ]
+            path.write_text(json.dumps(document), encoding="utf-8")
+            managed_state.load_document(path)
+
+            document["records"][0]["command_evidence"][1]["argv"] = original[
+                "records"
+            ][0]["command_evidence"][1]["argv"]
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError, "supervisor evidence"
+            ):
+                managed_state.load_document(path)
+
+    def test_only_writer_reachable_attempt_outcomes_are_accepted(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            original = managed_state.load_document(path)
+            for outcome in (
+                "not-attempted",
+                "already-satisfied",
+                "refused",
+                "manager-unavailable",
+                "privilege-unavailable",
+                "preflight-failed",
+            ):
+                with self.subTest(outcome=outcome):
+                    document = json.loads(json.dumps(original))
+                    document["records"][0]["verification"]["outcome"] = outcome
+                    path.write_text(json.dumps(document), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError, "verification evidence"
+                    ):
+                        managed_state.load_document(path)
 
     def test_success_requires_zero_non_timeout_commands_and_verified_paths(self) -> None:
         with TemporaryDirectory() as directory:
