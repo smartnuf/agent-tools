@@ -110,6 +110,12 @@ _MANAGED_EXECUTION_RESULT_TYPE = ManagedExecutionResult
 class _PersistencePhaseState:
     outcome: PersistenceOutcome | None = None
     detail: str = ""
+    interruption: (
+        ProviderPlanInterrupted
+        | ManagedExecutionInterrupted
+        | PersistenceInterrupted
+        | None
+    ) = None
 
 
 def managed_state_path(
@@ -851,6 +857,8 @@ def execute_provider_plan(
     if plan.context is None:
         raise ManagedStateError("mutating provider plan has no execution context")
     result: ManagedExecutionResult | None = None
+    report: PlanExecutionReport | None = None
+    persistence_phase = _PersistencePhaseState()
     pending_interruption: (
         ProviderPlanInterrupted
         | ManagedExecutionInterrupted
@@ -869,7 +877,6 @@ def execute_provider_plan(
                     None, PersistenceOutcome.BLOCKED, str(error)
                 )
             else:
-                persistence_phase = _PersistencePhaseState()
                 requested_at = _timestamp()
                 try:
                     report = executor(plan, **executor_arguments)
@@ -887,6 +894,7 @@ def execute_provider_plan(
                         report,
                         requested_at,
                         pending_interruption,
+                        persistence_phase,
                     )
                 )
 
@@ -964,10 +972,49 @@ def execute_provider_plan(
     ):
         raise
     except KeyboardInterrupt as error:
-        final_interruption = pending_interruption or _guarded_managed_interruption(
-            error
+        final_interruption = (
+            pending_interruption
+            or persistence_phase.interruption
+            or _guarded_managed_interruption(error)
         )
-        _attach_managed_result(final_interruption, result)
+        if (
+            result is None
+            and report is not None
+            and persistence_phase.outcome
+            in {PersistenceOutcome.FAILED, PersistenceOutcome.UNKNOWN}
+        ):
+            try:
+                result, _ = _guarded_persistence_failure_result(
+                    report,
+                    persistence_phase.outcome,
+                    persistence_phase.detail,
+                )
+            except KeyboardInterrupt:
+                recovery_guidance = (
+                    "provider execution evidence is preserved in this result",
+                    "provenance was not durably recorded"
+                    if persistence_phase.outcome is PersistenceOutcome.FAILED
+                    else "whether provenance became durable is unknown",
+                    "do not rerun provider mutation automatically and do not uninstall or roll back",
+                    "rediscover current machine state and generate a fresh plan before any later mutation",
+                )
+                result = _MANAGED_EXECUTION_RESULT_TYPE.__new__(
+                    _MANAGED_EXECUTION_RESULT_TYPE
+                )
+                object.__setattr__(result, "execution", report)
+                object.__setattr__(
+                    result, "persistence", persistence_phase.outcome
+                )
+                object.__setattr__(
+                    result, "persistence_detail", persistence_phase.detail
+                )
+                object.__setattr__(
+                    result, "recovery_guidance", recovery_guidance
+                )
+        try:
+            _attach_managed_result(final_interruption, result)
+        except KeyboardInterrupt:
+            object.__setattr__(final_interruption, "managed_result", result)
         raise final_interruption
 
     if result is None:
@@ -989,6 +1036,7 @@ def _prepare_update_for_persistence(
         | PersistenceInterrupted
         | None
     ),
+    persistence_phase: _PersistencePhaseState,
 ) -> tuple[
     _PreparedUpdate | None,
     ManagedExecutionResult | None,
@@ -999,6 +1047,8 @@ def _prepare_update_for_persistence(
 ]:
     """Prepare one update, with one bounded recovery attempt after interruption."""
 
+    if pending_interruption is not None:
+        persistence_phase.interruption = pending_interruption
     try:
         return (
             _prepare_update(document, plan, report, requested_at),
@@ -1008,6 +1058,7 @@ def _prepare_update_for_persistence(
     except KeyboardInterrupt as error:
         if pending_interruption is None:
             pending_interruption = _guarded_managed_interruption(error)
+        persistence_phase.interruption = pending_interruption
         try:
             return (
                 _prepare_update(document, plan, report, requested_at),
@@ -1015,16 +1066,22 @@ def _prepare_update_for_persistence(
                 pending_interruption,
             )
         except KeyboardInterrupt as repeated_interruption:
+            persistence_phase.outcome = PersistenceOutcome.FAILED
+            persistence_phase.detail = (
+                "provenance record construction was repeatedly interrupted "
+                "before persistence began"
+            )
             result, _ = _record_construction_failure_result(
                 report,
                 repeated_interruption,
-                detail=(
-                    "provenance record construction was repeatedly interrupted "
-                    "before persistence began"
-                ),
+                detail=persistence_phase.detail,
             )
             return None, result, pending_interruption
         except Exception as construction_error:
+            persistence_phase.outcome = PersistenceOutcome.FAILED
+            persistence_phase.detail = (
+                "provenance record construction failed before persistence began"
+            )
             result, finalization_interruption = (
                 _record_construction_failure_result(report, construction_error)
             )
@@ -1037,6 +1094,10 @@ def _prepare_update_for_persistence(
                 )
             return None, result, pending_interruption
     except Exception as construction_error:
+        persistence_phase.outcome = PersistenceOutcome.FAILED
+        persistence_phase.detail = (
+            "provenance record construction failed before persistence began"
+        )
         result, finalization_interruption = _record_construction_failure_result(
             report, construction_error
         )

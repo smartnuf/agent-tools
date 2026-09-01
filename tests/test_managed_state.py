@@ -2,6 +2,7 @@ import json
 import subprocess
 import threading
 import unittest
+from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -1605,6 +1606,86 @@ class ManagedStateTests(unittest.TestCase):
             )
             self.assertEqual(managed_state.load_document(path), original)
             executor.assert_called_once()
+
+    def test_repeated_preparation_finalization_boundaries_retain_failed_result(
+        self,
+    ) -> None:
+        for boundary in ("finalizer", "result fallback", "attachment"):
+            with self.subTest(boundary=boundary), TemporaryDirectory() as directory:
+                path = Path(directory) / "managed-state.json"
+                original = managed_state.empty_document()
+                path.write_text(json.dumps(original), encoding="utf-8")
+                execution = self.report()
+                executor = Mock(return_value=execution)
+                first_interruption = KeyboardInterrupt()
+                atomic_write = Mock(
+                    side_effect=AssertionError("persistence must not begin")
+                )
+                with ExitStack() as stack:
+                    stack.enter_context(
+                        patch.object(
+                            managed_state,
+                            "_prepare_update",
+                            side_effect=(
+                                first_interruption,
+                                KeyboardInterrupt(),
+                            ),
+                        )
+                    )
+                    stack.enter_context(
+                        patch.object(
+                            managed_state,
+                            "_record_construction_failure_result",
+                            side_effect=KeyboardInterrupt(),
+                        )
+                    )
+                    stack.enter_context(
+                        patch.object(
+                            managed_state,
+                            "_atomic_write",
+                            atomic_write,
+                        )
+                    )
+                    if boundary == "result fallback":
+                        stack.enter_context(
+                            patch.object(
+                                managed_state,
+                                "_guarded_persistence_failure_result",
+                                side_effect=KeyboardInterrupt(),
+                            )
+                        )
+                    if boundary == "attachment":
+                        stack.enter_context(
+                            patch.object(
+                                managed_state,
+                                "_attach_managed_result",
+                                side_effect=KeyboardInterrupt(),
+                            )
+                        )
+                    with self.assertRaises(
+                        managed_state.ManagedExecutionInterrupted
+                    ) as raised:
+                        managed_state.execute_provider_plan(
+                            self.plan,
+                            state_path=path,
+                            executor=executor,
+                            allow_provider_mutation=True,
+                        )
+                result = raised.exception.managed_result
+                self.assertIs(raised.exception.original, first_interruption)
+                self.assertIsNotNone(result)
+                self.assertIs(result.execution, execution)
+                self.assertEqual(
+                    result.persistence, managed_state.PersistenceOutcome.FAILED
+                )
+                self.assertIn("repeatedly interrupted", result.persistence_detail)
+                self.assertIn(
+                    "do not rerun provider mutation automatically and do not uninstall or roll back",
+                    result.recovery_guidance,
+                )
+                self.assertEqual(managed_state.load_document(path), original)
+                atomic_write.assert_not_called()
+                executor.assert_called_once()
 
     def test_repeated_interruption_while_building_prewrite_failure_is_structured(
         self,
