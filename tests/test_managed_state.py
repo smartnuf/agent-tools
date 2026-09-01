@@ -10,6 +10,14 @@ from unittest.mock import Mock, patch
 from agent_tools import capabilities, managed_state, provider_execution, provider_plans
 
 
+class _InterruptOnExit:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exception_type, exception, traceback):
+        raise KeyboardInterrupt()
+
+
 class ManagedStateTests(unittest.TestCase):
     def setUp(self) -> None:
         self.machine = capabilities.MachineState("Linux", "x86_64", "host")
@@ -571,16 +579,45 @@ class ManagedStateTests(unittest.TestCase):
                 managed_state.load_document(path)
 
     def test_timeout_requires_null_returncode(self) -> None:
+        machine = capabilities.MachineState("Darwin", "arm64", "host")
+        manager = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            machine,
+            locator=lambda probe, context: None,
+        )
+        plan = provider_plans.generate_provider_plan(
+            (absent,), ("ghostscript",), package_managers=(manager,)
+        )
+        action = plan.actions[0]
+        report = provider_execution.PlanExecutionReport(
+            machine,
+            plan.requested_capabilities,
+            provider_execution.PlanOutcome.PARTIAL_FAILURE,
+            (
+                provider_execution.ActionReport(
+                    action.capability_id,
+                    action.provider_id,
+                    action.manager,
+                    action.installation_unit,
+                    provider_execution.ActionOutcome.TIMED_OUT,
+                    (
+                        provider_execution.CommandReport(
+                            action.commands[0], None, "partial output", "", True
+                        ),
+                    ),
+                    detail="command timed out",
+                ),
+            ),
+        )
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
             managed_state.execute_provider_plan(
-                self.plan,
+                plan,
                 state_path=path,
-                executor=Mock(
-                    return_value=self.report(
-                        provider_execution.ActionOutcome.TIMED_OUT
-                    )
-                ),
+                executor=Mock(return_value=report),
                 allow_provider_mutation=True,
             )
             document = managed_state.load_document(path)
@@ -669,6 +706,40 @@ class ManagedStateTests(unittest.TestCase):
             document["records"][0]["command_evidence"][-1]["returncode"] = 124
             path.write_text(json.dumps(document), encoding="utf-8")
             managed_state.load_document(path)
+
+    def test_supervised_execution_cannot_persist_unsupervised_timeout(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(
+                    return_value=self.report(
+                        provider_execution.ActionOutcome.COMMAND_FAILED
+                    )
+                ),
+                allow_provider_mutation=True,
+            )
+            original = managed_state.load_document(path)
+            root_argv = original["records"][0]["command_evidence"][-1]["argv"]
+            for wrapper_argv in (
+                root_argv,
+                ["/usr/bin/sudo", "-n", "--", *root_argv],
+            ):
+                with self.subTest(wrapper_argv=wrapper_argv[:4]):
+                    document = json.loads(json.dumps(original))
+                    record = document["records"][0]
+                    record["verification"]["outcome"] = "timed-out"
+                    terminal = record["command_evidence"][-1]
+                    terminal["argv"] = wrapper_argv
+                    terminal["returncode"] = None
+                    terminal["timed_out"] = True
+                    path.write_text(json.dumps(document), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError,
+                        "terminal command evidence",
+                    ):
+                        managed_state.load_document(path)
 
     def test_current_user_command_failure_can_preserve_reserved_numeric_status(self) -> None:
         machine = capabilities.MachineState("Darwin", "arm64", "host")
@@ -1111,6 +1182,193 @@ class ManagedStateTests(unittest.TestCase):
             self.assertEqual(result.persistence, managed_state.PersistenceOutcome.FAILED)
             self.assertIn("provenance was not durably recorded", result.recovery_guidance)
             self.assertFalse(path.exists())
+
+    def test_record_construction_failure_is_structured_before_persistence(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            original = managed_state.empty_document()
+            path.write_text(json.dumps(original), encoding="utf-8")
+            execution = self.report()
+            executor = Mock(return_value=execution)
+            with patch.object(
+                managed_state.uuid,
+                "uuid4",
+                side_effect=OSError("randomness unavailable"),
+            ):
+                result = managed_state.execute_provider_plan(
+                    self.plan,
+                    state_path=path,
+                    executor=executor,
+                    allow_provider_mutation=True,
+                )
+            self.assertIs(result.execution, execution)
+            self.assertEqual(
+                result.persistence, managed_state.PersistenceOutcome.FAILED
+            )
+            self.assertIn("before persistence began", result.persistence_detail)
+            self.assertEqual(managed_state.load_document(path), original)
+            executor.assert_called_once()
+
+    def test_record_construction_retry_failure_preserves_pending_interrupt(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            original = managed_state.empty_document()
+            path.write_text(json.dumps(original), encoding="utf-8")
+            execution = self.report()
+            executor = Mock(return_value=execution)
+            with patch.object(
+                managed_state,
+                "_record",
+                side_effect=(KeyboardInterrupt(), OSError("assembly failed")),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            result = raised.exception.managed_result
+            self.assertIs(result.execution, execution)
+            self.assertEqual(
+                result.persistence, managed_state.PersistenceOutcome.FAILED
+            )
+            self.assertEqual(managed_state.load_document(path), original)
+            executor.assert_called_once()
+
+    def test_lock_exit_interrupt_preserves_successful_result(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            execution = self.report()
+            executor = Mock(return_value=execution)
+            with patch.object(
+                managed_state,
+                "_provider_execution_transaction",
+                return_value=_InterruptOnExit(),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            result = raised.exception.managed_result
+            self.assertIs(result.execution, execution)
+            self.assertEqual(
+                result.persistence, managed_state.PersistenceOutcome.SUCCEEDED
+            )
+            self.assertEqual(len(managed_state.load_document(path)["records"]), 1)
+            executor.assert_called_once()
+
+    def test_lock_exit_interrupt_preserves_failed_persistence_result(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            execution = self.report()
+            executor = Mock(return_value=execution)
+            with (
+                patch.object(
+                    managed_state,
+                    "_provider_execution_transaction",
+                    return_value=_InterruptOnExit(),
+                ),
+                patch.object(
+                    managed_state,
+                    "_atomic_write",
+                    side_effect=managed_state.PersistenceError(
+                        managed_state.PersistenceOutcome.FAILED,
+                        "write failed",
+                    ),
+                ),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            result = raised.exception.managed_result
+            self.assertIs(result.execution, execution)
+            self.assertEqual(
+                result.persistence, managed_state.PersistenceOutcome.FAILED
+            )
+            executor.assert_called_once()
+
+    def test_lock_exit_interrupt_preserves_provider_interruption(self) -> None:
+        action = replace(
+            self.report().actions[0],
+            outcome=provider_execution.ActionOutcome.INTERRUPTED,
+            final_verified_paths=(),
+        )
+        report = provider_execution.PlanExecutionReport(
+            self.machine,
+            self.plan.requested_capabilities,
+            provider_execution.PlanOutcome.PARTIAL_FAILURE,
+            (action,),
+        )
+        interruption = provider_execution.ProviderPlanInterrupted(report)
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            executor = Mock(side_effect=interruption)
+            with patch.object(
+                managed_state,
+                "_provider_execution_transaction",
+                return_value=_InterruptOnExit(),
+            ):
+                with self.assertRaises(
+                    provider_execution.ProviderPlanInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            self.assertIs(raised.exception, interruption)
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.SUCCEEDED,
+            )
+            executor.assert_called_once()
+
+    def test_lock_exit_interrupt_preserves_persistence_interruption(self) -> None:
+        failure = managed_state.PersistenceInterrupted(
+            managed_state.PersistenceOutcome.UNKNOWN,
+            "durability unknown",
+        )
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            executor = Mock(return_value=self.report())
+            with (
+                patch.object(
+                    managed_state,
+                    "_provider_execution_transaction",
+                    return_value=_InterruptOnExit(),
+                ),
+                patch.object(managed_state, "_atomic_write", side_effect=failure),
+            ):
+                with self.assertRaises(
+                    managed_state.PersistenceInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            self.assertIs(raised.exception, failure)
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.UNKNOWN,
+            )
+            executor.assert_called_once()
 
     def test_new_directory_entries_are_synced_before_success(self) -> None:
         with TemporaryDirectory() as directory:
