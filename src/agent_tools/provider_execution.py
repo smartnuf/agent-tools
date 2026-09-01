@@ -299,15 +299,13 @@ def _run(
     except CommandInterruptedError as error:
         if not error.lifetime_uncertain:
             raise
-        cleanup_established = False
-        with suppress(KeyboardInterrupt):
-            cleanup_established = _best_effort_started_process_cleanup(
-                process,
-                privileged_supervision,
-                tuple(started_readers),
-                stop_readers,
-                reader_errors,
-            )
+        cleanup_established = _best_effort_started_process_cleanup(
+            process,
+            privileged_supervision,
+            tuple(started_readers),
+            stop_readers,
+            reader_errors,
+        )
         raise CommandInterruptedError(
             subprocess.CompletedProcess(
                 argv,
@@ -355,14 +353,13 @@ def _run(
             lifetime_uncertain=not cleanup_established,
         ) from error
     except KeyboardInterrupt as error:
-        with suppress(KeyboardInterrupt):
-            _best_effort_started_process_cleanup(
-                process,
-                privileged_supervision,
-                tuple(started_readers),
-                stop_readers,
-                reader_errors,
-            )
+        _best_effort_started_process_cleanup(
+            process,
+            privileged_supervision,
+            tuple(started_readers),
+            stop_readers,
+            reader_errors,
+        )
         raise CommandInterruptedError(
             subprocess.CompletedProcess(
                 argv,
