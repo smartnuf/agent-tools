@@ -2025,6 +2025,70 @@ class ManagedStateTests(unittest.TestCase):
             self.assertFalse(path.exists())
             executor.assert_called_once()
 
+    def test_error_detail_interrupt_preserves_pre_replace_failed_outcome(
+        self,
+    ) -> None:
+        class DetailInterrupted(OSError):
+            def __str__(self) -> str:
+                raise KeyboardInterrupt()
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            execution = self.report()
+            executor = Mock(return_value=execution)
+            with patch.object(
+                managed_state.json,
+                "dump",
+                side_effect=DetailInterrupted(),
+            ):
+                result = managed_state.execute_provider_plan(
+                    self.plan,
+                    state_path=path,
+                    executor=executor,
+                    allow_provider_mutation=True,
+                )
+            self.assertIs(result.execution, execution)
+            self.assertEqual(
+                result.persistence, managed_state.PersistenceOutcome.FAILED
+            )
+            self.assertIn(
+                "exception detail was interrupted", result.persistence_detail
+            )
+            self.assertFalse(path.exists())
+            executor.assert_called_once()
+
+    def test_preparation_error_detail_interrupt_remains_structured_failed(
+        self,
+    ) -> None:
+        class DetailInterrupted(OSError):
+            def __str__(self) -> str:
+                raise KeyboardInterrupt()
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            execution = self.report()
+            executor = Mock(return_value=execution)
+            with patch.object(
+                managed_state,
+                "_prepare_update",
+                side_effect=DetailInterrupted(),
+            ):
+                result = managed_state.execute_provider_plan(
+                    self.plan,
+                    state_path=path,
+                    executor=executor,
+                    allow_provider_mutation=True,
+                )
+            self.assertIs(result.execution, execution)
+            self.assertEqual(
+                result.persistence, managed_state.PersistenceOutcome.FAILED
+            )
+            self.assertIn(
+                "exception detail was interrupted", result.persistence_detail
+            )
+            self.assertFalse(path.exists())
+            executor.assert_called_once()
+
     def test_interrupt_carrier_construction_interrupt_preserves_primary_outcome(
         self,
     ) -> None:

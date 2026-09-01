@@ -665,9 +665,7 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
             if replace_attempted
             else PersistenceOutcome.FAILED
         )
-        failure = _guarded_persistence_error(
-            outcome, f"managed-state atomic persistence failed: {error}"
-        )
+        failure = _guarded_persistence_error(outcome, error)
         _best_effort_discard_temporary(temporary)
         raise failure from error
     except KeyboardInterrupt as error:
@@ -693,8 +691,11 @@ def _best_effort_discard_temporary(temporary: Path | None) -> None:
 
 
 def _guarded_persistence_error(
-    outcome: PersistenceOutcome, detail: str
+    outcome: PersistenceOutcome, error: OSError
 ) -> PersistenceError:
+    detail = _safe_exception_detail(
+        "managed-state atomic persistence failed", error
+    )
     try:
         return PersistenceError(outcome, detail)
     except KeyboardInterrupt:
@@ -1064,11 +1065,28 @@ def _record_construction_failure_result(
         report,
         PersistenceOutcome.FAILED,
         detail
-        or (
-            "provenance record construction failed before persistence began: "
-            f"{type(error).__name__}: {error}"
+        or _safe_exception_detail(
+            "provenance record construction failed before persistence began",
+            error,
+            include_type=True,
         ),
     )
+
+
+def _safe_exception_detail(
+    prefix: str,
+    error: BaseException,
+    *,
+    include_type: bool = False,
+) -> str:
+    error_type = type(error).__name__
+    try:
+        rendered = str(error)
+    except KeyboardInterrupt:
+        return f"{prefix}: {error_type}; exception detail was interrupted"
+    if include_type:
+        return f"{prefix}: {error_type}: {rendered}"
+    return f"{prefix}: {rendered}"
 
 
 def _guarded_persistence_failure_result(
