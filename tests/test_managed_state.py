@@ -2,7 +2,6 @@ import json
 import subprocess
 import threading
 import unittest
-from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -1610,82 +1609,64 @@ class ManagedStateTests(unittest.TestCase):
     def test_repeated_preparation_finalization_boundaries_retain_failed_result(
         self,
     ) -> None:
-        for boundary in ("finalizer", "result fallback", "attachment"):
-            with self.subTest(boundary=boundary), TemporaryDirectory() as directory:
-                path = Path(directory) / "managed-state.json"
-                original = managed_state.empty_document()
-                path.write_text(json.dumps(original), encoding="utf-8")
-                execution = self.report()
-                executor = Mock(return_value=execution)
-                first_interruption = KeyboardInterrupt()
-                atomic_write = Mock(
-                    side_effect=AssertionError("persistence must not begin")
-                )
-                with ExitStack() as stack:
-                    stack.enter_context(
-                        patch.object(
-                            managed_state,
-                            "_prepare_update",
-                            side_effect=(
-                                first_interruption,
-                                KeyboardInterrupt(),
-                            ),
-                        )
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            original = managed_state.empty_document()
+            path.write_text(json.dumps(original), encoding="utf-8")
+            execution = self.report()
+            executor = Mock(return_value=execution)
+            first_interruption = KeyboardInterrupt()
+            atomic_write = Mock(
+                side_effect=AssertionError("persistence must not begin")
+            )
+            finalizer = managed_state._finalize_transaction
+            finalization_calls = 0
+
+            def interrupt_finalization_twice(transaction):
+                nonlocal finalization_calls
+                finalization_calls += 1
+                if finalization_calls <= 2:
+                    raise KeyboardInterrupt()
+                return finalizer(transaction)
+
+            with (
+                patch.object(
+                    managed_state,
+                    "_prepare_update",
+                    side_effect=(first_interruption, KeyboardInterrupt()),
+                ),
+                patch.object(
+                    managed_state,
+                    "_finalize_transaction",
+                    side_effect=interrupt_finalization_twice,
+                ),
+                patch.object(managed_state, "_atomic_write", atomic_write),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
                     )
-                    stack.enter_context(
-                        patch.object(
-                            managed_state,
-                            "_record_construction_failure_result",
-                            side_effect=KeyboardInterrupt(),
-                        )
-                    )
-                    stack.enter_context(
-                        patch.object(
-                            managed_state,
-                            "_atomic_write",
-                            atomic_write,
-                        )
-                    )
-                    if boundary == "result fallback":
-                        stack.enter_context(
-                            patch.object(
-                                managed_state,
-                                "_guarded_persistence_failure_result",
-                                side_effect=KeyboardInterrupt(),
-                            )
-                        )
-                    if boundary == "attachment":
-                        stack.enter_context(
-                            patch.object(
-                                managed_state,
-                                "_attach_managed_result",
-                                side_effect=KeyboardInterrupt(),
-                            )
-                        )
-                    with self.assertRaises(
-                        managed_state.ManagedExecutionInterrupted
-                    ) as raised:
-                        managed_state.execute_provider_plan(
-                            self.plan,
-                            state_path=path,
-                            executor=executor,
-                            allow_provider_mutation=True,
-                        )
-                result = raised.exception.managed_result
-                self.assertIs(raised.exception.original, first_interruption)
-                self.assertIsNotNone(result)
-                self.assertIs(result.execution, execution)
-                self.assertEqual(
-                    result.persistence, managed_state.PersistenceOutcome.FAILED
-                )
-                self.assertIn("repeatedly interrupted", result.persistence_detail)
-                self.assertIn(
-                    "do not rerun provider mutation automatically and do not uninstall or roll back",
-                    result.recovery_guidance,
-                )
-                self.assertEqual(managed_state.load_document(path), original)
-                atomic_write.assert_not_called()
-                executor.assert_called_once()
+            result = raised.exception.managed_result
+            self.assertIs(raised.exception.original, first_interruption)
+            self.assertIsNotNone(result)
+            self.assertIs(result.execution, execution)
+            self.assertEqual(
+                result.persistence, managed_state.PersistenceOutcome.FAILED
+            )
+            self.assertIn("repeatedly interrupted", result.persistence_detail)
+            self.assertIn(
+                "do not rerun provider mutation automatically and do not uninstall or roll back",
+                result.recovery_guidance,
+            )
+            self.assertEqual(finalization_calls, 3)
+            self.assertEqual(managed_state.load_document(path), original)
+            atomic_write.assert_not_called()
+            executor.assert_called_once()
 
     def test_repeated_interruption_while_building_prewrite_failure_is_structured(
         self,
@@ -1694,6 +1675,16 @@ class ManagedStateTests(unittest.TestCase):
             path = Path(directory) / "managed-state.json"
             execution = self.report()
             executor = Mock(return_value=execution)
+            result_type = managed_state.ManagedExecutionResult
+            calls = 0
+
+            def interrupt_twice(*arguments):
+                nonlocal calls
+                calls += 1
+                if calls <= 2:
+                    raise KeyboardInterrupt()
+                return result_type(*arguments)
+
             with (
                 patch.object(
                     managed_state,
@@ -1702,8 +1693,8 @@ class ManagedStateTests(unittest.TestCase):
                 ),
                 patch.object(
                     managed_state,
-                    "_persistence_failure_result",
-                    side_effect=KeyboardInterrupt(),
+                    "ManagedExecutionResult",
+                    side_effect=interrupt_twice,
                 ),
             ):
                 with self.assertRaises(
@@ -1722,6 +1713,7 @@ class ManagedStateTests(unittest.TestCase):
             )
             self.assertIn("before persistence began", result.persistence_detail)
             self.assertFalse(path.exists())
+            self.assertEqual(calls, 3)
             executor.assert_called_once()
 
     def test_lock_exit_interrupt_preserves_successful_result(self) -> None:
@@ -2039,6 +2031,46 @@ class ManagedStateTests(unittest.TestCase):
                     self.assertIs(result.execution, executor.return_value)
                     executor.assert_called_once()
 
+    def test_cleanup_helper_error_cannot_replace_terminal_outcome(self) -> None:
+        cases = (
+            (
+                patch.object(
+                    managed_state.json,
+                    "dump",
+                    side_effect=OSError("write failed"),
+                ),
+                managed_state.PersistenceOutcome.FAILED,
+            ),
+            (
+                patch.object(
+                    managed_state.os,
+                    "replace",
+                    side_effect=OSError("replacement is ambiguous"),
+                ),
+                managed_state.PersistenceOutcome.UNKNOWN,
+            ),
+        )
+        for primary_failure, expected in cases:
+            with self.subTest(outcome=expected), TemporaryDirectory() as directory:
+                executor = Mock(return_value=self.report())
+                with (
+                    primary_failure,
+                    patch.object(
+                        managed_state,
+                        "_best_effort_discard_temporary",
+                        side_effect=OSError("cleanup failed"),
+                    ),
+                ):
+                    result = managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=Path(directory) / "managed-state.json",
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+                self.assertEqual(result.persistence, expected)
+                self.assertIs(result.execution, executor.return_value)
+                executor.assert_called_once()
+
     def test_cleanup_interrupt_preserves_primary_persistence_interrupt(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
@@ -2073,39 +2105,6 @@ class ManagedStateTests(unittest.TestCase):
             )
             executor.assert_called_once()
 
-    def test_error_carrier_construction_interrupt_preserves_failed_outcome(
-        self,
-    ) -> None:
-        with TemporaryDirectory() as directory:
-            path = Path(directory) / "managed-state.json"
-            execution = self.report()
-            executor = Mock(return_value=execution)
-            with (
-                patch.object(
-                    managed_state.json,
-                    "dump",
-                    side_effect=OSError("write failed"),
-                ),
-                patch.object(
-                    managed_state.PersistenceError,
-                    "__init__",
-                    side_effect=KeyboardInterrupt(),
-                ),
-            ):
-                result = managed_state.execute_provider_plan(
-                    self.plan,
-                    state_path=path,
-                    executor=executor,
-                    allow_provider_mutation=True,
-                )
-            self.assertIs(result.execution, execution)
-            self.assertEqual(
-                result.persistence, managed_state.PersistenceOutcome.FAILED
-            )
-            self.assertIn("write failed", result.persistence_detail)
-            self.assertFalse(path.exists())
-            executor.assert_called_once()
-
     def test_error_detail_interrupt_preserves_pre_replace_failed_outcome(
         self,
     ) -> None:
@@ -2138,16 +2137,13 @@ class ManagedStateTests(unittest.TestCase):
             self.assertFalse(path.exists())
             executor.assert_called_once()
 
-    def test_phase_state_preserves_failed_across_later_call_boundaries(self) -> None:
+    def test_transaction_snapshot_preserves_failed_across_later_boundaries(
+        self,
+    ) -> None:
         cases = (
             patch.object(
                 managed_state,
                 "_safe_exception_detail",
-                side_effect=KeyboardInterrupt(),
-            ),
-            patch.object(
-                managed_state,
-                "_guarded_persistence_error",
                 side_effect=KeyboardInterrupt(),
             ),
             patch.object(
@@ -2230,6 +2226,16 @@ class ManagedStateTests(unittest.TestCase):
             path = Path(directory) / "managed-state.json"
             execution = self.report()
             executor = Mock(return_value=execution)
+            interruption_type = managed_state.PersistenceInterrupted
+            calls = 0
+
+            def interrupt_twice(*arguments):
+                nonlocal calls
+                calls += 1
+                if calls <= 2:
+                    raise KeyboardInterrupt()
+                return interruption_type(*arguments)
+
             with (
                 patch.object(
                     managed_state.json,
@@ -2237,14 +2243,12 @@ class ManagedStateTests(unittest.TestCase):
                     side_effect=KeyboardInterrupt(),
                 ),
                 patch.object(
-                    managed_state.PersistenceInterrupted,
-                    "__init__",
-                    side_effect=KeyboardInterrupt(),
+                    managed_state,
+                    "PersistenceInterrupted",
+                    side_effect=interrupt_twice,
                 ),
             ):
-                with self.assertRaises(
-                    managed_state.PersistenceInterrupted
-                ) as raised:
+                with self.assertRaises(interruption_type) as raised:
                     managed_state.execute_provider_plan(
                         self.plan,
                         state_path=path,
@@ -2257,6 +2261,7 @@ class ManagedStateTests(unittest.TestCase):
                 managed_state.PersistenceOutcome.FAILED,
             )
             self.assertFalse(path.exists())
+            self.assertEqual(calls, 3)
             executor.assert_called_once()
 
     def test_failure_result_constructor_interrupt_preserves_failed_outcome(
@@ -2266,6 +2271,16 @@ class ManagedStateTests(unittest.TestCase):
             path = Path(directory) / "managed-state.json"
             execution = self.report()
             executor = Mock(return_value=execution)
+            result_type = managed_state.ManagedExecutionResult
+            calls = 0
+
+            def interrupt_twice(*arguments):
+                nonlocal calls
+                calls += 1
+                if calls <= 2:
+                    raise KeyboardInterrupt()
+                return result_type(*arguments)
+
             with (
                 patch.object(
                     managed_state,
@@ -2276,9 +2291,9 @@ class ManagedStateTests(unittest.TestCase):
                     ),
                 ),
                 patch.object(
-                    managed_state.ManagedExecutionResult,
-                    "__init__",
-                    side_effect=KeyboardInterrupt(),
+                    managed_state,
+                    "ManagedExecutionResult",
+                    side_effect=interrupt_twice,
                 ),
             ):
                 with self.assertRaises(
@@ -2295,15 +2310,26 @@ class ManagedStateTests(unittest.TestCase):
                 raised.exception.managed_result.persistence,
                 managed_state.PersistenceOutcome.FAILED,
             )
+            self.assertEqual(calls, 3)
             executor.assert_called_once()
 
-    def test_managed_interrupt_constructor_interrupt_preserves_unknown_result(
+    def test_managed_interrupt_constructor_preserves_prewrite_failed_result(
         self,
     ) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
             execution = self.report()
             executor = Mock(return_value=execution)
+            interruption_type = managed_state.ManagedExecutionInterrupted
+            calls = 0
+
+            def interrupt_twice(*arguments):
+                nonlocal calls
+                calls += 1
+                if calls <= 2:
+                    raise KeyboardInterrupt()
+                return interruption_type(*arguments)
+
             with (
                 patch.object(
                     managed_state,
@@ -2311,14 +2337,12 @@ class ManagedStateTests(unittest.TestCase):
                     side_effect=KeyboardInterrupt(),
                 ),
                 patch.object(
-                    managed_state.ManagedExecutionInterrupted,
-                    "__init__",
-                    side_effect=KeyboardInterrupt(),
+                    managed_state,
+                    "ManagedExecutionInterrupted",
+                    side_effect=interrupt_twice,
                 ),
             ):
-                with self.assertRaises(
-                    managed_state.ManagedExecutionInterrupted
-                ) as raised:
+                with self.assertRaises(interruption_type) as raised:
                     managed_state.execute_provider_plan(
                         self.plan,
                         state_path=path,
@@ -2328,11 +2352,12 @@ class ManagedStateTests(unittest.TestCase):
             self.assertIs(raised.exception.managed_result.execution, execution)
             self.assertEqual(
                 raised.exception.managed_result.persistence,
-                managed_state.PersistenceOutcome.UNKNOWN,
+                managed_state.PersistenceOutcome.FAILED,
             )
+            self.assertEqual(calls, 3)
             executor.assert_called_once()
 
-    def test_unclassified_atomic_interrupt_is_conservatively_unknown(self) -> None:
+    def test_atomic_invocation_interrupt_is_prewrite_failed(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
             executor = Mock(return_value=self.report())
@@ -2352,19 +2377,19 @@ class ManagedStateTests(unittest.TestCase):
                     )
             self.assertEqual(
                 raised.exception.managed_result.persistence,
-                managed_state.PersistenceOutcome.UNKNOWN,
+                managed_state.PersistenceOutcome.FAILED,
             )
             self.assertIs(
                 raised.exception.managed_result.execution, executor.return_value
             )
             self.assertIn(
-                "whether provenance became durable is unknown",
+                "provenance was not durably recorded",
                 raised.exception.managed_result.recovery_guidance,
             )
             executor.assert_called_once()
 
     def test_interrupt_during_persistence_failure_result_is_structured(self) -> None:
-        original = managed_state._persistence_failure_result
+        original = managed_state.ManagedExecutionResult
         calls = 0
 
         def interrupt_once(*args):
@@ -2388,7 +2413,7 @@ class ManagedStateTests(unittest.TestCase):
                 ),
                 patch.object(
                     managed_state,
-                    "_persistence_failure_result",
+                    "ManagedExecutionResult",
                     side_effect=interrupt_once,
                 ),
             ):
@@ -2407,6 +2432,143 @@ class ManagedStateTests(unittest.TestCase):
             )
             self.assertIs(raised.exception.managed_result.execution, report)
 
+    def test_authoritative_persistence_interruption_survives_result_retries(
+        self,
+    ) -> None:
+        failure = managed_state.PersistenceInterrupted(
+            managed_state.PersistenceOutcome.UNKNOWN,
+            "durability is unknown",
+        )
+        result_type = managed_state.ManagedExecutionResult
+        result_calls = 0
+
+        def interrupt_result_twice(*arguments):
+            nonlocal result_calls
+            result_calls += 1
+            if result_calls <= 2:
+                raise KeyboardInterrupt()
+            return result_type(*arguments)
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            report = self.report()
+            executor = Mock(return_value=report)
+            atomic_write = Mock(side_effect=failure)
+            with (
+                patch.object(managed_state, "_atomic_write", atomic_write),
+                patch.object(
+                    managed_state,
+                    "ManagedExecutionResult",
+                    side_effect=interrupt_result_twice,
+                ),
+            ):
+                with self.assertRaises(
+                    managed_state.PersistenceInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            self.assertIs(raised.exception, failure)
+            self.assertIsNotNone(raised.exception.managed_result)
+            self.assertIs(raised.exception.managed_result.execution, report)
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.UNKNOWN,
+            )
+            self.assertEqual(result_calls, 3)
+            atomic_write.assert_called_once()
+            executor.assert_called_once()
+
+    def test_first_provider_interruption_survives_later_persistence_interrupt(
+        self,
+    ) -> None:
+        action = replace(
+            self.report().actions[0],
+            outcome=provider_execution.ActionOutcome.INTERRUPTED,
+            final_verified_paths=(),
+        )
+        report = provider_execution.PlanExecutionReport(
+            self.machine,
+            self.plan.requested_capabilities,
+            provider_execution.PlanOutcome.PARTIAL_FAILURE,
+            (action,),
+        )
+        provider_interruption = provider_execution.ProviderPlanInterrupted(report)
+        persistence_interruption = managed_state.PersistenceInterrupted(
+            managed_state.PersistenceOutcome.UNKNOWN,
+            "durability is unknown",
+        )
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            executor = Mock(side_effect=provider_interruption)
+            atomic_write = Mock(side_effect=persistence_interruption)
+            with patch.object(managed_state, "_atomic_write", atomic_write):
+                with self.assertRaises(
+                    provider_execution.ProviderPlanInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            self.assertIs(raised.exception, provider_interruption)
+            self.assertIs(raised.exception.managed_result.execution, report)
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.UNKNOWN,
+            )
+            atomic_write.assert_called_once()
+            executor.assert_called_once()
+
+    def test_durable_success_is_frozen_before_result_retries(self) -> None:
+        result_type = managed_state.ManagedExecutionResult
+        observed_outcomes = []
+
+        def interrupt_result_twice(*arguments):
+            observed_outcomes.append(arguments[1])
+            if len(observed_outcomes) <= 2:
+                raise KeyboardInterrupt()
+            return result_type(*arguments)
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            report = self.report()
+            executor = Mock(return_value=report)
+            atomic_write = Mock(wraps=managed_state._atomic_write)
+            with (
+                patch.object(managed_state, "_atomic_write", atomic_write),
+                patch.object(
+                    managed_state,
+                    "ManagedExecutionResult",
+                    side_effect=interrupt_result_twice,
+                ),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=executor,
+                        allow_provider_mutation=True,
+                    )
+            self.assertEqual(
+                observed_outcomes,
+                [managed_state.PersistenceOutcome.SUCCEEDED] * 3,
+            )
+            self.assertIs(raised.exception.managed_result.execution, report)
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.SUCCEEDED,
+            )
+            self.assertEqual(len(managed_state.load_document(path)["records"]), 1)
+            atomic_write.assert_called_once()
+            executor.assert_called_once()
+
     def test_interrupt_during_persistence_result_attachment_keeps_unknown(self) -> None:
         class AttachmentInterrupted(managed_state.PersistenceInterrupted):
             def __init__(self) -> None:
@@ -2414,27 +2576,31 @@ class ManagedStateTests(unittest.TestCase):
                     managed_state.PersistenceOutcome.UNKNOWN,
                     "durability is unknown",
                 )
-                self._interrupt_attachment = True
+                self._attachment_interruptions = 2
 
             def __setattr__(self, name, value):
                 if name == "managed_result" and getattr(
-                    self, "_interrupt_attachment", False
+                    self, "_attachment_interruptions", 0
                 ):
-                    object.__setattr__(self, "_interrupt_attachment", False)
+                    object.__setattr__(
+                        self,
+                        "_attachment_interruptions",
+                        self._attachment_interruptions - 1,
+                    )
                     raise KeyboardInterrupt()
                 super().__setattr__(name, value)
 
         failure = AttachmentInterrupted()
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
-            with patch.object(
-                managed_state, "_atomic_write", side_effect=failure
-            ):
+            executor = Mock(return_value=self.report())
+            atomic_write = Mock(side_effect=failure)
+            with patch.object(managed_state, "_atomic_write", atomic_write):
                 with self.assertRaises(managed_state.PersistenceInterrupted) as raised:
                     managed_state.execute_provider_plan(
                         self.plan,
                         state_path=path,
-                        executor=Mock(return_value=self.report()),
+                        executor=executor,
                         allow_provider_mutation=True,
                     )
             self.assertIs(raised.exception, failure)
@@ -2442,6 +2608,8 @@ class ManagedStateTests(unittest.TestCase):
                 raised.exception.managed_result.persistence,
                 managed_state.PersistenceOutcome.UNKNOWN,
             )
+            atomic_write.assert_called_once()
+            executor.assert_called_once()
 
     def test_interruption_after_replace_begins_is_unknown(self) -> None:
         with TemporaryDirectory() as directory:
@@ -2533,7 +2701,7 @@ class ManagedStateTests(unittest.TestCase):
             )
             executor.assert_called_once()
 
-    def test_phase_state_preserves_unknown_across_cleanup_call_boundary(
+    def test_transaction_snapshot_preserves_unknown_across_cleanup_boundary(
         self,
     ) -> None:
         with TemporaryDirectory() as directory:
