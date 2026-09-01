@@ -591,6 +591,130 @@ class ManagedStateTests(unittest.TestCase):
             ):
                 managed_state.load_document(path)
 
+    def test_interrupted_command_evidence_cannot_claim_timeout(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(
+                    return_value=self.report(
+                        provider_execution.ActionOutcome.INTERRUPTED
+                    )
+                ),
+                allow_provider_mutation=True,
+            )
+            for field, value in (("timed_out", True), ("returncode", None)):
+                with self.subTest(field=field):
+                    document = managed_state.load_document(path)
+                    document["records"][0]["command_evidence"][-1][field] = value
+                    path.write_text(json.dumps(document), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError,
+                        "terminal command evidence",
+                    ):
+                        managed_state.load_document(path)
+                    path.unlink()
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=Mock(
+                            return_value=self.report(
+                                provider_execution.ActionOutcome.INTERRUPTED
+                            )
+                        ),
+                        allow_provider_mutation=True,
+                    )
+
+    def test_supervised_command_failure_rejects_reserved_wrapper_statuses(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(
+                    return_value=self.report(
+                        provider_execution.ActionOutcome.COMMAND_FAILED
+                    )
+                ),
+                allow_provider_mutation=True,
+            )
+            original = managed_state.load_document(path)
+            root_argv = original["records"][0]["command_evidence"][-1]["argv"]
+            wrapper_forms = (
+                root_argv,
+                ["/usr/bin/sudo", "-n", "--", *root_argv],
+            )
+            for wrapper_argv in wrapper_forms:
+                for returncode in (125, 126, 127, 137, -9):
+                    with self.subTest(
+                        prefix_length=(
+                            len(wrapper_argv)
+                            - len(self.plan.actions[0].commands[0])
+                        ),
+                        returncode=returncode,
+                    ):
+                        document = json.loads(json.dumps(original))
+                        terminal = document["records"][0]["command_evidence"][-1]
+                        terminal["argv"] = wrapper_argv
+                        terminal["returncode"] = returncode
+                        path.write_text(json.dumps(document), encoding="utf-8")
+                        with self.assertRaisesRegex(
+                            managed_state.ManagedStateError,
+                            "terminal command evidence",
+                        ):
+                            managed_state.load_document(path)
+
+            document = json.loads(json.dumps(original))
+            document["records"][0]["command_evidence"][-1]["returncode"] = 124
+            path.write_text(json.dumps(document), encoding="utf-8")
+            managed_state.load_document(path)
+
+    def test_current_user_command_failure_can_preserve_reserved_numeric_status(self) -> None:
+        machine = capabilities.MachineState("Darwin", "arm64", "host")
+        manager = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            machine,
+            locator=lambda probe, context: None,
+        )
+        plan = provider_plans.generate_provider_plan(
+            (absent,), ("ghostscript",), package_managers=(manager,)
+        )
+        action = plan.actions[0]
+        report = provider_execution.PlanExecutionReport(
+            machine,
+            plan.requested_capabilities,
+            provider_execution.PlanOutcome.PARTIAL_FAILURE,
+            (
+                provider_execution.ActionReport(
+                    action.capability_id,
+                    action.provider_id,
+                    action.manager,
+                    action.installation_unit,
+                    provider_execution.ActionOutcome.COMMAND_FAILED,
+                    (
+                        provider_execution.CommandReport(
+                            action.commands[0], 125, "manager output", ""
+                        ),
+                    ),
+                    detail="command exited with status 125",
+                ),
+            ),
+        )
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                plan,
+                state_path=path,
+                executor=Mock(return_value=report),
+                allow_provider_mutation=True,
+            )
+            record = managed_state.load_document(path)["records"][0]
+            self.assertEqual(record["command_evidence"][0]["returncode"], 125)
+
     def test_all_probe_success_requires_complete_verified_paths(self) -> None:
         missing = capabilities.detect_capability(
             capabilities.POPPLER,
@@ -1325,6 +1449,54 @@ class ManagedStateTests(unittest.TestCase):
             self.assertEqual(result.persistence, managed_state.PersistenceOutcome.SUCCEEDED)
             record = managed_state.load_document(path)["records"][0]
             self.assertEqual(record["verification"]["outcome"], "interrupted")
+
+    def test_post_runner_classification_interrupt_persists_completed_evidence(self) -> None:
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            self.machine,
+            locator=lambda probe, context: None,
+        )
+        completed = subprocess.CompletedProcess(
+            ("ignored",), 7, "completed output", "completed error"
+        )
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            with (
+                patch.object(
+                    provider_execution,
+                    "_completed_command_failure",
+                    side_effect=KeyboardInterrupt(),
+                ),
+                self.assertRaises(
+                    provider_execution.ProviderPlanInterrupted
+                ) as raised,
+            ):
+                managed_state.execute_provider_plan(
+                    self.plan,
+                    state_path=path,
+                    allow_provider_mutation=True,
+                    current_context=lambda: self.machine,
+                    detector=lambda capability, context: absent,
+                    manager_verifier=lambda state, context: True,
+                    privilege_resolver=lambda action: "/usr/bin/sudo",
+                    supervisor_resolver=lambda action: "/usr/bin/timeout",
+                    privilege_preflight=lambda argv: True,
+                    runner=lambda argv, timeout: completed,
+                )
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.SUCCEEDED,
+            )
+            record = managed_state.load_document(path)["records"][0]
+            self.assertEqual(record["verification"]["outcome"], "interrupted")
+            self.assertEqual(len(record["command_evidence"]), 1)
+            self.assertEqual(record["command_evidence"][0]["returncode"], 7)
+            self.assertEqual(
+                record["command_evidence"][0]["stdout"], "completed output"
+            )
+            self.assertEqual(
+                record["command_evidence"][0]["stderr"], "completed error"
+            )
 
     def test_executor_preflight_interrupt_is_not_recorded_as_mutation(self) -> None:
         with TemporaryDirectory() as directory:

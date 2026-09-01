@@ -477,6 +477,11 @@ def load_document(path: Path) -> dict[str, Any]:
                 terminal is None
                 or terminal["returncode"] in {None, 0}
                 or terminal["timed_out"]
+                or (
+                    context["platform"] == "Linux"
+                    and package_manager["name"] in {"apt", "dnf", "pacman"}
+                    and terminal["returncode"] in {125, 126, 127, 137, -9}
+                )
             )
         ) or (
             outcome == ActionOutcome.TIMED_OUT.value
@@ -492,6 +497,10 @@ def load_document(path: Path) -> dict[str, Any]:
                 or terminal["timed_out"]
                 or terminal["returncode"] not in {137, -9}
             )
+        ) or (
+            outcome == ActionOutcome.INTERRUPTED.value
+            and terminal is not None
+            and (terminal["timed_out"] or terminal["returncode"] is None)
         ):
             raise ManagedStateError(
                 f"managed-state record {index} has inconsistent terminal command evidence"

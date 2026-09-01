@@ -1004,6 +1004,59 @@ def _command_report(
     )
 
 
+def _completed_command_failure(
+    result: subprocess.CompletedProcess[str], *, elevated_linux: bool
+) -> tuple[ActionOutcome, str] | None:
+    """Classify completed command evidence before the next provider command."""
+
+    if elevated_linux and result.returncode in {
+        124,
+        137,
+        POSIX_SIGKILL_RETURNCODE,
+        125,
+        126,
+        127,
+    }:
+        supervised_outcomes = {
+            124: ActionOutcome.COMMAND_FAILED,
+            137: ActionOutcome.FORCED_KILL,
+            POSIX_SIGKILL_RETURNCODE: ActionOutcome.FORCED_KILL,
+            125: ActionOutcome.SUPERVISOR_FAILED,
+            126: ActionOutcome.COMMAND_START_FAILED,
+            127: ActionOutcome.COMMAND_START_FAILED,
+        }
+        details = {
+            124: (
+                "GNU timeout returned status 124, which cannot distinguish "
+                "deadline expiry from the reviewed command's own status 124"
+            ),
+            137: "command or supervisor exited after SIGKILL; timeout expiry is not independently established",
+            POSIX_SIGKILL_RETURNCODE: (
+                "command or supervisor exited after SIGKILL; timeout "
+                "expiry is not independently established"
+            ),
+            125: (
+                "GNU timeout returned status 125, which cannot distinguish "
+                "supervisor failure from the reviewed command's own status 125"
+            ),
+            126: (
+                "GNU timeout returned status 126, which cannot distinguish "
+                "command-start failure from the reviewed command's own status 126"
+            ),
+            127: (
+                "GNU timeout returned status 127, which cannot distinguish "
+                "command resolution failure from the reviewed command's own status 127"
+            ),
+        }
+        return supervised_outcomes[result.returncode], details[result.returncode]
+    if result.returncode != 0:
+        return (
+            ActionOutcome.COMMAND_FAILED,
+            f"command exited with status {result.returncode}",
+        )
+    return None
+
+
 def _action_report(
     action: ProviderAction,
     outcome: ActionOutcome,
@@ -1523,74 +1576,48 @@ def _execute_provider_plan(
                     reports,
                     mutation_may_have_started=earlier_command_completed,
                 )
-            command_report = _command_report(argv, result)
-            commands.append(command_report)
-            if elevated_linux and result.returncode in {
-                124,
-                137,
-                POSIX_SIGKILL_RETURNCODE,
-                125,
-                126,
-                127,
-            }:
-                supervised_outcomes = {
-                    124: ActionOutcome.COMMAND_FAILED,
-                    137: ActionOutcome.FORCED_KILL,
-                    POSIX_SIGKILL_RETURNCODE: ActionOutcome.FORCED_KILL,
-                    125: ActionOutcome.SUPERVISOR_FAILED,
-                    126: ActionOutcome.COMMAND_START_FAILED,
-                    127: ActionOutcome.COMMAND_START_FAILED,
-                }
-                outcome = supervised_outcomes[result.returncode]
-                details = {
-                    124: (
-                        "GNU timeout returned status 124, which cannot distinguish "
-                        "deadline expiry from the reviewed command's own status 124"
-                    ),
-                    137: "command or supervisor exited after SIGKILL; timeout expiry is not independently established",
-                    POSIX_SIGKILL_RETURNCODE: (
-                        "command or supervisor exited after SIGKILL; timeout "
-                        "expiry is not independently established"
-                    ),
-                    125: (
-                        "GNU timeout returned status 125, which cannot distinguish "
-                        "supervisor failure from the reviewed command's own status 125"
-                    ),
-                    126: (
-                        "GNU timeout returned status 126, which cannot distinguish "
-                        "command-start failure from the reviewed command's own status 126"
-                    ),
-                    127: (
-                        "GNU timeout returned status 127, which cannot distinguish "
-                        "command resolution failure from the reviewed command's own status 127"
-                    ),
-                }
+            command_count_before = len(commands)
+            try:
+                command_report = _command_report(argv, result)
+                commands.append(command_report)
+                failure = _completed_command_failure(
+                    result, elevated_linux=elevated_linux
+                )
+                if failure is not None:
+                    outcome, detail = failure
+                    return _failed_report(
+                        plan,
+                        context,
+                        [
+                            *reports,
+                            _action_report(
+                                action,
+                                outcome,
+                                tuple(commands),
+                                detail=detail,
+                            ),
+                        ],
+                        mutation_may_have_started=True,
+                    )
+            except KeyboardInterrupt as error:
+                if len(commands) == command_count_before:
+                    commands.append(_command_report(argv, result))
                 reports.append(
                     _action_report(
                         action,
-                        outcome,
+                        ActionOutcome.INTERRUPTED,
                         tuple(commands),
-                        detail=details[result.returncode],
+                        detail=(
+                            "interrupted while classifying completed provider "
+                            "command evidence"
+                        ),
                     )
                 )
-                return _failed_report(
-                    plan,
-                    context,
-                    reports,
-                    mutation_may_have_started=True,
-                )
-            if result.returncode != 0:
-                reports.append(
-                    _action_report(
-                        action,
-                        ActionOutcome.COMMAND_FAILED,
-                        tuple(commands),
-                        detail=f"command exited with status {result.returncode}",
+                raise ProviderPlanInterrupted(
+                    _failed_report(
+                        plan, context, reports, mutation_may_have_started=True
                     )
-                )
-                return _failed_report(
-                    plan, context, reports, mutation_may_have_started=True
-                )
+                ) from error
 
         observed_paths: tuple[str, ...] = ()
         try:

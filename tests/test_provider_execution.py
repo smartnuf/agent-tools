@@ -139,6 +139,64 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(action.commands[0].returncode, 0)
         self.assertEqual(action.commands[0].stdout, "installed")
 
+    def test_post_runner_normalization_interrupt_preserves_command_evidence(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        completed = subprocess.CompletedProcess(
+            ("ignored",), 0, "completed output", "completed error"
+        )
+        original = provider_execution._command_report
+        calls = 0
+
+        def interrupt_once(argv, result):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise KeyboardInterrupt()
+            return original(argv, result)
+
+        with (
+            patch.object(
+                provider_execution, "_command_report", side_effect=interrupt_once
+            ),
+            self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised,
+        ):
+            self.execute(
+                self.plan(),
+                detector=lambda capability, machine: absent,
+                runner=lambda argv, timeout: completed,
+            )
+        action = raised.exception.report.actions[0]
+        self.assertEqual(action.outcome, provider_execution.ActionOutcome.INTERRUPTED)
+        self.assertEqual(len(action.commands), 1)
+        self.assertEqual(action.commands[0].returncode, 0)
+        self.assertEqual(action.commands[0].stdout, "completed output")
+        self.assertEqual(action.commands[0].stderr, "completed error")
+
+    def test_post_runner_classification_interrupt_does_not_duplicate_evidence(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        completed = subprocess.CompletedProcess(
+            ("ignored",), 7, "completed output", "completed error"
+        )
+        with (
+            patch.object(
+                provider_execution,
+                "_completed_command_failure",
+                side_effect=KeyboardInterrupt(),
+            ),
+            self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised,
+        ):
+            self.execute(
+                self.plan(),
+                detector=lambda capability, machine: absent,
+                runner=lambda argv, timeout: completed,
+            )
+        action = raised.exception.report.actions[0]
+        self.assertEqual(action.outcome, provider_execution.ActionOutcome.INTERRUPTED)
+        self.assertEqual(len(action.commands), 1)
+        self.assertEqual(action.commands[0].returncode, 7)
+        self.assertEqual(action.commands[0].stdout, "completed output")
+        self.assertEqual(action.commands[0].stderr, "completed error")
+
     def test_later_precheck_interrupt_preserves_completed_action_only(self):
         ghostscript_absent = self.state(capabilities.GHOSTSCRIPT)
         ghostscript_available = self.state(
