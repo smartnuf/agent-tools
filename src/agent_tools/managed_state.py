@@ -749,15 +749,37 @@ def execute_provider_plan(
                 raise interruption
             return result
         except PersistenceInterrupted as error:
-            result = _persistence_failure_result(report, error.outcome, error.detail)
-            error.managed_result = result
-            raise
+            try:
+                result = _persistence_failure_result(
+                    report, error.outcome, error.detail
+                )
+                error.managed_result = result
+            except KeyboardInterrupt:
+                result = _persistence_failure_result(
+                    report, error.outcome, error.detail
+                )
+                error.managed_result = result
+            raise error
         except PersistenceError as error:
-            result = _persistence_failure_result(report, error.outcome, error.detail)
-            if interruption is not None:
-                interruption.managed_result = result
-                raise interruption
-            return result
+            try:
+                result = _persistence_failure_result(
+                    report, error.outcome, error.detail
+                )
+                if interruption is not None:
+                    interruption.managed_result = result
+                    raise interruption
+                return result
+            except (ProviderPlanInterrupted, ManagedExecutionInterrupted):
+                raise
+            except KeyboardInterrupt as finalization_error:
+                result = _persistence_failure_result(
+                    report, error.outcome, error.detail
+                )
+                final_interruption = interruption or ManagedExecutionInterrupted(
+                    finalization_error
+                )
+                final_interruption.managed_result = result
+                raise final_interruption
         except (ProviderPlanInterrupted, ManagedExecutionInterrupted):
             raise
         except KeyboardInterrupt as error:

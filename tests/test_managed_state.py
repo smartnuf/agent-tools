@@ -508,6 +508,36 @@ class ManagedStateTests(unittest.TestCase):
             path.write_text(json.dumps(document), encoding="utf-8")
             managed_state.load_document(path)
 
+    def test_command_start_failure_keeps_post_popen_cleanup_status(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            report = self.report()
+            action = replace(
+                report.actions[0],
+                outcome=provider_execution.ActionOutcome.COMMAND_START_FAILED,
+            )
+            report = replace(
+                report,
+                outcome=provider_execution.PlanOutcome.PARTIAL_FAILURE,
+                actions=(action,),
+            )
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=report),
+                allow_provider_mutation=True,
+            )
+            record = managed_state.load_document(path)["records"][0]
+            self.assertEqual(
+                record["verification"]["outcome"], "command-start-failed"
+            )
+            self.assertTrue(
+                all(
+                    evidence["returncode"] == 0
+                    for evidence in record["command_evidence"]
+                )
+            )
+
     def test_translated_homebrew_authorization_evidence_is_structured(self) -> None:
         machine = capabilities.MachineState("Darwin", "arm64", "host")
         missing = capabilities.detect_capability(
@@ -884,6 +914,86 @@ class ManagedStateTests(unittest.TestCase):
                 managed_state.PersistenceOutcome.FAILED,
             )
             self.assertFalse(path.exists())
+
+    def test_interrupt_during_persistence_failure_result_is_structured(self) -> None:
+        original = managed_state._persistence_failure_result
+        calls = 0
+
+        def interrupt_once(*args):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise KeyboardInterrupt()
+            return original(*args)
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            report = self.report()
+            with (
+                patch.object(
+                    managed_state,
+                    "_atomic_write",
+                    side_effect=managed_state.PersistenceError(
+                        managed_state.PersistenceOutcome.FAILED,
+                        "write failed",
+                    ),
+                ),
+                patch.object(
+                    managed_state,
+                    "_persistence_failure_result",
+                    side_effect=interrupt_once,
+                ),
+            ):
+                with self.assertRaises(
+                    managed_state.ManagedExecutionInterrupted
+                ) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=Mock(return_value=report),
+                        allow_provider_mutation=True,
+                    )
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.FAILED,
+            )
+            self.assertIs(raised.exception.managed_result.execution, report)
+
+    def test_interrupt_during_persistence_result_attachment_keeps_unknown(self) -> None:
+        class AttachmentInterrupted(managed_state.PersistenceInterrupted):
+            def __init__(self) -> None:
+                super().__init__(
+                    managed_state.PersistenceOutcome.UNKNOWN,
+                    "durability is unknown",
+                )
+                self._interrupt_attachment = True
+
+            def __setattr__(self, name, value):
+                if name == "managed_result" and getattr(
+                    self, "_interrupt_attachment", False
+                ):
+                    object.__setattr__(self, "_interrupt_attachment", False)
+                    raise KeyboardInterrupt()
+                super().__setattr__(name, value)
+
+        failure = AttachmentInterrupted()
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            with patch.object(
+                managed_state, "_atomic_write", side_effect=failure
+            ):
+                with self.assertRaises(managed_state.PersistenceInterrupted) as raised:
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        executor=Mock(return_value=self.report()),
+                        allow_provider_mutation=True,
+                    )
+            self.assertIs(raised.exception, failure)
+            self.assertEqual(
+                raised.exception.managed_result.persistence,
+                managed_state.PersistenceOutcome.UNKNOWN,
+            )
 
     def test_interruption_after_replace_begins_is_unknown(self) -> None:
         with TemporaryDirectory() as directory:
