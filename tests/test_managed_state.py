@@ -3436,6 +3436,79 @@ class ManagedStateTests(unittest.TestCase):
         finally:
             provider_execution._restore_environment(previous)
 
+    def test_environment_restore_force_abort_bypasses_managed_persistence(
+        self,
+    ) -> None:
+        first = KeyboardInterrupt()
+        later = KeyboardInterrupt()
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            self.machine,
+            locator=lambda probe, context: None,
+        )
+        detector = Mock(return_value=absent)
+        runner = Mock(
+            side_effect=AssertionError("provider command must not run")
+        )
+        prepare = Mock(
+            side_effect=AssertionError("force-abort must not prepare provenance")
+        )
+        write = Mock(
+            side_effect=AssertionError("force-abort must not persist provenance")
+        )
+        original_path = os.environ.get("PATH")
+        restore = provider_execution._restore_environment
+        restore_calls = 0
+
+        def interrupt_restoration(previous):
+            nonlocal restore_calls
+            restore_calls += 1
+            raise first if restore_calls == 1 else later
+
+        try:
+            with TemporaryDirectory() as directory:
+                path = Path(directory) / "managed-state.json"
+                with (
+                    patch.object(
+                        provider_execution,
+                        "_restore_environment",
+                        side_effect=interrupt_restoration,
+                    ),
+                    patch.object(
+                        managed_state, "_prepare_update_for_persistence", prepare
+                    ),
+                    patch.object(managed_state, "_atomic_write", write),
+                    self.assertRaises(provider_execution._ForceAbort) as raised,
+                ):
+                    managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        allow_provider_mutation=True,
+                        current_context=lambda: self.machine,
+                        detector=detector,
+                        manager_verifier=lambda state, context: True,
+                        privilege_resolver=lambda action: "/usr/bin/sudo",
+                        supervisor_resolver=lambda action: "/usr/bin/timeout",
+                        privilege_preflight=lambda argv: True,
+                        environment_refresher=lambda action: {
+                            "PATH": "/temporary"
+                        },
+                        runner=runner,
+                    )
+
+                self.assertIs(raised.exception.interruption, later)
+                self.assertEqual(restore_calls, 2)
+                detector.assert_called_once()
+                runner.assert_not_called()
+                prepare.assert_not_called()
+                write.assert_not_called()
+                self.assertFalse(path.exists())
+        finally:
+            if original_path is None:
+                os.environ.pop("PATH", None)
+            else:
+                os.environ["PATH"] = original_path
+
     def test_second_interrupt_during_provider_interruption_publication_force_aborts(
         self,
     ) -> None:
