@@ -149,6 +149,127 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
         popen.assert_called_once()
         cleanup.assert_called_once()
 
+    def test_post_start_oserror_stringification_interrupt_preserves_launch(self):
+        process = self._mock_started_process()
+        first = KeyboardInterrupt()
+        cancellation = provider_execution._CancellationContext()
+
+        class InterruptingOSError(OSError):
+            def __str__(self):
+                raise first
+
+        with mock.patch.object(
+            provider_execution.subprocess, "Popen", return_value=process
+        ) as popen, mock.patch.object(
+            provider_execution,
+            "_supervise_started_process",
+            side_effect=InterruptingOSError("wait failed"),
+        ), mock.patch.object(
+            provider_execution,
+            "_best_effort_started_process_cleanup",
+            return_value=False,
+        ) as cleanup:
+            with self.assertRaises(
+                provider_execution.CommandInterruptedError
+            ) as raised:
+                provider_execution._run(
+                    ("manager", "install"), 1, _cancellation=cancellation
+                )
+
+        self.assertIs(raised.exception.__cause__, first)
+        self.assertIs(
+            cancellation.phase, provider_execution._CancellationPhase.CANCELLING
+        )
+        self.assertTrue(raised.exception.lifetime_uncertain)
+        self.assertEqual(raised.exception.result.args, ("manager", "install"))
+        self.assertIn("launched", raised.exception.detail)
+        self.assertNotIn("no provider command started", raised.exception.detail)
+        popen.assert_called_once()
+        cleanup.assert_called_once()
+
+    def test_second_oserror_materialization_interrupt_force_aborts(self):
+        process = self._mock_started_process()
+        first = KeyboardInterrupt()
+        later = KeyboardInterrupt()
+        cancellation = provider_execution._CancellationContext()
+        completed = subprocess.CompletedProcess(
+            ("manager", "install"), None, "partial", "wait failed"
+        )
+        materialize = mock.Mock(side_effect=(completed, later))
+
+        class InterruptingOSError(OSError):
+            def __str__(self):
+                raise first
+
+        with mock.patch.object(
+            provider_execution.subprocess, "Popen", return_value=process
+        ) as popen, mock.patch.object(
+            provider_execution,
+            "_supervise_started_process",
+            side_effect=InterruptingOSError("wait failed"),
+        ), mock.patch.object(
+            provider_execution,
+            "_best_effort_started_process_cleanup",
+            return_value=False,
+        ) as cleanup, mock.patch.object(
+            provider_execution, "_started_process_result", materialize
+        ):
+            with self.assertRaises(provider_execution._ForceAbort) as raised:
+                provider_execution._run(
+                    ("manager", "install"), 1, _cancellation=cancellation
+                )
+
+        self.assertIs(raised.exception.interruption, later)
+        self.assertIs(
+            cancellation.phase,
+            provider_execution._CancellationPhase.FORCE_ABORTED,
+        )
+        self.assertEqual(materialize.call_count, 2)
+        popen.assert_called_once()
+        cleanup.assert_called_once()
+
+    def test_timeout_termination_error_stringification_is_materialized_inside_boundary(
+        self,
+    ):
+        process = self._mock_started_process()
+        process.wait.side_effect = subprocess.TimeoutExpired(
+            ("manager", "install"), 1
+        )
+        first = KeyboardInterrupt()
+        cancellation = provider_execution._CancellationContext()
+
+        class InterruptingOSError(OSError):
+            def __str__(self):
+                raise first
+
+        with mock.patch.object(
+            provider_execution.subprocess, "Popen", return_value=process
+        ) as popen, mock.patch.object(
+            provider_execution, "_start_output_readers", return_value=()
+        ), mock.patch.object(
+            provider_execution,
+            "_terminate_process_tree",
+            side_effect=InterruptingOSError("termination failed"),
+        ) as terminate:
+            with self.assertRaises(
+                provider_execution.CommandInterruptedError
+            ) as raised:
+                provider_execution._run(
+                    ("manager", "install"), 1, _cancellation=cancellation
+                )
+
+        self.assertIsInstance(
+            raised.exception.__cause__, provider_execution.CommandInterruptedError
+        )
+        self.assertIs(raised.exception.__cause__.__cause__, first)
+        self.assertIs(
+            cancellation.phase, provider_execution._CancellationPhase.CANCELLING
+        )
+        self.assertTrue(raised.exception.lifetime_uncertain)
+        self.assertIn("launched", raised.exception.detail)
+        popen.assert_called_once()
+        self.assertGreaterEqual(terminate.call_count, 1)
+
     def test_second_lifecycle_materialization_interrupt_force_aborts(self):
         process = self._mock_started_process()
         ordinary = provider_execution.CommandLifecycleError(
