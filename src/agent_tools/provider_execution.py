@@ -317,20 +317,20 @@ def _run(
                 stop_readers,
                 reader_errors,
             )
-        except _ForceAbort:
+            raise CommandInterruptedError(
+                subprocess.CompletedProcess(
+                    argv,
+                    process.returncode,
+                    stdout_tail.value(),
+                    stderr_tail.value(),
+                ),
+                error.detail,
+                lifetime_uncertain=not cleanup_established,
+            ) from error
+        except (CommandInterruptedError, _ForceAbort):
             raise
         except KeyboardInterrupt as interruption:
             raise _ForceAbort(interruption) from interruption
-        raise CommandInterruptedError(
-            subprocess.CompletedProcess(
-                argv,
-                process.returncode,
-                stdout_tail.value(),
-                stderr_tail.value(),
-            ),
-            error.detail,
-            lifetime_uncertain=not cleanup_established,
-        ) from error
     except OSError as error:
         try:
             cleanup_established = _best_effort_started_process_cleanup(
@@ -376,20 +376,20 @@ def _run(
                 stop_readers,
                 reader_errors,
             )
-        except _ForceAbort:
+            raise CommandInterruptedError(
+                subprocess.CompletedProcess(
+                    argv,
+                    process.returncode,
+                    stdout_tail.value(),
+                    stderr_tail.value(),
+                ),
+                "provider command was interrupted after launch before cleanup could establish quiescence",
+                lifetime_uncertain=True,
+            ) from error
+        except (CommandInterruptedError, _ForceAbort):
             raise
         except KeyboardInterrupt as interruption:
             raise _ForceAbort(interruption) from interruption
-        raise CommandInterruptedError(
-            subprocess.CompletedProcess(
-                argv,
-                process.returncode,
-                stdout_tail.value(),
-                stderr_tail.value(),
-            ),
-            "provider command was interrupted after launch before cleanup could establish quiescence",
-            lifetime_uncertain=True,
-        ) from error
 
 
 def _best_effort_started_process_cleanup(
@@ -547,7 +547,12 @@ def _supervise_started_process(
                     ) from interruption
                 raise
             except ExecutionContractError:
-                _join_output_readers(readers, stop_readers, reader_errors)
+                _join_output_readers(
+                    readers,
+                    stop_readers,
+                    reader_errors,
+                    cancellation_active=isinstance(interruption, KeyboardInterrupt),
+                )
                 if isinstance(interruption, KeyboardInterrupt):
                     raise CommandInterruptedError(
                         subprocess.CompletedProcess(
@@ -574,10 +579,12 @@ def _supervise_started_process(
                         "package state is uncertain"
                     ),
                 ) from None
-            if not _join_output_readers(readers, stop_readers, reader_errors):
-                raise _uncertain_output_error(
-                    argv, process.returncode, stdout_tail, stderr_tail
-                )
+            readers_clean = _join_output_readers(
+                readers,
+                stop_readers,
+                reader_errors,
+                cancellation_active=isinstance(interruption, KeyboardInterrupt),
+            )
             if isinstance(interruption, KeyboardInterrupt):
                 raise CommandInterruptedError(
                     subprocess.CompletedProcess(
@@ -585,8 +592,13 @@ def _supervise_started_process(
                         process.returncode,
                         stdout_tail.value(),
                         stderr_tail.value(),
-                    )
+                    ),
+                    lifetime_uncertain=not readers_clean,
                 ) from interruption
+            if not readers_clean:
+                raise _uncertain_output_error(
+                    argv, process.returncode, stdout_tail, stderr_tail
+                )
             raise
         except (CommandInterruptedError, _ForceAbort):
             raise
@@ -862,6 +874,8 @@ def _join_output_readers(
     readers: tuple[threading.Thread, ...],
     stop: threading.Event,
     errors: list[OSError],
+    *,
+    cancellation_active: bool = False,
 ) -> bool:
     """Return whether output closed cleanly within the synchronous guard."""
 
@@ -870,6 +884,8 @@ def _join_output_readers(
         for reader in readers:
             reader.join(timeout=max(0, deadline - time.monotonic()))
     except KeyboardInterrupt:
+        if cancellation_active:
+            raise
         stop.set()
         for reader in readers:
             with suppress(RuntimeError):
