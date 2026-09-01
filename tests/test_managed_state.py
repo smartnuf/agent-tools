@@ -35,6 +35,7 @@ class ManagedStateTests(unittest.TestCase):
         returncode = {
             provider_execution.ActionOutcome.COMMAND_FAILED: 1,
             provider_execution.ActionOutcome.COMMAND_START_FAILED: None,
+            provider_execution.ActionOutcome.TIMED_OUT: None,
             provider_execution.ActionOutcome.FORCED_KILL: 137,
         }.get(outcome, 0)
         reported_commands = (
@@ -569,6 +570,93 @@ class ManagedStateTests(unittest.TestCase):
             ):
                 managed_state.load_document(path)
 
+    def test_timeout_requires_null_returncode(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(
+                    return_value=self.report(
+                        provider_execution.ActionOutcome.TIMED_OUT
+                    )
+                ),
+                allow_provider_mutation=True,
+            )
+            document = managed_state.load_document(path)
+            document["records"][0]["command_evidence"][-1]["returncode"] = 0
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError, "terminal command evidence"
+            ):
+                managed_state.load_document(path)
+
+    def test_all_probe_success_requires_complete_verified_paths(self) -> None:
+        missing = capabilities.detect_capability(
+            capabilities.POPPLER,
+            self.machine,
+            locator=lambda probe, context: None,
+        )
+        plan = provider_plans.generate_provider_plan(
+            (missing,),
+            ("poppler",),
+            package_managers=(self.plan.actions[0].manager_state,),
+        )
+        action = plan.actions[0]
+        commands = tuple(
+            provider_execution.CommandReport(
+                (
+                    "/usr/bin/timeout",
+                    "--signal=TERM",
+                    "--kill-after=5s",
+                    "900s",
+                    *command,
+                ),
+                0,
+                "installed",
+                "",
+            )
+            for command in action.commands
+        )
+        report = provider_execution.PlanExecutionReport(
+            self.machine,
+            plan.requested_capabilities,
+            provider_execution.PlanOutcome.SUCCEEDED,
+            (
+                provider_execution.ActionReport(
+                    action.capability_id,
+                    action.provider_id,
+                    action.manager,
+                    action.installation_unit,
+                    provider_execution.ActionOutcome.SUCCEEDED,
+                    commands,
+                    (
+                        "/tools/pdfinfo",
+                        "/tools/pdftotext",
+                        "/tools/pdftoppm",
+                    ),
+                    "verified",
+                ),
+            ),
+        )
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                plan,
+                state_path=path,
+                executor=Mock(return_value=report),
+                allow_provider_mutation=True,
+            )
+            document = managed_state.load_document(path)
+            document["records"][0]["verification"]["verified_paths"] = [
+                "/tools/pdfinfo"
+            ]
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError, "success evidence"
+            ):
+                managed_state.load_document(path)
+
     def test_translated_homebrew_authorization_evidence_is_structured(self) -> None:
         machine = capabilities.MachineState("Darwin", "arm64", "host")
         missing = capabilities.detect_capability(
@@ -684,6 +772,10 @@ class ManagedStateTests(unittest.TestCase):
                 (("command_evidence", 0, "returncode"), 1),
                 (("command_evidence", 0, "timed_out"), True),
                 (("verification", "verified_paths"), []),
+                (
+                    ("verification", "verified_paths"),
+                    ["/tools/one", "/tools/two", "/tools/three", "/tools/four"],
+                ),
                 (("command_evidence",), document_sentinel),
             )
             for fields, value in corruptions:

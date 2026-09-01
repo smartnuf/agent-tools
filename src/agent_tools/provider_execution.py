@@ -1601,6 +1601,11 @@ def _execute_provider_plan(
                     "detector returned evidence for a different capability"
                 )
             validate_capability_state(after, expected_context=context)
+            observed_paths = _observed_verified_provider_paths(action, after)
+            final_paths = _verified_provider_paths(action, after)
+            verification_detail = (
+                "package-manager success did not produce the planned verified provider"
+            )
         except KeyboardInterrupt as error:
             reports.append(
                 _action_report(
@@ -1635,12 +1640,6 @@ def _execute_provider_plan(
             )
             return _failed_report(
                 plan, context, reports, mutation_may_have_started=True
-            )
-        else:
-            observed_paths = _observed_verified_provider_paths(action, after)
-            final_paths = _verified_provider_paths(action, after)
-            verification_detail = (
-                "package-manager success did not produce the planned verified provider"
             )
         if not final_paths:
             reports.append(

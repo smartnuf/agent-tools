@@ -114,6 +114,31 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(report.actions[0].commands[0].stdout, "installed")
         self.assertIn("RuntimeError: verification broke", report.actions[0].detail)
 
+    def test_final_path_extraction_interrupt_preserves_command_evidence(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        available = self.state(capabilities.GHOSTSCRIPT, available=True)
+        with (
+            patch.object(
+                provider_execution,
+                "_observed_verified_provider_paths",
+                side_effect=KeyboardInterrupt(),
+            ),
+            self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised,
+        ):
+            self.execute(
+                self.plan(),
+                detector=self.detector_sequence(absent, available),
+                runner=lambda argv, timeout: subprocess.CompletedProcess(
+                    argv, 0, "installed", ""
+                ),
+            )
+        action = raised.exception.report.actions[0]
+        self.assertEqual(
+            action.outcome, provider_execution.ActionOutcome.INTERRUPTED
+        )
+        self.assertEqual(action.commands[0].returncode, 0)
+        self.assertEqual(action.commands[0].stdout, "installed")
+
     def test_later_precheck_interrupt_preserves_completed_action_only(self):
         ghostscript_absent = self.state(capabilities.GHOSTSCRIPT)
         ghostscript_available = self.state(

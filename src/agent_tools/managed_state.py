@@ -15,7 +15,7 @@ from enum import Enum
 from pathlib import Path, PureWindowsPath
 from typing import Any, Callable
 
-from .capabilities import MachineState, get_capability
+from .capabilities import MachineState, ProbePolicy, get_capability
 from .provider_execution import (
     ActionOutcome,
     ActionReport,
@@ -478,7 +478,11 @@ def load_document(path: Path) -> dict[str, Any]:
             )
         ) or (
             outcome == ActionOutcome.TIMED_OUT.value
-            and (terminal is None or not terminal["timed_out"])
+            and (
+                terminal is None
+                or not terminal["timed_out"]
+                or terminal["returncode"] is not None
+            )
         ) or (
             outcome == ActionOutcome.FORCED_KILL.value
             and (
@@ -492,6 +496,12 @@ def load_document(path: Path) -> dict[str, Any]:
             )
         if outcome == ActionOutcome.SUCCEEDED.value and (
             not verification["verified_paths"]
+            or len(verification["verified_paths"]) > len(provider_spec.probes)
+            or (
+                provider_spec.probe_policy is ProbePolicy.ALL
+                and len(verification["verified_paths"])
+                != len(provider_spec.probes)
+            )
         ):
             raise ManagedStateError(
                 f"managed-state record {index} has inconsistent success evidence"
