@@ -1239,29 +1239,60 @@ def _refresh_environment(action: ProviderAction) -> Mapping[str, str]:
     )
 
 
+def _restore_environment(previous: Mapping[str, str | None]) -> None:
+    for name, value in previous.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+
 @contextmanager
-def _temporary_environment(updates: Mapping[str, str]):
+def _temporary_environment(
+    updates: Mapping[str, str], cancellation: _CancellationContext
+):
     with _ENVIRONMENT_LOCK:
         previous = {name: os.environ.get(name) for name in updates}
         os.environ.update(updates)
         try:
             yield
-        finally:
-            for name, value in previous.items():
-                if value is None:
-                    os.environ.pop(name, None)
-                else:
-                    os.environ[name] = value
+        except _ForceAbort:
+            raise
+        except _ControlledCancellation as interruption:
+            cancellation.adopt(interruption)
+            with cancellation.guard():
+                _restore_environment(previous)
+            raise
+        except KeyboardInterrupt as interruption:
+            cancellation.observe(interruption)
+            with cancellation.guard():
+                _restore_environment(previous)
+            raise
+        except BaseException:
+            try:
+                _restore_environment(previous)
+            except KeyboardInterrupt as interruption:
+                cancellation.observe(interruption)
+                raise
+            raise
+        else:
+            try:
+                _restore_environment(previous)
+            except KeyboardInterrupt as interruption:
+                cancellation.observe(interruption)
+                raise
 
 
 @contextmanager
 def _refreshed_environment(
-    action: ProviderAction, refresher: EnvironmentRefresher
+    action: ProviderAction,
+    refresher: EnvironmentRefresher,
+    cancellation: _CancellationContext,
 ):
     """Compute and apply a temporary refresh under one process-wide lock."""
 
     with _ENVIRONMENT_LOCK:
-        with _temporary_environment(refresher(action)):
+        with _temporary_environment(refresher(action), cancellation):
             yield
 
 
@@ -1749,7 +1780,9 @@ def _execute_provider_plan(
     for action in plan.actions:
         try:
             capability = get_capability(action.capability_id)
-            with _refreshed_environment(action, environment_refresher):
+            with _refreshed_environment(
+                action, environment_refresher, cancellation
+            ):
                 before = detector(capability, context)
             if before.capability != capability:
                 raise PlanningError(
@@ -2174,7 +2207,9 @@ def _execute_provider_plan(
 
         observed_paths: tuple[str, ...] = ()
         try:
-            with _refreshed_environment(action, environment_refresher):
+            with _refreshed_environment(
+                action, environment_refresher, cancellation
+            ):
                 after = detector(capability, context)
             if after.capability != capability:
                 raise PlanningError(
