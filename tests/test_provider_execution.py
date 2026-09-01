@@ -60,6 +60,27 @@ class ProviderExecutionTests(unittest.TestCase):
         defaults.update(kwargs)
         return provider_execution._execute_provider_plan_unmanaged(plan, **defaults)
 
+    def test_cancellation_contexts_are_operation_scoped(self):
+        first = KeyboardInterrupt()
+        later = KeyboardInterrupt()
+        cancelling = provider_execution._CancellationContext()
+        independent = provider_execution._CancellationContext()
+
+        cancelling.observe(first)
+        with self.assertRaises(provider_execution._ForceAbort) as raised:
+            cancelling.observe(later)
+
+        self.assertEqual(
+            cancelling.phase, provider_execution._CancellationPhase.FORCE_ABORTED
+        )
+        self.assertIs(cancelling.first_interruption, first)
+        self.assertIs(raised.exception.interruption, later)
+        self.assertEqual(
+            independent.phase, provider_execution._CancellationPhase.RUNNING
+        )
+        self.assertIsNone(independent.first_interruption)
+        self.assertIsNone(independent.force_abort)
+
     def test_zero_action_plan_needs_no_mutation_authorization(self):
         state = self.state(capabilities.GHOSTSCRIPT, available=True)
         plan = provider_plans.generate_provider_plan(
@@ -97,6 +118,33 @@ class ProviderExecutionTests(unittest.TestCase):
             provider_execution.ActionOutcome.INTERRUPTED,
         )
         self.assertEqual(report.actions[0].commands[0].stdout, "partial output")
+
+    def test_second_interrupt_during_provider_report_synthesis_force_aborts(self):
+        completed = subprocess.CompletedProcess(
+            ("/usr/bin/sudo",), -2, "partial output", "interrupted"
+        )
+        for boundary in ("_command_report", "_action_report", "_failed_report"):
+            with self.subTest(boundary=boundary):
+                first = provider_execution.CommandInterruptedError(completed)
+                later = KeyboardInterrupt()
+                cancellation = provider_execution._CancellationContext()
+                runner = Mock(side_effect=first)
+                with (
+                    patch.object(provider_execution, boundary, side_effect=later),
+                    self.assertRaises(provider_execution._ForceAbort) as raised,
+                ):
+                    self.execute(
+                        self.plan(),
+                        detector=lambda capability, machine: self.state(capability),
+                        runner=runner,
+                        _cancellation=cancellation,
+                    )
+                self.assertIs(raised.exception.interruption, later)
+                self.assertEqual(
+                    cancellation.phase,
+                    provider_execution._CancellationPhase.FORCE_ABORTED,
+                )
+                runner.assert_called_once()
 
     def test_force_abort_from_runner_is_not_translated_by_provider_plan(self):
         later = KeyboardInterrupt()
