@@ -26,7 +26,13 @@ from .provider_execution import (
     _execute_provider_plan_unmanaged,
     _provider_execution_transaction,
 )
-from .provider_plans import PlanningError, ProviderPlan, adapter_commands
+from .provider_plans import (
+    NativeStatus,
+    PackageManagerState,
+    PlanningError,
+    ProviderPlan,
+    adapter_commands,
+)
 from .python_selection import normalize_architecture
 
 
@@ -226,9 +232,16 @@ def load_document(path: Path) -> dict[str, Any]:
             raise ManagedStateError(
                 f"managed-state record {index} has inconsistent provider identity"
             )
-        if not all(
-            isinstance(package_manager.get(name), str)
-            for name in ("name", "executable")
+        if (
+            not all(
+                isinstance(package_manager.get(name), str)
+                for name in ("name", "executable")
+            )
+            or "architecture" not in package_manager
+            or (
+                package_manager.get("architecture") is not None
+                and not isinstance(package_manager["architecture"], str)
+            )
         ):
             raise ManagedStateError(
                 f"managed-state record {index} has invalid package-manager evidence"
@@ -277,6 +290,8 @@ def load_document(path: Path) -> dict[str, Any]:
                 isinstance(item, str)
                 for item in requested["displaces_verified_paths"]
             )
+            or type(requested.get("translated_manager_fallback_authorized"))
+            is not bool
         ):
             raise ManagedStateError(
                 f"managed-state record {index} has invalid requested-action semantics"
@@ -308,6 +323,13 @@ def load_document(path: Path) -> dict[str, Any]:
                 f"managed-state record {index} has unreviewed requested commands"
             )
         displaced_paths = requested["displaces_verified_paths"]
+        if any(
+            not _is_absolute_for_platform(path, context["platform"])
+            for path in displaced_paths
+        ):
+            raise ManagedStateError(
+                f"managed-state record {index} has non-absolute displaced-provider evidence"
+            )
         native_target = normalize_architecture(target_architecture)
         context_architecture = normalize_architecture(context["architecture"])
         if (
@@ -324,6 +346,31 @@ def load_document(path: Path) -> dict[str, Any]:
         ):
             raise ManagedStateError(
                 f"managed-state record {index} has inconsistent native-replacement semantics"
+            )
+        recorded_manager = PackageManagerState(
+            package_manager["name"],
+            package_manager["executable"],
+            context["execution_environment"],
+            package_manager["architecture"],
+        )
+        translated_authorized = requested[
+            "translated_manager_fallback_authorized"
+        ]
+        if package_manager["name"] == "brew":
+            manager_native_status = recorded_manager.native_status(machine)
+            if manager_native_status is NativeStatus.UNKNOWN or (
+                manager_native_status is NativeStatus.TRANSLATED
+                and not translated_authorized
+            ) or (
+                manager_native_status is NativeStatus.NATIVE
+                and translated_authorized
+            ):
+                raise ManagedStateError(
+                    f"managed-state record {index} has inconsistent Homebrew authorization evidence"
+                )
+        elif translated_authorized:
+            raise ManagedStateError(
+                f"managed-state record {index} has invalid translated-manager authorization"
             )
         if not (
             isinstance(verification.get("outcome"), str)
@@ -415,6 +462,13 @@ def load_document(path: Path) -> dict[str, Any]:
                 )
             )
         terminal = evidence_items[-1] if evidence_items else None
+        if any(
+            evidence["returncode"] != 0 or evidence["timed_out"]
+            for evidence in evidence_items[:-1]
+        ):
+            raise ManagedStateError(
+                f"managed-state record {index} has inconsistent preceding command evidence"
+            )
         if (
             outcome == ActionOutcome.COMMAND_FAILED.value
             and (
@@ -603,6 +657,7 @@ def _record(
         "package_manager": {
             "name": action.manager,
             "executable": action.manager_state.executable_path,
+            "architecture": action.manager_state.architecture,
         },
         "installation_unit": action.installation_unit,
         "execution_context": asdict(plan.context),
@@ -616,6 +671,9 @@ def _record(
             "commands": [list(command) for command in action.commands],
             "target_architecture": action.target_architecture,
             "displaces_verified_paths": list(action.displaces_verified_paths),
+            "translated_manager_fallback_authorized": (
+                action.translated_manager_fallback_authorized
+            ),
         },
         "verification": {
             "outcome": observed.outcome.value,

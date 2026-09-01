@@ -37,6 +37,18 @@ class ManagedStateTests(unittest.TestCase):
             provider_execution.ActionOutcome.COMMAND_START_FAILED: None,
             provider_execution.ActionOutcome.FORCED_KILL: 137,
         }.get(outcome, 0)
+        reported_commands = (
+            action.commands[:1]
+            if outcome
+            in {
+                provider_execution.ActionOutcome.COMMAND_FAILED,
+                provider_execution.ActionOutcome.COMMAND_START_FAILED,
+                provider_execution.ActionOutcome.TIMED_OUT,
+                provider_execution.ActionOutcome.FORCED_KILL,
+                provider_execution.ActionOutcome.SUPERVISOR_FAILED,
+            }
+            else action.commands
+        )
         command_reports = (
             tuple(
                 provider_execution.CommandReport(
@@ -52,7 +64,7 @@ class ManagedStateTests(unittest.TestCase):
                     "",
                     outcome is provider_execution.ActionOutcome.TIMED_OUT,
                 )
-                for command in action.commands
+                for command in reported_commands
             )
             if commands
             else ()
@@ -469,6 +481,131 @@ class ManagedStateTests(unittest.TestCase):
                     path.write_text(json.dumps(document), encoding="utf-8")
                     with self.assertRaisesRegex(
                         managed_state.ManagedStateError, "verification evidence"
+                    ):
+                        managed_state.load_document(path)
+
+    def test_preceding_command_evidence_must_show_success(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            document = managed_state.load_document(path)
+            record = document["records"][0]
+            record["verification"]["outcome"] = "command-failed"
+            record["command_evidence"][0]["returncode"] = 1
+            record["command_evidence"][1]["returncode"] = 1
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError, "preceding command evidence"
+            ):
+                managed_state.load_document(path)
+
+            record["command_evidence"][0]["returncode"] = 0
+            path.write_text(json.dumps(document), encoding="utf-8")
+            managed_state.load_document(path)
+
+    def test_translated_homebrew_authorization_evidence_is_structured(self) -> None:
+        machine = capabilities.MachineState("Darwin", "arm64", "host")
+        missing = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, context: None,
+        )
+        translated = provider_plans.PackageManagerState(
+            "brew", "/usr/local/bin/brew", "host", "x86_64"
+        )
+        plan = provider_plans.generate_provider_plan(
+            (missing,),
+            ("bash",),
+            package_managers=(translated,),
+            translated_manager_fallbacks=(translated,),
+        )
+        action = plan.actions[0]
+        report = provider_execution.PlanExecutionReport(
+            machine,
+            plan.requested_capabilities,
+            provider_execution.PlanOutcome.SUCCEEDED,
+            (
+                provider_execution.ActionReport(
+                    action.capability_id,
+                    action.provider_id,
+                    action.manager,
+                    action.installation_unit,
+                    provider_execution.ActionOutcome.SUCCEEDED,
+                    (
+                        provider_execution.CommandReport(
+                            action.commands[0], 0, "installed", ""
+                        ),
+                    ),
+                    ("/usr/local/bin/bash",),
+                    "verified",
+                ),
+            ),
+        )
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                plan,
+                state_path=path,
+                executor=Mock(return_value=report),
+                allow_provider_mutation=True,
+            )
+            original = managed_state.load_document(path)
+            record = original["records"][0]
+            self.assertEqual(record["package_manager"]["architecture"], "x86_64")
+            self.assertTrue(
+                record["requested_action"][
+                    "translated_manager_fallback_authorized"
+                ]
+            )
+            native_document = json.loads(json.dumps(original))
+            native_document["records"][0]["package_manager"]["architecture"] = (
+                "arm64"
+            )
+            native_document["records"][0]["requested_action"][
+                "translated_manager_fallback_authorized"
+            ] = False
+            path.write_text(json.dumps(native_document), encoding="utf-8")
+            managed_state.load_document(path)
+            for architecture, authorized in (
+                ("x86_64", False),
+                ("arm64", True),
+                ("unknown", True),
+            ):
+                with self.subTest(
+                    architecture=architecture, authorized=authorized
+                ):
+                    document = json.loads(json.dumps(original))
+                    document["records"][0]["package_manager"][
+                        "architecture"
+                    ] = architecture
+                    document["records"][0]["requested_action"][
+                        "translated_manager_fallback_authorized"
+                    ] = authorized
+                    path.write_text(json.dumps(document), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError,
+                        "Homebrew authorization evidence",
+                    ):
+                        managed_state.load_document(path)
+            for container, field, message in (
+                ("package_manager", "architecture", "package-manager evidence"),
+                (
+                    "requested_action",
+                    "translated_manager_fallback_authorized",
+                    "requested-action semantics",
+                ),
+            ):
+                with self.subTest(missing_field=field):
+                    document = json.loads(json.dumps(original))
+                    del document["records"][0][container][field]
+                    path.write_text(json.dumps(document), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError, message
                     ):
                         managed_state.load_document(path)
 
@@ -1089,13 +1226,15 @@ class ManagedStateTests(unittest.TestCase):
                 ("target_architecture", None),
                 ("target_architecture", "arm64"),
                 ("displaces_verified_paths", []),
+                ("displaces_verified_paths", ["relative/gs"]),
             ):
                 with self.subTest(field=field, value=value):
                     document = managed_state.load_document(path)
                     document["records"][0]["requested_action"][field] = value
                     path.write_text(json.dumps(document), encoding="utf-8")
                     with self.assertRaisesRegex(
-                        managed_state.ManagedStateError, "native-replacement"
+                        managed_state.ManagedStateError,
+                        "native-replacement|displaced-provider",
                     ):
                         managed_state.load_document(path)
                     path.unlink()

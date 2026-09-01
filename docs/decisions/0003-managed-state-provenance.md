@@ -40,6 +40,8 @@ records:
 - provider mechanism/origin, package-manager mechanism, and installation unit;
 - execution environment and machine context;
 - the action Agent Tools requested and bounded command evidence;
+- structured package-manager architecture and translated-Homebrew fallback
+  authorization evidence, never inferred from free-form reason text;
 - request, completion, and recording timestamps; and
 - the executor's rediscovery/verification result.
 
