@@ -19,6 +19,172 @@ from agent_tools import provider_plans
 class ProviderExecutionIntegrationTests(unittest.TestCase):
     """Exercise the executor against a disposable filesystem-backed host."""
 
+    def _mock_started_process(self):
+        process = mock.Mock()
+        process.stdout = None
+        process.stderr = None
+        process.returncode = None
+        return process
+
+    def test_popen_oserror_remains_a_launch_failure(self):
+        with mock.patch.object(
+            provider_execution.subprocess,
+            "Popen",
+            side_effect=FileNotFoundError("manager disappeared"),
+        ):
+            with self.assertRaises(FileNotFoundError):
+                provider_execution._run(("missing-manager",), 1)
+
+    def test_wait_oserror_after_launch_preserves_reaped_process_evidence(self):
+        process = self._mock_started_process()
+        process.wait.side_effect = OSError("wait failed")
+
+        def terminate(started):
+            self.assertIs(started, process)
+            started.returncode = -9
+
+        with mock.patch.object(
+            provider_execution.subprocess, "Popen", return_value=process
+        ), mock.patch.object(
+            provider_execution, "_start_output_readers", return_value=()
+        ), mock.patch.object(
+            provider_execution, "_terminate_process_tree", side_effect=terminate
+        ), mock.patch.object(
+            provider_execution, "_join_output_readers", return_value=True
+        ):
+            with self.assertRaises(
+                provider_execution.CommandLifecycleError
+            ) as raised:
+                provider_execution._run(("manager", "install"), 1)
+        self.assertFalse(raised.exception.lifetime_uncertain)
+        self.assertEqual(raised.exception.result.returncode, -9)
+        self.assertIn("launched", raised.exception.detail)
+
+    def test_reader_initialization_cleanup_oserror_finishes_bounded_local_cleanup(self):
+        process = self._mock_started_process()
+        process.stdout = mock.Mock()
+        process.stderr = mock.Mock()
+        reader = mock.Mock()
+        reader.is_alive.return_value = False
+        initialization_error = provider_execution._OutputReaderInitializationError(
+            (reader,), OSError("reader start failed")
+        )
+        terminate = mock.Mock(side_effect=OSError("termination failed"))
+        with mock.patch.object(
+            provider_execution.subprocess, "Popen", return_value=process
+        ), mock.patch.object(
+            provider_execution,
+            "_start_output_readers",
+            side_effect=initialization_error,
+        ), mock.patch.object(
+            provider_execution, "_terminate_process_tree", terminate
+        ):
+            with self.assertRaises(
+                provider_execution.UncertainSupervisionError
+            ) as raised:
+                provider_execution._run(("manager", "install"), 1)
+        self.assertIn("could not establish quiescence", raised.exception.detail)
+        self.assertEqual(terminate.call_count, 1)
+        self.assertTrue(reader.join.called)
+        process.stdout.close.assert_called_once()
+        process.stderr.close.assert_called_once()
+
+    def test_reader_oserror_after_leader_exit_is_uncertain(self):
+        process = self._mock_started_process()
+
+        def start_readers(
+            started, stdout_tail, stderr_tail, stop_readers, reader_errors
+        ):
+            reader_errors.append(OSError("pipe read failed"))
+            return ()
+
+        def complete(timeout):
+            process.returncode = 0
+            return 0
+
+        process.wait.side_effect = complete
+        with mock.patch.object(
+            provider_execution.subprocess, "Popen", return_value=process
+        ), mock.patch.object(
+            provider_execution,
+            "_start_output_readers",
+            side_effect=start_readers,
+        ):
+            with self.assertRaises(
+                provider_execution.UncertainSupervisionError
+            ) as raised:
+                provider_execution._run(("manager", "install"), 1)
+        self.assertEqual(raised.exception.result.returncode, 0)
+        self.assertIn("could not establish quiescence", raised.exception.detail)
+
+    def test_timeout_termination_oserror_preserves_started_uncertainty(self):
+        process = self._mock_started_process()
+        process.wait.side_effect = subprocess.TimeoutExpired(("manager",), 1)
+        terminate = mock.Mock(side_effect=OSError("kill failed"))
+        with mock.patch.object(
+            provider_execution.subprocess, "Popen", return_value=process
+        ), mock.patch.object(
+            provider_execution, "_start_output_readers", return_value=()
+        ), mock.patch.object(
+            provider_execution,
+            "_terminate_process_tree",
+            terminate,
+        ):
+            with self.assertRaises(
+                provider_execution.CommandLifecycleError
+            ) as raised:
+                provider_execution._run(("manager", "install"), 1)
+        self.assertTrue(raised.exception.lifetime_uncertain)
+        self.assertTrue(raised.exception.timed_out)
+        self.assertIsNone(raised.exception.result.returncode)
+        self.assertEqual(terminate.call_count, 2)
+
+    def test_interrupted_termination_oserror_preserves_started_uncertainty(self):
+        process = self._mock_started_process()
+        process.wait.side_effect = KeyboardInterrupt()
+        terminate = mock.Mock(side_effect=OSError("reap failed"))
+        with mock.patch.object(
+            provider_execution.subprocess, "Popen", return_value=process
+        ), mock.patch.object(
+            provider_execution, "_start_output_readers", return_value=()
+        ), mock.patch.object(
+            provider_execution,
+            "_terminate_process_tree",
+            terminate,
+        ):
+            with self.assertRaises(
+                provider_execution.CommandInterruptedError
+            ) as raised:
+                provider_execution._run(("manager", "install"), 1)
+        self.assertTrue(raised.exception.lifetime_uncertain)
+        self.assertIsNone(raised.exception.result.returncode)
+        self.assertIn("after launch", raised.exception.detail)
+        self.assertEqual(terminate.call_count, 2)
+
+    def test_output_join_interrupt_preserves_known_process_completion(self):
+        process = self._mock_started_process()
+
+        def complete(timeout):
+            process.returncode = 0
+            return 0
+
+        process.wait.side_effect = complete
+        with mock.patch.object(
+            provider_execution.subprocess, "Popen", return_value=process
+        ), mock.patch.object(
+            provider_execution, "_start_output_readers", return_value=()
+        ), mock.patch.object(
+            provider_execution,
+            "_join_output_readers",
+            side_effect=KeyboardInterrupt(),
+        ):
+            with self.assertRaises(
+                provider_execution.CommandInterruptedError
+            ) as raised:
+                provider_execution._run(("manager", "install"), 1)
+        self.assertTrue(raised.exception.lifetime_uncertain)
+        self.assertEqual(raised.exception.result.returncode, 0)
+
     def test_real_subprocess_install_rediscovery_and_repeat(self):
         machine = capabilities.MachineState("Linux", "x86_64")
         with TemporaryDirectory() as directory:
@@ -212,7 +378,7 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
                     side_effect=start_or_fail,
                 ):
                     with self.assertRaises(
-                        provider_execution.CommandInitializationError
+                        provider_execution.CommandLifecycleError
                     ) as raised:
                         provider_execution._run(
                             (sys.executable, "-c", "import time;time.sleep(30)"),
@@ -247,7 +413,7 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
             "Thread",
             side_effect=construct_or_fail,
         ):
-            with self.assertRaises(provider_execution.CommandInitializationError):
+            with self.assertRaises(provider_execution.CommandLifecycleError):
                 provider_execution._run(
                     (sys.executable, "-c", "import time;time.sleep(30)"),
                     10,
@@ -281,7 +447,7 @@ class ProviderExecutionIntegrationTests(unittest.TestCase):
             "_terminate_privileged_supervisor",
             side_effect=provider_execution._terminate_process_tree,
         ) as terminate:
-            with self.assertRaises(provider_execution.CommandInitializationError):
+            with self.assertRaises(provider_execution.CommandLifecycleError):
                 provider_execution._run(
                     (sys.executable, "-c", "import time;time.sleep(30)"),
                     10,

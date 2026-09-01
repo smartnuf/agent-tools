@@ -3,9 +3,12 @@ import subprocess
 import threading
 import unittest
 from dataclasses import replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from agent_tools import capabilities
+from agent_tools import managed_state
 from agent_tools import provider_execution
 from agent_tools import provider_plans
 
@@ -632,10 +635,11 @@ class ProviderExecutionTests(unittest.TestCase):
         absent = self.state(capabilities.GHOSTSCRIPT)
 
         def fail_after_start(argv, timeout):
-            raise provider_execution.CommandInitializationError(
+            raise provider_execution.CommandLifecycleError(
                 subprocess.CompletedProcess(argv, -9, "partial-out", "partial-err"),
                 "output reader initialization failed after the command may have started; "
                 "the process was terminated and reaped",
+                lifetime_uncertain=False,
             )
 
         report = self.execute(
@@ -646,7 +650,7 @@ class ProviderExecutionTests(unittest.TestCase):
         action = report.actions[0]
         self.assertEqual(
             action.outcome,
-            provider_execution.ActionOutcome.COMMAND_START_FAILED,
+            provider_execution.ActionOutcome.SUPERVISOR_FAILED,
         )
         self.assertEqual(action.commands[0].returncode, -9)
         self.assertEqual(action.commands[0].stdout, "partial-out")
@@ -1160,6 +1164,130 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertTrue(any("fresh plan" in item for item in report.recovery_guidance))
         self.assertFalse(any("idempotent" in item for item in report.recovery_guidance))
 
+    def test_post_start_lifecycle_uncertainty_preserves_prior_action_and_provenance(self):
+        ghostscript_absent = self.state(capabilities.GHOSTSCRIPT)
+        ghostscript_available = self.state(
+            capabilities.GHOSTSCRIPT, available=True
+        )
+        poppler_absent = self.state(capabilities.POPPLER)
+        plan = provider_plans.generate_provider_plan(
+            (ghostscript_absent, poppler_absent),
+            ("ghostscript", "poppler"),
+            package_managers=(self.manager,),
+        )
+        calls = 0
+
+        def run(argv, timeout):
+            nonlocal calls
+            calls += 1
+            if calls <= 2:
+                return subprocess.CompletedProcess(argv, 0, f"completed-{calls}", "")
+            raise provider_execution.CommandLifecycleError(
+                subprocess.CompletedProcess(argv, None, "partial", "reap failed"),
+                "provider command launched, but reaping failed",
+                lifetime_uncertain=True,
+            )
+
+        detector = Mock(
+            side_effect=self.detector_sequence(
+                ghostscript_absent,
+                ghostscript_available,
+                poppler_absent,
+            )
+        )
+        with TemporaryDirectory() as directory:
+            state_path = Path(directory) / "managed-state.json"
+            result = managed_state.execute_provider_plan(
+                plan,
+                state_path=state_path,
+                allow_provider_mutation=True,
+                current_context=lambda: self.machine,
+                manager_verifier=lambda state, machine: True,
+                privilege_resolver=lambda action: "/usr/bin/sudo",
+                supervisor_resolver=lambda action: "/usr/bin/timeout",
+                privilege_preflight=lambda argv: True,
+                detector=detector,
+                runner=run,
+            )
+            document = managed_state.load_document(state_path)
+
+        execution = result.execution
+        self.assertEqual(
+            tuple(action.outcome for action in execution.actions),
+            (
+                provider_execution.ActionOutcome.SUCCEEDED,
+                provider_execution.ActionOutcome.SUPERVISOR_FAILED,
+            ),
+        )
+        self.assertEqual(execution.actions[0].commands[-1].stdout, "completed-2")
+        self.assertIsNone(execution.actions[1].commands[0].returncode)
+        self.assertIn("launched", execution.actions[1].detail)
+        self.assertFalse(
+            any("no provider command started" in item for item in execution.recovery_guidance)
+        )
+        self.assertTrue(
+            any("do not retry" in item for item in execution.recovery_guidance)
+        )
+        self.assertTrue(
+            any("do not attempt rollback" in item for item in execution.recovery_guidance)
+        )
+        self.assertFalse(any("idempotent" in item for item in execution.recovery_guidance))
+        self.assertEqual(detector.call_count, 3)
+        self.assertEqual(len(document["records"]), 2)
+        self.assertTrue(all(record["ownership"] is False for record in document["records"]))
+        self.assertEqual(
+            document["records"][1]["verification"]["outcome"],
+            provider_execution.ActionOutcome.SUPERVISOR_FAILED.value,
+        )
+
+    def test_uncertain_post_start_interrupt_is_persisted_before_propagation(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        plan = self.plan()
+
+        def interrupt(argv, timeout):
+            raise provider_execution.CommandInterruptedError(
+                subprocess.CompletedProcess(argv, None, "partial", "reap failed"),
+                "provider command was interrupted after launch; reaping failed",
+                lifetime_uncertain=True,
+            )
+
+        with TemporaryDirectory() as directory:
+            state_path = Path(directory) / "managed-state.json"
+            with self.assertRaises(
+                provider_execution.ProviderPlanInterrupted
+            ) as raised:
+                managed_state.execute_provider_plan(
+                    plan,
+                    state_path=state_path,
+                    allow_provider_mutation=True,
+                    current_context=lambda: self.machine,
+                    manager_verifier=lambda state, machine: True,
+                    privilege_resolver=lambda action: "/usr/bin/sudo",
+                    supervisor_resolver=lambda action: "/usr/bin/timeout",
+                    privilege_preflight=lambda argv: True,
+                    detector=self.detector_sequence(absent),
+                    runner=interrupt,
+                )
+            document = managed_state.load_document(state_path)
+
+        report = raised.exception.report
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.SUPERVISOR_FAILED,
+        )
+        self.assertIsNone(report.actions[0].commands[0].returncode)
+        self.assertTrue(any("do not retry" in item for item in report.recovery_guidance))
+        self.assertTrue(
+            any("do not attempt rollback" in item for item in report.recovery_guidance)
+        )
+        self.assertFalse(
+            any("no provider command started" in item for item in report.recovery_guidance)
+        )
+        self.assertEqual(
+            document["records"][0]["verification"]["outcome"],
+            provider_execution.ActionOutcome.SUPERVISOR_FAILED.value,
+        )
+
     def test_stale_homebrew_bash_action_skips_for_fresh_system_bash(self):
         machine = capabilities.MachineState("Darwin", "arm64")
         manager = provider_plans.PackageManagerState(
@@ -1337,7 +1465,7 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         self.assertIn("different capability", report.actions[0].detail)
 
-    def test_reader_join_interruption_detaches_as_uncertain(self):
+    def test_reader_join_interruption_is_preserved(self):
         first = Mock()
         second = Mock()
         first.join.side_effect = (KeyboardInterrupt(), None)
@@ -1345,10 +1473,8 @@ class ProviderExecutionTests(unittest.TestCase):
         first.is_alive.return_value = True
         second.is_alive.return_value = True
         stop = threading.Event()
-        clean = provider_execution._join_output_readers(
-            (first, second), stop, []
-        )
-        self.assertFalse(clean)
+        with self.assertRaises(KeyboardInterrupt):
+            provider_execution._join_output_readers((first, second), stop, [])
         self.assertTrue(stop.is_set())
 
     def test_native_replacement_uses_any_fresh_native_provider_but_not_translated(self):
