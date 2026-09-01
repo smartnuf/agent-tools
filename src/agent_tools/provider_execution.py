@@ -356,15 +356,26 @@ def _materialize_with_cancellation(
 
 def _raise_post_start_error(
     cancellation: _CancellationContext,
-    error: Callable[[], BaseException],
-    interrupted: Callable[[], CommandInterruptedError],
+    argv: tuple[str, ...],
+    process: subprocess.Popen[str],
+    stdout_tail: _BoundedOutputTail,
+    stderr_tail: _BoundedOutputTail,
+    error: Callable[[subprocess.CompletedProcess[str]], BaseException],
+    interrupted: Callable[
+        [subprocess.CompletedProcess[str]], CommandInterruptedError
+    ],
 ) -> None:
-    """Raise a post-start error inside its cancellation materialization boundary."""
+    """Materialize all post-start evidence inside the cancellation boundary."""
 
     def raise_error() -> None:
-        raise error()
+        raise error(_started_process_result(argv, process, stdout_tail, stderr_tail))
 
-    _materialize_with_cancellation(cancellation, raise_error, interrupted)
+    def interrupted_error() -> CommandInterruptedError:
+        return interrupted(
+            _started_process_result(argv, process, stdout_tail, stderr_tail)
+        )
+
+    _materialize_with_cancellation(cancellation, raise_error, interrupted_error)
     raise AssertionError("post-start error materialization must raise")
 
 
@@ -454,14 +465,18 @@ def _run(
         lifetime_uncertain = not cleanup_established
         _raise_post_start_error(
             cancellation,
-            lambda: CommandLifecycleError(
-                _started_process_result(argv, process, stdout_tail, stderr_tail),
+            argv,
+            process,
+            stdout_tail,
+            stderr_tail,
+            lambda result: CommandLifecycleError(
+                result,
                 error.detail,
                 lifetime_uncertain=lifetime_uncertain,
                 timed_out=error.timed_out,
             ),
-            lambda: CommandInterruptedError(
-                _started_process_result(argv, process, stdout_tail, stderr_tail),
+            lambda result: CommandInterruptedError(
+                result,
                 (
                     "provider command launched and lifecycle handling failed; "
                     "cancellation interrupted failure-evidence materialization"
@@ -519,19 +534,22 @@ def _run(
                     lifetime_uncertain=True,
                 ) from interruption
         lifetime_uncertain = not cleanup_established
-        detail = (
-            "provider command launched, but post-start lifecycle handling failed: "
-            f"{error}"
-        )
         _raise_post_start_error(
             cancellation,
-            lambda: CommandLifecycleError(
-                _started_process_result(argv, process, stdout_tail, stderr_tail),
-                detail,
+            argv,
+            process,
+            stdout_tail,
+            stderr_tail,
+            lambda result: CommandLifecycleError(
+                result,
+                (
+                    "provider command launched, but post-start lifecycle handling "
+                    f"failed: {error}"
+                ),
                 lifetime_uncertain=lifetime_uncertain,
             ),
-            lambda: CommandInterruptedError(
-                _started_process_result(argv, process, stdout_tail, stderr_tail),
+            lambda result: CommandInterruptedError(
+                result,
                 (
                     "provider command launched and post-start lifecycle handling "
                     "failed; cancellation interrupted failure-evidence materialization"
@@ -654,20 +672,23 @@ def _supervise_started_process(
                 _terminate_process_tree(process)
         except OSError as error:
             lifetime_uncertain = process.returncode is None
-            detail = (
-                "provider command launched and exceeded its timeout, but "
-                f"termination or reaping failed: {error}"
-            )
             _raise_post_start_error(
                 cancellation,
-                lambda: CommandLifecycleError(
-                    _started_process_result(argv, process, stdout_tail, stderr_tail),
-                    detail,
+                argv,
+                process,
+                stdout_tail,
+                stderr_tail,
+                lambda result: CommandLifecycleError(
+                    result,
+                    (
+                        "provider command launched and exceeded its timeout, but "
+                        f"termination or reaping failed: {error}"
+                    ),
                     lifetime_uncertain=lifetime_uncertain,
                     timed_out=True,
                 ),
-                lambda: CommandInterruptedError(
-                    _started_process_result(argv, process, stdout_tail, stderr_tail),
+                lambda result: CommandInterruptedError(
+                    result,
                     (
                         "provider command launched and timed out; cancellation "
                         "interrupted termination-failure evidence materialization"
@@ -687,16 +708,15 @@ def _supervise_started_process(
             )
             _raise_post_start_error(
                 cancellation,
-                lambda: _uncertain_output_error(
-                    argv,
-                    process.returncode,
-                    stdout_tail,
-                    stderr_tail,
-                    detail=detail,
-                    timed_out=True,
+                argv,
+                process,
+                stdout_tail,
+                stderr_tail,
+                lambda result: UncertainSupervisionError(
+                    result, detail, timed_out=True
                 ),
-                lambda: CommandInterruptedError(
-                    _started_process_result(argv, process, stdout_tail, stderr_tail),
+                lambda result: CommandInterruptedError(
+                    result,
                     (
                         "provider command launched and timed out; cancellation "
                         "interrupted uncertain supervisor evidence materialization"
@@ -709,15 +729,15 @@ def _supervise_started_process(
         ):
             _raise_post_start_error(
                 cancellation,
-                lambda: _uncertain_output_error(
-                    argv,
-                    process.returncode,
-                    stdout_tail,
-                    stderr_tail,
-                    timed_out=True,
+                argv,
+                process,
+                stdout_tail,
+                stderr_tail,
+                lambda result: UncertainSupervisionError(
+                    result, timed_out=True
                 ),
-                lambda: CommandInterruptedError(
-                    _started_process_result(argv, process, stdout_tail, stderr_tail),
+                lambda result: CommandInterruptedError(
+                    result,
                     (
                         "provider command launched and timed out; cancellation "
                         "interrupted uncertain output evidence materialization"
@@ -727,14 +747,18 @@ def _supervise_started_process(
             )
         _raise_post_start_error(
             cancellation,
-            lambda: subprocess.TimeoutExpired(
+            argv,
+            process,
+            stdout_tail,
+            stderr_tail,
+            lambda result: subprocess.TimeoutExpired(
                 argv,
                 timeout,
-                output=stdout_tail.value(),
-                stderr=stderr_tail.value(),
+                output=result.stdout,
+                stderr=result.stderr,
             ),
-            lambda: CommandInterruptedError(
-                _started_process_result(argv, process, stdout_tail, stderr_tail),
+            lambda result: CommandInterruptedError(
+                result,
                 (
                     "provider command launched and timed out; cancellation interrupted "
                     "timeout evidence materialization after quiescence was established"
@@ -845,11 +869,13 @@ def _supervise_started_process(
     ):
         _raise_post_start_error(
             cancellation,
-            lambda: _uncertain_output_error(
-                argv, process.returncode, stdout_tail, stderr_tail
-            ),
-            lambda: CommandInterruptedError(
-                _started_process_result(argv, process, stdout_tail, stderr_tail),
+            argv,
+            process,
+            stdout_tail,
+            stderr_tail,
+            lambda result: UncertainSupervisionError(result),
+            lambda result: CommandInterruptedError(
+                result,
                 (
                     "provider command launched; cancellation interrupted uncertain "
                     "output evidence materialization"
@@ -1000,18 +1026,21 @@ def _finish_reader_initialization_cleanup(
             lifetime_uncertain=termination_failed or not readers_clean,
         ) from initialization_error
     if termination_failed or not readers_clean:
-        uncertain_detail = (
-            f"{detail}; termination or local reader cleanup could not establish "
-            "quiescence, and provider/package state is uncertain"
-        )
         _raise_post_start_error(
             cancellation,
-            lambda: UncertainSupervisionError(
-                _started_process_result(argv, process, stdout_tail, stderr_tail),
-                uncertain_detail,
+            argv,
+            process,
+            stdout_tail,
+            stderr_tail,
+            lambda result: UncertainSupervisionError(
+                result,
+                (
+                    f"{detail}; termination or local reader cleanup could not "
+                    "establish quiescence, and provider/package state is uncertain"
+                ),
             ),
-            lambda: CommandInterruptedError(
-                _started_process_result(argv, process, stdout_tail, stderr_tail),
+            lambda result: CommandInterruptedError(
+                result,
                 (
                     f"{detail}; cancellation interrupted uncertain reader-"
                     "initialization evidence materialization"
@@ -1019,19 +1048,22 @@ def _finish_reader_initialization_cleanup(
                 lifetime_uncertain=True,
             ),
         )
-    lifecycle_detail = (
-        f"{detail}; the process was terminated and reaped, but it may have mutated "
-        "state before cleanup"
-    )
     _raise_post_start_error(
         cancellation,
-        lambda: CommandLifecycleError(
-            _started_process_result(argv, process, stdout_tail, stderr_tail),
-            lifecycle_detail,
+        argv,
+        process,
+        stdout_tail,
+        stderr_tail,
+        lambda result: CommandLifecycleError(
+            result,
+            (
+                f"{detail}; the process was terminated and reaped, but it may have "
+                "mutated state before cleanup"
+            ),
             lifetime_uncertain=False,
         ),
-        lambda: CommandInterruptedError(
-            _started_process_result(argv, process, stdout_tail, stderr_tail),
+        lambda result: CommandInterruptedError(
+            result,
             (
                 f"{detail}; cancellation interrupted reader-initialization failure "
                 "evidence materialization"
