@@ -86,15 +86,22 @@ agent-tools doctor
 agent-tools tools list
 agent-tools tools status
 agent-tools tools status bash
+agent-tools tools enable bash --allow-config-mutation
+agent-tools tools disable bash --allow-config-mutation
 ```
 
-`tools status bash` verifies the provider, executable path, version, execution
+`tools status bash` reports desired state separately and verifies the detected
+provider, executable path, version, execution
 environment, and executable architecture where observable. On Windows it
 discovers Git Bash outside the normal process `PATH`; the default WSL
 distribution is reported separately and never silently treated as
-Windows-hosted Bash. These commands do not install software, alter `PATH`, or
-configure an agent. Version 0.1.2 is the first packaged release containing
-these commands.
+Windows-hosted Bash. `tools enable` and `tools disable` change only the
+versioned per-user desired-capability document, require the dedicated mutation
+flag for a real change, and back up an existing document before replacement.
+Disable never uninstalls a provider. The status and list commands do not
+install software, alter `PATH`, or configure an agent. Version 0.1.2 is the
+first packaged release containing the read-only commands; the desired-state
+commands are currently available from `main` pending the next release.
 
 ## Get the source
 
@@ -128,7 +135,7 @@ All mutation flags are opt-in. On Windows, `-InstallUv` delegates to WinGet. On 
 
 Bootstrap discovers installed interpreters without downloads, verifies each executable, and passes the selected absolute path to `uv`. A temporary bootstrap process does not determine the final runtime: a compatible native system Python normally wins over a translated managed Python. The resulting `.venv` is verified again before packages are installed. If an existing `.venv` no longer matches the selected runtime, bootstrap stops without replacing it; remove that checkout-owned environment deliberately and rerun.
 
-Native setup reports the reviewed package-manager commands and then reports host-mutation and managed-provenance outcomes separately. An all-satisfied rerun performs no provider command. After partial or uncertain execution, do not rerun automatically: follow the reported recovery guidance, rediscover current state, and generate a fresh attempt. Temporary process `PATH` refresh used for verification is restored; persistent PATH or profile changes still require the separate explicit PATH flag.
+Native setup reports the reviewed package-manager commands and then reports host-mutation and managed-provenance outcomes separately. It also consumes enabled optional capabilities and exact provider preferences from the desired-state document; the bootstrap native-install flag remains a separate authorization for any resulting provider mutation. An all-satisfied rerun performs no provider command. After partial or uncertain execution, do not rerun automatically: follow the reported recovery guidance, rediscover current state, and generate a fresh attempt. Temporary process `PATH` refresh used for verification is restored; persistent PATH or profile changes still require the separate explicit PATH flag.
 
 PATH changes are also opt-in. Windows backups are written under `.backups/path/`; Unix shell-profile changes create a timestamped sibling backup before editing an existing profile.
 Unix profile updates use a per-profile lock. If an interrupted update leaves that lock behind, the command stops without changing the profile and reports the exact lock path and recorded PID. Verify that no update process owns it before removing it manually and rerunning.
@@ -166,4 +173,4 @@ For routine operation:
 
 The maintained roadmap is [`docs/plan/00-index.md`](docs/plan/00-index.md). It records the current milestone, acceptance gates, estimates, evidence, remaining effort, and recommended next work. [`docs/plan/README.md`](docs/plan/README.md) defines how humans and agents plan tasks and report progress consistently.
 
-The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md) and the first stable PyPI publication in M2 are complete. M3 now includes tested native/system-first selection and clone bootstrap delegation through the explicitly authorized managed provider lifecycle; desired-state and integration lifecycle work remains. See the maintained roadmap for the ordered work. The packaged release and clone-based shared development environment remain supported entry points.
+The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md) and the first stable PyPI publication in M2 are complete. M3 now includes tested native/system-first selection, clone bootstrap delegation through the explicitly authorized managed provider lifecycle, and a reversible desired-capability configuration boundary. Agent integration and release-lifecycle evidence remain. See the maintained roadmap for the ordered work. The packaged release and clone-based shared development environment remain supported entry points.

@@ -35,6 +35,26 @@ automatically. Process-only PATH refresh may be used for post-install
 verification and is restored afterward; profile or persistent PATH changes
 remain controlled by the separate explicit PATH flag.
 
+## Desired capability configuration
+
+Optional capabilities are enabled independently of detection and managed
+mutation provenance. The v1 document is stored at
+`%LOCALAPPDATA%\agent-tools\config.json` on Windows,
+`$XDG_CONFIG_HOME/agent-tools/config.json` (or
+`~/.config/agent-tools/config.json`) on Linux and WSL, and
+`~/Library/Application Support/agent-tools/config.json` on macOS. Windows-host
+and WSL configuration are therefore separate.
+
+Use `agent-tools tools enable bash --allow-config-mutation` to accept the
+catalogue's provider order, or add `--provider PROVIDER` to require one exact
+provider supported in the current context. `tools disable bash
+--allow-config-mutation` removes that desired entry only; it never invokes a
+package manager or uninstalls Bash or Git. A real change to an existing valid
+document creates a collision-safe sibling backup before atomic replacement.
+Unreadable, malformed, unknown-version, symlinked, or non-regular state fails
+closed and is preserved. See [Decision 0005](decisions/0005-desired-capability-state.md)
+for the schema and failure contract.
+
 ## Read-only capability discovery
 
 The reviewed M1.5 package build supports `agent-tools tools list` and
