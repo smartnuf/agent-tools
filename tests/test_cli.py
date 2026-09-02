@@ -173,6 +173,11 @@ class CliTests(unittest.TestCase):
                 {"USERPROFILE": r"C:\Users\person"},
                 clear=True,
             ),
+            patch.object(
+                claude_code_integration,
+                "current_machine",
+                return_value=capabilities.MachineState("Windows", "AMD64", "host"),
+            ),
             redirect_stderr(StringIO()) as errors,
         ):
             self.assertEqual(

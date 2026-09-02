@@ -207,6 +207,7 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
             b'{"env":{"X":"1","X":"2"}}',
             b'{"env":null}',
             b'{"env":{"X":1}}',
+            b'{"unrelated":Infinity}',
         )
         with TemporaryDirectory() as directory:
             settings, state = self.paths(directory)
@@ -318,6 +319,35 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
             self.assertEqual(
                 integration._parse_state(state.read_bytes())["phase"], "prepared"
             )
+
+    def test_activation_preserves_uncertain_ledger_recovery_evidence(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings, state = self.paths(directory)
+            settings.parent.mkdir()
+            raw = b'{"env":{"KEEP":"yes"}}\n'
+            settings.write_bytes(raw)
+            actual_replace = integration._replace_document
+            recovery_backup = state.with_name("state.recovery.json")
+            calls = 0
+
+            def fail_activation(*args, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 3:
+                    raise integration.ClaudeCodeIntegrationRestorationError(
+                        "ledger restoration is uncertain", (recovery_backup,)
+                    )
+                return actual_replace(*args, **kwargs)
+
+            with (
+                patch.object(integration, "_replace_document", side_effect=fail_activation),
+                self.assertRaises(
+                    integration.ClaudeCodeIntegrationRestorationError
+                ) as raised,
+            ):
+                self.apply(settings, state, allow_config_mutation=True)
+            self.assertEqual(settings.read_bytes(), raw)
+            self.assertIn(recovery_backup, raised.exception.backup_paths)
 
     def test_prepared_reconciliation_refreshes_unchanged_file_existence(self) -> None:
         with TemporaryDirectory() as directory:
@@ -439,16 +469,63 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             settings, state = self.paths(directory)
             empty = integration.inspect_integration(
-                settings_path=settings, state_path=state
+                machine=WINDOWS, settings_path=settings, state_path=state
             )
             self.assertFalse(empty.managed)
             self.assertIsNone(empty.phase)
             self.apply(settings, state, allow_config_mutation=True)
             active = integration.inspect_integration(
-                settings_path=settings, state_path=state
+                machine=WINDOWS, settings_path=settings, state_path=state
             )
             self.assertTrue(active.managed)
             self.assertIs(active.phase, integration.IntegrationPhase.ACTIVE)
+
+    def test_status_rejects_unsupported_host_before_path_resolution(self) -> None:
+        with (
+            patch.object(integration, "claude_settings_path") as settings_path,
+            patch.object(integration, "integration_state_path") as state_path,
+            self.assertRaisesRegex(
+                integration.ClaudeCodeIntegrationError, "native Windows"
+            ),
+        ):
+            integration.inspect_integration(machine=WSL)
+        settings_path.assert_not_called()
+        state_path.assert_not_called()
+
+    def test_windows_path_identity_is_case_and_separator_insensitive(self) -> None:
+        self.assertTrue(
+            integration._same_path_identity(
+                r"C:\Users\Person\.claude\settings.json",
+                r"c:/users/person/.CLAUDE/SETTINGS.JSON",
+            )
+        )
+        self.assertFalse(
+            integration._same_path_identity(
+                r"C:\Users\Person\.claude\settings.json",
+                r"D:\Users\Person\.claude\settings.json",
+            )
+        )
+
+    def test_lifecycle_accepts_equivalent_git_bash_path_casing(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings, state = self.paths(directory)
+            self.apply(settings, state, allow_config_mutation=True)
+            document = integration._parse_settings(settings.read_bytes())
+            document["env"][integration.SETTING_NAME] = GIT_BASH.swapcase()
+            settings.write_text(json.dumps(document), encoding="utf-8")
+
+            repeated = integration.apply_git_bash_integration(
+                machine=WINDOWS,
+                detector=lambda capability, machine: git_bash_state(
+                    GIT_BASH.lower()
+                ),
+                settings_path=settings,
+                state_path=state,
+                allow_config_mutation=True,
+            )
+            self.assertIs(repeated.outcome, integration.IntegrationOutcome.NO_CHANGES)
+            removed = self.remove(settings, state, allow_config_mutation=True)
+            self.assertIs(removed.phase, integration.IntegrationPhase.REMOVED)
 
     def test_lifecycle_never_invokes_provider_mutation(self) -> None:
         with TemporaryDirectory() as directory:

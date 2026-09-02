@@ -148,9 +148,17 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return value
 
 
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON constant is not permitted: {value}")
+
+
 def _parse_json(raw: bytes) -> object:
     try:
-        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
+        value = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_unique_object,
+            parse_constant=_reject_json_constant,
+        )
     except (UnicodeError, ValueError, OverflowError, RecursionError) as error:
         raise ClaudeCodeIntegrationError(
             f"configuration is unreadable or corrupt: {error}"
@@ -200,6 +208,33 @@ def _valid_git_bash_path(value: object) -> bool:
         and PureWindowsPath(value).is_absolute()
         and ntpath.basename(value).casefold() in {"bash.exe", "sh.exe"}
     )
+
+
+def _same_path_identity(left: str, right: str) -> bool:
+    """Compare native-Windows path spellings without weakening fixture paths."""
+
+    if PureWindowsPath(left).is_absolute() and PureWindowsPath(right).is_absolute():
+        return ntpath.normcase(ntpath.normpath(left)) == ntpath.normcase(
+            ntpath.normpath(right)
+        )
+    return left == right
+
+
+def _same_member(
+    actual_present: bool,
+    actual_value: str | None,
+    expected_present: bool,
+    expected_value: str | None,
+) -> bool:
+    if actual_present != expected_present:
+        return False
+    if not actual_present:
+        return True
+    if actual_value is None or expected_value is None:
+        return actual_value == expected_value
+    if _valid_git_bash_path(actual_value) and _valid_git_bash_path(expected_value):
+        return _same_path_identity(actual_value, expected_value)
+    return actual_value == expected_value
 
 
 def _parse_state(raw: bytes) -> dict[str, Any]:
@@ -298,7 +333,9 @@ def _snapshot(path: Path, parser: DocumentParser) -> _Snapshot:
 
 
 def _serialize(document: dict[str, Any]) -> bytes:
-    return (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    return (
+        json.dumps(document, allow_nan=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
 
 
 def _write_all(descriptor: int, value: bytes) -> None:
@@ -673,10 +710,7 @@ def _selected_git_bash(
     machine: MachineState,
     detector: Callable[[CapabilitySpec, MachineState], CapabilityState],
 ) -> str:
-    if machine.platform != "Windows" or machine.execution_environment != "host":
-        raise ClaudeCodeIntegrationError(
-            "Claude Code Git Bash integration requires native Windows host execution"
-        )
+    _require_native_windows(machine)
     state = detector(BASH, machine)
     selected = state.selected_provider
     if selected is None or selected.provider.provider_id != "git-bash":
@@ -695,11 +729,20 @@ def _selected_git_bash(
     return executables[0].path
 
 
+def _require_native_windows(machine: MachineState) -> None:
+    if machine.platform != "Windows" or machine.execution_environment != "host":
+        raise ClaudeCodeIntegrationError(
+            "Claude Code Git Bash integration requires native Windows host execution"
+        )
+
+
 def inspect_integration(
     *,
+    machine: MachineState | None = None,
     settings_path: Path | None = None,
     state_path: Path | None = None,
 ) -> IntegrationStatus:
+    _require_native_windows(machine or current_machine())
     settings_path = settings_path or claude_settings_path()
     state_path = state_path or integration_state_path()
     settings = _snapshot(settings_path, _parse_settings)
@@ -710,13 +753,13 @@ def inspect_integration(
     phase, applied, settings_existed, previous_present, previous_value = _record_facts(
         state.document
     )
-    if state.document["settings_path"] != str(settings_path):
+    if not _same_path_identity(state.document["settings_path"], str(settings_path)):
         raise ClaudeCodeIntegrationError("integration state names another settings path")
     expected = (True, applied) if phase in {
         IntegrationPhase.PREPARED,
         IntegrationPhase.ACTIVE,
     } else (previous_present, previous_value)
-    managed = (present, current) == expected
+    managed = _same_member(present, current, *expected)
     return IntegrationStatus(settings_path, state_path, phase, current, managed)
 
 
@@ -758,7 +801,7 @@ def _apply_git_bash_integration(
         state = _snapshot(state_path, _parse_state)
         current_present, current_value = _current_member(settings.document)
         if not state.exists:
-            if (current_present, current_value) == (True, applied):
+            if _same_member(current_present, current_value, True, applied):
                 return IntegrationResult(
                     IntegrationOutcome.NO_CHANGES,
                     settings_path,
@@ -770,7 +813,9 @@ def _apply_git_bash_integration(
             previous_present, previous_value = current_present, current_value
             phase = None
         else:
-            if state.document["settings_path"] != str(settings_path):
+            if not _same_path_identity(
+                state.document["settings_path"], str(settings_path)
+            ):
                 raise ClaudeCodeIntegrationError(
                     "integration state names another settings path"
                 )
@@ -782,11 +827,13 @@ def _apply_git_bash_integration(
                 previous_value,
             ) = _record_facts(state.document)
             if phase is IntegrationPhase.ACTIVE:
-                if recorded_applied != applied:
+                if not _same_path_identity(recorded_applied, applied):
                     raise ClaudeCodeIntegrationError(
                         "selected Git Bash changed; remove the active integration before reapplying"
                     )
-                if (current_present, current_value) != (True, recorded_applied):
+                if not _same_member(
+                    current_present, current_value, True, recorded_applied
+                ):
                     raise ClaudeCodeIntegrationError(
                         "Claude Code setting diverged from active integration state"
                     )
@@ -802,25 +849,30 @@ def _apply_git_bash_integration(
                 )
             expected_previous = (previous_present, previous_value)
             if phase is IntegrationPhase.PREPARED:
-                if recorded_applied != applied:
+                if not _same_path_identity(recorded_applied, applied):
                     raise ClaudeCodeIntegrationError(
                         "prepared integration names another Git Bash path"
                     )
-                if (current_present, current_value) not in {
-                    expected_previous,
-                    (True, recorded_applied),
-                }:
+                matches_previous = _same_member(
+                    current_present, current_value, *expected_previous
+                )
+                matches_applied = _same_member(
+                    current_present, current_value, True, recorded_applied
+                )
+                if not (matches_previous or matches_applied):
                     raise ClaudeCodeIntegrationError(
                         "Claude Code setting diverged from prepared integration state"
                     )
-                if (current_present, current_value) == expected_previous:
+                if matches_previous:
                     settings_existed = settings.exists
                     previous_present, previous_value = (
                         current_present,
                         current_value,
                     )
             else:
-                if (current_present, current_value) != expected_previous:
+                if not _same_member(
+                    current_present, current_value, *expected_previous
+                ):
                     raise ClaudeCodeIntegrationError(
                         "Claude Code setting diverged from removed integration state"
                     )
@@ -850,7 +902,9 @@ def _apply_git_bash_integration(
             if backup is not None:
                 backups.append(backup)
             state = _snapshot(state_path, _parse_state)
-        changed_settings = (current_present, current_value) != (True, applied)
+        changed_settings = not _same_member(
+            current_present, current_value, True, applied
+        )
         if changed_settings:
             updated_settings = _with_member(settings.document, True, applied)
             backup = _replace_document(
@@ -886,6 +940,14 @@ def _apply_git_bash_integration(
                         f"uncertain: {restoration_error}",
                         tuple(backups),
                     ) from error
+            if isinstance(error, ClaudeCodeIntegrationRestorationError):
+                recovery_paths = tuple(
+                    dict.fromkeys((*backups, *error.backup_paths))
+                )
+                raise ClaudeCodeIntegrationRestorationError(
+                    f"integration activation failed; prior settings restored; {error}",
+                    recovery_paths,
+                ) from error
             _raise_if_cancelled(cancellation)
             if isinstance(error, KeyboardInterrupt):
                 raise
@@ -928,10 +990,7 @@ def _remove_git_bash_integration(
     cancellation: _CancellationContext,
 ) -> IntegrationResult:
     machine = machine or current_machine()
-    if machine.platform != "Windows" or machine.execution_environment != "host":
-        raise ClaudeCodeIntegrationError(
-            "Claude Code Git Bash integration requires native Windows host execution"
-        )
+    _require_native_windows(machine)
     settings_path = settings_path or claude_settings_path()
     state_path = state_path or integration_state_path()
     with _MUTATION_LOCK:
@@ -945,7 +1004,9 @@ def _remove_git_bash_integration(
                 None,
                 detail="no Agent Tools-managed Claude Code integration exists",
             )
-        if state.document["settings_path"] != str(settings_path):
+        if not _same_path_identity(
+            state.document["settings_path"], str(settings_path)
+        ):
             raise ClaudeCodeIntegrationError("integration state names another settings path")
         (
             phase,
@@ -957,7 +1018,7 @@ def _remove_git_bash_integration(
         current = _current_member(settings.document)
         previous = (previous_present, previous_value)
         if phase is IntegrationPhase.REMOVED:
-            if current != previous:
+            if not _same_member(*current, *previous):
                 raise ClaudeCodeIntegrationError(
                     "Claude Code setting diverged from removed integration state"
                 )
@@ -967,7 +1028,9 @@ def _remove_git_bash_integration(
                 state_path,
                 phase,
             )
-        if current not in {(True, applied), previous}:
+        matches_applied = _same_member(*current, True, applied)
+        matches_previous = _same_member(*current, *previous)
+        if not (matches_applied or matches_previous):
             raise ClaudeCodeIntegrationError(
                 "Claude Code setting diverged from managed integration state"
             )
@@ -988,7 +1051,7 @@ def _remove_git_bash_integration(
             if backup is not None:
                 backups.append(backup)
             state = _snapshot(state_path, _parse_state)
-        if current == (True, applied):
+        if matches_applied:
             restored_settings = _with_member(
                 settings.document, previous_present, previous_value
             )
