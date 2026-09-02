@@ -1386,6 +1386,23 @@ def _validate_plan(plan: ProviderPlan, current: MachineState) -> MachineState:
         raise ExecutionContractError("provider plan is for a different execution context")
     if len(plan.requested_capabilities) != len(set(plan.requested_capabilities)):
         raise ExecutionContractError("provider plan has duplicate requested capabilities")
+    try:
+        preferences = dict(plan.provider_preferences)
+    except (TypeError, ValueError) as error:
+        raise ExecutionContractError(
+            "provider plan has malformed provider preferences"
+        ) from error
+    if (
+        len(preferences) != len(plan.provider_preferences)
+        or any(
+            not isinstance(capability_id, str)
+            or not isinstance(provider_id, str)
+            or capability_id not in plan.requested_capabilities
+            or not provider_id
+            for capability_id, provider_id in plan.provider_preferences
+        )
+    ):
+        raise ExecutionContractError("provider plan has invalid provider preferences")
     seen: set[str] = set()
     for action in plan.actions:
         if action.capability_id not in plan.requested_capabilities:
@@ -1444,10 +1461,16 @@ def _acceptable_provider_paths(
 def _acceptable_current_provider(
     state: CapabilityState,
     target_architecture: str | None,
+    preferred_provider_id: str | None = None,
 ) -> tuple[str, tuple[str, ...]] | None:
     """Select fresh satisfying evidence using catalogue provider priority."""
 
     for provider in state.providers:
+        if (
+            preferred_provider_id is not None
+            and provider.provider.provider_id != preferred_provider_id
+        ):
+            continue
         paths = _acceptable_provider_paths(
             provider, state.machine, target_architecture
         )
@@ -1652,6 +1675,7 @@ def _omitted_request_failure(
     detector: Detector,
 ) -> str | None:
     action_capabilities = {action.capability_id for action in plan.actions}
+    preferences = dict(plan.provider_preferences)
     for capability_id in plan.requested_capabilities:
         if capability_id in action_capabilities:
             continue
@@ -1669,7 +1693,9 @@ def _omitted_request_failure(
             validate_capability_state(state, expected_context=context)
         except PlanningError as error:
             return f"omitted capability evidence is stale: {error}"
-        if _acceptable_current_provider(state, None) is None:
+        if _acceptable_current_provider(
+            state, None, preferences.get(capability_id)
+        ) is None:
             return f"requested capability no longer verifies: {capability_id}"
     return None
 
@@ -1905,7 +1931,9 @@ def _execute_provider_plan(
 
         existing_provider = precommand(
             lambda: _acceptable_current_provider(
-                before, action.target_architecture
+                before,
+                action.target_architecture,
+                dict(plan.provider_preferences).get(action.capability_id),
             )
         )
         if existing_provider:

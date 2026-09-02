@@ -22,6 +22,14 @@ from .managed_state import (
     managed_state_path,
     provenance_for_capability,
 )
+from .desired_state import (
+    DesiredMutationOutcome,
+    DesiredStateError,
+    desired_capabilities,
+    desired_state_path,
+    load_document as load_desired_document,
+    set_capability,
+)
 
 DISTRIBUTION_NAME = "smartnuf-agent-tools"
 PACKAGE_PROBES = ("pypdf", "pdfplumber", "pymupdf", "PIL", "reportlab", "docx", "openpyxl")
@@ -197,6 +205,7 @@ def tools_status(capability_id: str | None = None) -> int:
 
     states = detect_capabilities(catalogue)
     managed_error: str | None = None
+    desired_error: str | None = None
     try:
         managed = load_document(
             managed_state_path(platform_name=states[0].machine.platform)
@@ -204,10 +213,28 @@ def tools_status(capability_id: str | None = None) -> int:
     except ManagedStateError as error:
         managed = None
         managed_error = str(error)
+    try:
+        desired_entries = desired_capabilities(
+            load_desired_document(
+                desired_state_path(platform_name=states[0].machine.platform)
+            ),
+            states[0].machine,
+        )
+        desired_by_id = {item.capability_id: item for item in desired_entries}
+    except DesiredStateError as error:
+        desired_by_id = {}
+        desired_error = str(error)
     for index, state in enumerate(states):
         if index:
             print()
         _print_capability_status(state)
+        desired = desired_by_id.get(state.capability.capability_id)
+        if desired is not None:
+            print("  desired: enabled")
+            if desired.provider_id is not None:
+                print(f"    preferred provider: {desired.provider_id}")
+        elif desired_error is None and not state.capability.required_by_default:
+            print("  desired: not enabled")
         if managed is not None:
             records = provenance_for_capability(managed, state.capability.capability_id)
             if records:
@@ -221,6 +248,8 @@ def tools_status(capability_id: str | None = None) -> int:
                 print("  agent-tools requests: none recorded")
     if managed_error is not None:
         print(f"managed provenance unavailable: {managed_error}", file=sys.stderr)
+    if desired_error is not None:
+        print(f"desired state unavailable: {desired_error}", file=sys.stderr)
 
     if capability_id is not None:
         availability = states[0].availability
@@ -237,6 +266,32 @@ def tools_status(capability_id: str | None = None) -> int:
     return detected_status
 
 
+def _change_desired_capability(
+    capability_id: str,
+    *,
+    enabled: bool,
+    provider_id: str | None,
+    allow_config_mutation: bool,
+) -> int:
+    try:
+        result = set_capability(
+            capability_id,
+            enabled=enabled,
+            provider_id=provider_id,
+            allow_config_mutation=allow_config_mutation,
+        )
+    except DesiredStateError as error:
+        print(f"desired-state change failed: {error}", file=sys.stderr)
+        return 1
+    print(f"desired state: {result.outcome.value}")
+    print(f"  path: {result.path}")
+    if result.backup_path is not None:
+        print(f"  backup: {result.backup_path}")
+    if result.detail:
+        print(f"  detail: {result.detail}")
+    return 1 if result.outcome is DesiredMutationOutcome.REFUSED else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-tools")
     parser.add_argument("--version", action="version", version=f"%(prog)s {_application_version()}")
@@ -247,6 +302,25 @@ def build_parser() -> argparse.ArgumentParser:
     tools_subparsers.add_parser("list", help="list project-supported capabilities")
     status_parser = tools_subparsers.add_parser("status", help="show detected capability state")
     status_parser.add_argument("capability", nargs="?", help="capability identity")
+    enable_parser = tools_subparsers.add_parser(
+        "enable", help="enable an optional desired capability"
+    )
+    enable_parser.add_argument("capability", help="capability identity")
+    enable_parser.add_argument("--provider", help="exact built-in provider preference")
+    enable_parser.add_argument(
+        "--allow-config-mutation",
+        action="store_true",
+        help="authorize desired-state configuration mutation",
+    )
+    disable_parser = tools_subparsers.add_parser(
+        "disable", help="disable an optional desired capability"
+    )
+    disable_parser.add_argument("capability", help="capability identity")
+    disable_parser.add_argument(
+        "--allow-config-mutation",
+        action="store_true",
+        help="authorize desired-state configuration mutation",
+    )
     return parser
 
 
@@ -258,4 +332,18 @@ def main(argv: list[str] | None = None) -> int:
         return tools_list()
     if args.command == "tools" and args.tools_command == "status":
         return tools_status(args.capability)
+    if args.command == "tools" and args.tools_command == "enable":
+        return _change_desired_capability(
+            args.capability,
+            enabled=True,
+            provider_id=args.provider,
+            allow_config_mutation=args.allow_config_mutation,
+        )
+    if args.command == "tools" and args.tools_command == "disable":
+        return _change_desired_capability(
+            args.capability,
+            enabled=False,
+            provider_id=None,
+            allow_config_mutation=args.allow_config_mutation,
+        )
     return 2

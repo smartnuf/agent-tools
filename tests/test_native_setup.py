@@ -8,7 +8,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from agent_tools import capabilities, managed_state, native_setup, provider_execution
+from agent_tools import (
+    capabilities,
+    desired_state,
+    managed_state,
+    native_setup,
+    provider_execution,
+)
 
 
 class NativeSetupTests(unittest.TestCase):
@@ -80,18 +86,100 @@ class NativeSetupTests(unittest.TestCase):
             )
             for capability in (capabilities.POPPLER, capabilities.GHOSTSCRIPT)
         )
-        with (
-            patch.object(native_setup, "detect_capabilities", return_value=states),
-            patch.object(
-                native_setup,
-                "detect_package_managers",
-                side_effect=AssertionError("all-satisfied setup queried a manager"),
-            ),
-        ):
-            plan = native_setup.build_bootstrap_plan(("poppler", "ghostscript"))
+        with TemporaryDirectory() as directory:
+            with (
+                patch.object(native_setup, "current_machine", return_value=machine),
+                patch.object(native_setup, "detect_capabilities", return_value=states),
+                patch.object(
+                    native_setup,
+                    "detect_package_managers",
+                    side_effect=AssertionError("all-satisfied setup queried a manager"),
+                ),
+            ):
+                plan = native_setup.build_bootstrap_plan(
+                    ("poppler", "ghostscript"),
+                    config_path=Path(directory) / "config.json",
+                )
 
         self.assertFalse(plan.changes_host)
         self.assertEqual(plan.actions, ())
+
+    def test_bootstrap_consumes_enabled_capability_and_exact_preference(self) -> None:
+        machine = capabilities.MachineState("Linux", "x86_64")
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            desired_state.set_capability(
+                "bash",
+                enabled=True,
+                provider_id="system-bash",
+                allow_config_mutation=True,
+                path=path,
+                machine=machine,
+            )
+
+            def detect(catalogue, context):
+                self.assertEqual(context, machine)
+                return tuple(
+                    capabilities.detect_capability(
+                        capability,
+                        machine,
+                        locator=lambda probe, current: f"/verified/{probe.name}",
+                        version_reader=lambda probe, executable: "1.0",
+                        architecture_reader=lambda probe, executable: "x86_64",
+                    )
+                    for capability in catalogue
+                )
+
+            with (
+                patch.object(native_setup, "current_machine", return_value=machine),
+                patch.object(native_setup, "detect_capabilities", side_effect=detect),
+                patch.object(
+                    native_setup,
+                    "detect_package_managers",
+                    side_effect=AssertionError("verified desired provider queried a manager"),
+                ),
+            ):
+                plan = native_setup.build_bootstrap_plan(
+                    ("poppler", "ghostscript", "poppler"), config_path=path
+                )
+
+        self.assertEqual(
+            plan.requested_capabilities, ("poppler", "ghostscript", "bash")
+        )
+        self.assertEqual(plan.provider_preferences, (("bash", "system-bash"),))
+        self.assertEqual(plan.actions, ())
+
+    def test_bootstrap_fails_closed_on_unreadable_desired_state(self) -> None:
+        machine = capabilities.MachineState("Linux", "x86_64")
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text("not json", encoding="utf-8")
+            with (
+                patch.object(native_setup, "current_machine", return_value=machine),
+                patch.object(
+                    native_setup,
+                    "detect_capabilities",
+                    side_effect=AssertionError("corrupt desired state reached detection"),
+                ),
+                self.assertRaises(desired_state.DesiredStateError),
+            ):
+                native_setup.build_bootstrap_plan(("poppler",), config_path=path)
+
+    def test_cli_reports_desired_state_failure_without_traceback(self) -> None:
+        with (
+            patch.object(
+                native_setup,
+                "native_setup",
+                side_effect=desired_state.DesiredStateError("corrupt config"),
+            ),
+            redirect_stdout(StringIO()) as output,
+            redirect_stderr(StringIO()) as errors,
+        ):
+            status = native_setup.main(["poppler"])
+        self.assertEqual(status, 1)
+        self.assertEqual(output.getvalue(), "")
+        self.assertIn("corrupt config", errors.getvalue())
+        self.assertNotIn("Traceback", errors.getvalue())
 
     def test_native_setup_delegates_plan_and_explicit_authorization(self) -> None:
         plan = Mock()

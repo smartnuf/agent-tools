@@ -17,6 +17,13 @@ from .capabilities import (
     detect_capabilities,
     get_capability,
 )
+from .desired_state import (
+    DesiredStateError,
+    desired_capabilities,
+    desired_state_path,
+    load_document as load_desired_document,
+    provider_preferences,
+)
 from .managed_state import (
     ManagedExecutionInterrupted,
     ManagedExecutionResult,
@@ -145,10 +152,25 @@ def detect_package_managers(
     return tuple(managers)
 
 
-def build_bootstrap_plan(capability_ids: Sequence[str]) -> ProviderPlan:
+def build_bootstrap_plan(
+    capability_ids: Sequence[str],
+    *,
+    config_path: Path | None = None,
+) -> ProviderPlan:
     """Discover current facts and produce the canonical immutable provider plan."""
 
-    requested = tuple(dict.fromkeys(capability_ids))
+    machine = current_machine()
+    configured = desired_capabilities(
+        load_desired_document(
+            config_path or desired_state_path(platform_name=machine.platform)
+        ),
+        machine,
+    )
+    requested = tuple(
+        dict.fromkeys(
+            (*capability_ids, *(item.capability_id for item in configured))
+        )
+    )
     if not requested:
         raise NativeSetupError("at least one native capability must be requested")
     capabilities = []
@@ -157,16 +179,22 @@ def build_bootstrap_plan(capability_ids: Sequence[str]) -> ProviderPlan:
             capabilities.append(get_capability(capability_id))
         except KeyError as error:
             raise NativeSetupError(f"unknown native capability: {capability_id}") from error
-    states = detect_capabilities(capabilities)
-    machine = states[0].machine
+    states = detect_capabilities(capabilities, machine)
+    preferences = provider_preferences(configured)
     try:
-        return generate_provider_plan(states, requested, package_managers=())
+        return generate_provider_plan(
+            states,
+            requested,
+            package_managers=(),
+            provider_preferences=preferences,
+        )
     except NoSupportedProviderPlanError:
         managers = detect_package_managers(machine)
         return generate_provider_plan(
             states,
             requested,
             package_managers=managers,
+            provider_preferences=preferences,
         )
 
 
@@ -279,7 +307,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             report_result(result)
         print(f"Native provider setup interrupted: {interruption}", file=sys.stderr)
         return 130
-    except (NativeSetupError, PlanningError, ManagedStateError, ExecutionContractError) as error:
+    except (
+        NativeSetupError,
+        PlanningError,
+        ManagedStateError,
+        DesiredStateError,
+        ExecutionContractError,
+    ) as error:
         print(f"Native provider setup failed: {error}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
