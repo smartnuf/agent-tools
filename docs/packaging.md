@@ -23,6 +23,13 @@ valid entries, and never install or remove a provider. Clone native setup is
 the first consumer and still requires independent provider-mutation authority
 before it can execute a nonempty plan.
 
+[Decision 0006](decisions/0006-claude-code-git-bash-integration.md) adds one
+packaged native-Windows agent adapter. It consumes the selected, verified Git
+Bash path and manages only Claude Code's documented user-setting member behind
+separate configuration-mutation authority. Its phase record is independent of
+desired state and provider provenance; removal restores the prior member and
+never removes the provider.
+
 The clone workflow remains supported for contributors and advanced users who want the shared `agent-python` environment. Its bootstrap scripts install the same project editable and synchronize the complete environment from `requirements.txt`. A project-specific environment and lock remain authoritative over either installation.
 
 `agent-tools doctor` reports `mode: checkout` and the verified repository root when invoked through that source layout. A wheel installation reports `mode: installed` and the package directory instead; it never labels a `site-packages` parent as a repository. `agent-tools --version` reads installed distribution metadata and falls back to the source version only when running directly from an uninstalled checkout.
@@ -35,7 +42,9 @@ distribution is reported separately rather than satisfying Windows-hosted
 Bash. `agent-tools tools enable bash [--provider PROVIDER]
 --allow-config-mutation` and `tools disable bash --allow-config-mutation`
 manage the separate desired-state document. Public provider installation and
-agent integration remain outside this console-command boundary.
+removal remain outside this console-command boundary. The separately named
+`agent-tools integrations claude-code` command group provides the one supported
+agent-integration lifecycle; it is not a generic plugin surface.
 
 ## Dependencies
 
@@ -59,7 +68,7 @@ There are currently no optional dependency groups: omitting the document librari
 - License: MIT.
 - Maturity: alpha until the release lifecycle milestones are complete.
 
-`tests/check_distribution.py` validates wheel and source-distribution metadata, required contents (including desired-state support), archive safety, and exclusion of machine-local state without importing from the checkout. CI installs the wheel and all declared dependencies in a clean environment, then `tests/check_installed_cli.py` requires `--version`, `doctor`, `tools list`, the platform-appropriate Bash provider status, and the non-mutating desired-state command help surfaces to pass from an unrelated directory. Build and smoke-test state is kept outside the checkout, which must remain unchanged.
+`tests/check_distribution.py` validates wheel and source-distribution metadata, required contents (including desired-state and Claude Code integration support), archive safety, and exclusion of machine-local state without importing from the checkout. CI installs the wheel and all declared dependencies in a clean environment, then `tests/check_installed_cli.py` requires `--version`, `doctor`, `tools list`, the platform-appropriate Bash provider status, and the non-mutating desired-state and integration command help surfaces to pass from an unrelated directory. Build and smoke-test state is kept outside the checkout, which must remain unchanged.
 
 CI builds one release bundle on Ubuntu, verifies its checksum manifest, and passes the same wheel to Windows, Ubuntu, and macOS jobs for isolated `uv tool` installation. This proves operating-system portability of the pure-Python artifact, but it is not native ARM64 coverage. Windows ARM64 may use x64-emulated uv-managed Python; native interpreter selection and architecture reporting are tracked in issue #14.
 
