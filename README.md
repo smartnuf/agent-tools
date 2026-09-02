@@ -1,67 +1,92 @@
 # Agent Tools
 
-A user-level, agent-neutral home for workstation capability discovery, reusable Python and document helpers, command wrappers, and native-tool setup. The repository is intended to live at `~/.agent-tools` and to be usable by Codex, Claude Code, terminal users, and other local agents.
+Agent Tools is a cross-platform command-line application for coding-agent
+workstations. It discovers and diagnoses the Python and native capabilities
+agents depend on. Read-only inspection is the default; workflows that change
+desired state, agent integrations, or native providers require explicit
+authorization.
 
-The checked-in repository contains source and recipes. Machine-local state stays untracked:
+## Quick start
 
-- `.venv/` — shared Python environment
-- `.tools/` — exceptional locally managed binaries
-- `.cache/`, `tmp/`, and generated output
-
-## Initial tool policy
-
-- **Python and packages:** use [`uv`](https://docs.astral.sh/uv/) to create and update `.venv` from `requirements.txt`.
-- **Windows native tools:** prefer WinGet; use Chocolatey or Scoop only where WinGet is unsuitable.
-- **Debian/Ubuntu:** use `apt`; Fedora/RHEL use `dnf`; Arch uses `pacman`.
-- **macOS:** use Homebrew. Test scripts on GitHub-hosted macOS runners until physical Mac hardware is available.
-- **Poppler and Ghostscript:** install through the native package manager. Do not copy opaque executables into this repository.
-- **Capability discovery:** keep detection read-only. Git Bash is the preferred Windows-hosted Bash provider; the default WSL distribution is reported as a separate environment.
-
-## Layout
-
-```text
-bin/                    stable user-facing wrappers
-docs/packaging.md       public distribution and dependency contract
-docs/platforms.md       platform policy and macOS testing notes
-scripts/                bootstrap, update, PATH, and validation scripts
-src/agent_tools/        reusable standard-library Python helpers
-tests/                  unit tests
-requirements.in         reviewed direct Python dependencies
-requirements.txt        generated, fully pinned Python environment lock
-```
-
-## Install the packaged release
-
-The current stable release is [v0.1.2](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.2). Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) through a trusted package manager, then install `agent-tools` from PyPI:
+Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) through
+a trusted package manager, then install the current stable release from PyPI:
 
 ```sh
 uv tool install --python 3.13 smartnuf-agent-tools
 ```
 
-Verify it without assuming uv's executable directory is already on `PATH`.
+Run the installed executable directly from uv's tool directory so no shell
+profile or persistent `PATH` change is required.
 
 PowerShell:
 
 ```powershell
-& "$(uv tool dir --bin)\agent-tools.exe" --version
+$agentTools = "$(uv tool dir --bin)\agent-tools.exe"
+& $agentTools doctor
+& $agentTools tools list
+& $agentTools tools status
 ```
 
 Linux or macOS:
 
 ```sh
-"$(uv tool dir --bin)/agent-tools" --version
+agent_tools="$(uv tool dir --bin)/agent-tools"
+"$agent_tools" doctor
+"$agent_tools" tools list
+"$agent_tools" tools status
 ```
 
-To make `agent-tools` directly discoverable in future shells, `uv tool update-shell` can update the user shell configuration. That is an explicit profile change; review uv's reported change and open a new shell afterward.
+`doctor`, `tools list`, and `tools status` are read-only. Discovery verifies
+what is already available and never installs software, edits configuration, or
+changes `PATH`. `tools list` shows the packaged capability catalogue;
+`tools status [CAPABILITY]` reports detected providers, executable paths,
+versions, execution environments, and architectures where observable. A
+missing required Python library or native executable makes `doctor` report the
+gap and return a nonzero status.
 
-Upgrade an unpinned installation to the latest compatible release:
+Upgrade an unpinned installation or remove the application:
 
 ```sh
 uv tool upgrade smartnuf-agent-tools
+uv tool uninstall smartnuf-agent-tools
 ```
 
-The v0.1.1 prerelease used a direct GitHub wheel rather than PyPI. Replace that
-recorded direct-wheel requirement while upgrading it to the current release:
+Uninstalling removes uv's isolated application environment and launcher. It
+does not remove user-owned desired state, reverse an active agent integration,
+or uninstall external native providers such as Bash, Poppler, or Ghostscript.
+
+## Advanced use and source development
+
+- [Verify the installed version and optionally update `PATH`](#installed-release-details).
+- [Pin or roll back an exact release](#pin-or-roll-back).
+- [Configure desired capabilities and the Claude Code integration](#capability-configuration-and-integrations).
+- [Use the source checkout and shared development environment](#source-checkout-and-bootstrap).
+- Read the [platform guide](https://github.com/smartnuf/agent-tools/blob/main/docs/platforms.md), [packaging contract](https://github.com/smartnuf/agent-tools/blob/main/docs/packaging.md), or [release history](https://github.com/smartnuf/agent-tools/releases).
+
+## Installed release details
+
+The current stable release is
+[v0.1.2](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.2) and
+supports Python 3.11 through 3.13. Verify it without assuming uv's executable
+directory is already on `PATH`:
+
+```powershell
+& "$(uv tool dir --bin)\agent-tools.exe" --version
+```
+
+```sh
+"$(uv tool dir --bin)/agent-tools" --version
+```
+
+To make `agent-tools` directly discoverable in future shells,
+`uv tool update-shell` can update the user shell configuration. That is an
+explicit profile change; review uv's reported change and open a new shell
+afterward.
+
+### Pin or roll back
+
+The v0.1.1 prerelease used a direct GitHub wheel rather than PyPI. Replace its
+recorded direct-wheel requirement while upgrading to the current release:
 
 ```sh
 uv tool install --python 3.13 --upgrade smartnuf-agent-tools
@@ -91,27 +116,20 @@ checksum-bound requirement:
 uv tool install --python 3.13 --reinstall "smartnuf-agent-tools @ https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl#sha256=b790d7c30294fae43f57ef6e83de02396489dac97ffe59e3616202dff289c14f"
 ```
 
-To remove it:
+Remove an integration explicitly before rollback or application uninstall
+when restoration of its managed setting is intended; older releases may not
+have the integration-removal command.
 
-```sh
-uv tool uninstall smartnuf-agent-tools
-```
+Poppler and Ghostscript are not bundled. Install them through the operating
+system package manager before expecting `agent-tools doctor` to pass
+completely. See the [v0.1.2 release notes](https://github.com/smartnuf/agent-tools/blob/main/docs/releases/v0.1.2.md)
+for current limitations.
 
-Application removal deletes uv's isolated tool environment and executable. It
-does not delete Agent Tools' per-user desired-state configuration, reverse an
-active agent integration, or uninstall externally owned native providers such
-as Bash. Remove an integration explicitly before rollback or application
-uninstall when restoration of its managed setting is intended; older releases
-may not have the integration-removal command.
+## Capability configuration and integrations
 
-Poppler and Ghostscript are not bundled. Install them through the operating-system package manager before expecting `agent-tools doctor` to pass completely. See the [v0.1.2 release notes](docs/releases/v0.1.2.md) for current limitations.
-
-## Check health and discovered capabilities
-
-After the optional `uv tool update-shell` step above, run the health check and
-inspect the immutable native-capability catalogue with these read-only
-commands. Without that PATH change, use the same platform-specific executable
-path shown in the verification step.
+After the optional `uv tool update-shell` step above, these commands inspect or
+change desired capability and integration state. Without that `PATH` change,
+use the same platform-specific executable path shown above.
 
 ```sh
 agent-tools doctor
@@ -142,12 +160,13 @@ path. Apply and remove require the dedicated configuration-mutation flag,
 preserve unrelated Claude settings, and restore the exact prior setting; they
 never install or uninstall Git for Windows. A matching setting not created by
 Agent Tools remains unowned and is not removed. See
-[Decision 0006](docs/decisions/0006-claude-code-git-bash-integration.md) for
+[Decision 0006](https://github.com/smartnuf/agent-tools/blob/main/docs/decisions/0006-claude-code-git-bash-integration.md)
+for
 the recovery and compatibility contract. Version 0.1.2 is the first packaged
 release containing the read-only commands; desired-state and integration
 commands are currently available from `main` pending the next release.
 
-## Get the source
+## Source checkout and bootstrap
 
 For the shared `agent-python` development environment and repository automation, clone into the conventional user-level location:
 
@@ -157,7 +176,7 @@ git clone https://github.com/smartnuf/agent-tools.git "$HOME/.agent-tools"
 
 Alternatively, download the repository's [main-branch ZIP archive](https://github.com/smartnuf/agent-tools/archive/refs/heads/main.zip), extract it, and rename or move the extracted directory to `~/.agent-tools`. An archive installation works normally but cannot be updated with `git pull`; download a newer archive or replace it with a clone to update.
 
-## Bootstrap
+### Bootstrap
 
 PowerShell 7+ on Windows:
 
@@ -198,6 +217,34 @@ or:
 
 The `agent-python` wrapper runs the shared interpreter. The `agent-tools` wrapper runs the maintenance CLI. Agents can invoke either by absolute path without relying on `PATH`.
 
+## Repository policy and layout
+
+The checked-in repository contains source and recipes. Machine-local state such
+as `.venv/`, `.tools/`, `.cache/`, temporary directories, and generated output
+stays untracked.
+
+- **Python and packages:** use [`uv`](https://docs.astral.sh/uv/) to create and
+  update `.venv` from `requirements.txt`.
+- **Windows native tools:** prefer WinGet; use Chocolatey or Scoop only where
+  WinGet is unsuitable.
+- **Debian/Ubuntu:** use `apt`; Fedora/RHEL use `dnf`; Arch uses `pacman`.
+- **macOS:** use Homebrew and exercise automation on hosted macOS runners.
+- **Poppler and Ghostscript:** install them through the native package manager;
+  do not copy opaque executables into this repository.
+- **Capability discovery:** keep detection read-only. Git Bash is the preferred
+  Windows-hosted Bash provider; WSL is reported as a separate environment.
+
+```text
+bin/                    stable user-facing wrappers
+docs/packaging.md       public distribution and dependency contract
+docs/platforms.md       platform policy and macOS testing notes
+scripts/                bootstrap, update, PATH, and validation scripts
+src/agent_tools/        reusable standard-library Python helpers
+tests/                  unit tests
+requirements.in         reviewed direct Python dependencies
+requirements.txt        generated, fully pinned Python environment lock
+```
+
 ## Scope and security
 
 This is a convenience environment, not a substitute for project-specific dependencies. A project's own environment and lock file remain authoritative. Keep secrets, credentials, private data, and machine-local state out of this public repository.
@@ -215,6 +262,17 @@ For routine operation:
 
 ## Roadmap and current status
 
-The maintained roadmap is [`docs/plan/00-index.md`](docs/plan/00-index.md). It records the current milestone, acceptance gates, estimates, evidence, remaining effort, and recommended next work. [`docs/plan/README.md`](docs/plan/README.md) defines how humans and agents plan tasks and report progress consistently.
+The maintained [roadmap](https://github.com/smartnuf/agent-tools/blob/main/docs/plan/00-index.md)
+records the current milestone, acceptance gates, estimates, evidence, remaining
+effort, and recommended next work. The [planning protocol](https://github.com/smartnuf/agent-tools/blob/main/docs/plan/README.md)
+defines how humans and agents plan tasks and report progress consistently.
 
-The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md), the first stable PyPI publication in M2, and the tested update and capability lifecycle in M3 are complete. M3 includes native/system-first selection, clone bootstrap delegation through the explicitly authorized managed provider lifecycle, reversible desired-capability configuration, the native-Windows Claude Code Git Bash adapter, and exact-artifact upgrade, pin, rollback, and removal evidence. See the maintained roadmap for the acceptance record. The packaged release and clone-based shared development environment remain supported entry points.
+The bounded [M1.5 packaged capability-discovery milestone](https://github.com/smartnuf/agent-tools/blob/main/docs/plan/09-capabilities/README.md),
+the first stable PyPI publication in M2, and the tested update and capability
+lifecycle in M3 are complete. M3 includes native/system-first selection, clone
+bootstrap delegation through the explicitly authorized managed provider
+lifecycle, reversible desired-capability configuration, the native-Windows
+Claude Code Git Bash adapter, and exact-artifact upgrade, pin, rollback, and
+removal evidence. See the maintained roadmap for the acceptance record. The
+packaged release and clone-based shared development environment remain
+supported entry points.
