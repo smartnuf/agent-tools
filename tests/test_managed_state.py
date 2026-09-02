@@ -241,6 +241,24 @@ class ManagedStateTests(unittest.TestCase):
             with self.assertRaisesRegex(managed_state.ManagedStateError, "corrupt"):
                 managed_state.load_document(path)
 
+    def test_excessive_json_nesting_is_structured_corruption_and_blocks_mutation(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            path.write_text("[" * 2000 + "0" + "]" * 2000, encoding="utf-8")
+            with self.assertRaisesRegex(managed_state.ManagedStateError, "corrupt"):
+                managed_state.load_document(path)
+
+            executor = Mock(side_effect=AssertionError("must not execute"))
+            result = managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=executor,
+                allow_provider_mutation=True,
+            )
+            self.assertEqual(result.persistence, managed_state.PersistenceOutcome.BLOCKED)
+            executor.assert_not_called()
+            self.assertTrue(path.read_text(encoding="utf-8").startswith("[[[["))
+
     def test_schema_version_requires_an_exact_integer(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
@@ -298,6 +316,43 @@ class ManagedStateTests(unittest.TestCase):
             with self.assertRaisesRegex(managed_state.ManagedStateError, "duplicate id"):
                 managed_state.load_document(path)
 
+    def test_timestamp_triple_uses_writer_order_and_rejects_reversal(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            with patch.object(
+                managed_state,
+                "_timestamp",
+                side_effect=(
+                    "2026-09-02T12:00:02Z",
+                    "2026-09-02T12:00:01Z",
+                    "2026-09-02T12:00:00Z",
+                ),
+            ):
+                managed_state.execute_provider_plan(
+                    self.plan,
+                    state_path=path,
+                    executor=Mock(return_value=self.report()),
+                    allow_provider_mutation=True,
+                )
+            document = managed_state.load_document(path)
+            record = document["records"][0]
+            self.assertEqual(record["requested_at"], record["completed_at"])
+            self.assertEqual(record["completed_at"], record["recorded_at"])
+
+            for first, second in (
+                ("requested_at", "completed_at"),
+                ("completed_at", "recorded_at"),
+            ):
+                with self.subTest(first=first, second=second):
+                    damaged = json.loads(json.dumps(document))
+                    damaged["records"][0][first] = "2026-09-02T12:00:03Z"
+                    damaged["records"][0][second] = "2026-09-02T12:00:02Z"
+                    path.write_text(json.dumps(damaged), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError, "timestamp ordering"
+                    ):
+                        managed_state.load_document(path)
+
     def test_container_discriminators_are_managed_schema_errors(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
@@ -331,7 +386,7 @@ class ManagedStateTests(unittest.TestCase):
                 executor=Mock(return_value=self.report()),
                 allow_provider_mutation=True,
             )
-            for returncode in (True, 1.0, "1", object()):
+            for returncode in (True, 1.0, "1", 2**32, -(2**31) - 1, object()):
                 with self.subTest(returncode=returncode):
                     document = managed_state.load_document(path)
                     evidence = document["records"][0]["command_evidence"][0]
@@ -474,6 +529,42 @@ class ManagedStateTests(unittest.TestCase):
             ):
                 managed_state.load_document(path)
 
+    def test_supervisor_duration_uses_bounded_canonical_writer_grammar(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            original = managed_state.load_document(path)
+            for evidence in original["records"][0]["command_evidence"]:
+                evidence["argv"][3] = "0.5s"
+            path.write_text(json.dumps(original), encoding="utf-8")
+            managed_state.load_document(path)
+
+            invalid_tokens = (
+                "0s",
+                "-1s",
+                "01s",
+                "1.0s",
+                "0.0000001s",
+                "1e3s",
+                "1000000000s",
+                "9" * 10000 + "s",
+            )
+            for token in invalid_tokens:
+                with self.subTest(token=token[:20]):
+                    damaged = json.loads(json.dumps(original))
+                    for evidence in damaged["records"][0]["command_evidence"]:
+                        evidence["argv"][3] = token
+                    path.write_text(json.dumps(damaged), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError, "command evidence"
+                    ):
+                        managed_state.load_document(path)
+
     def test_only_writer_reachable_attempt_outcomes_are_accepted(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
@@ -501,6 +592,154 @@ class ManagedStateTests(unittest.TestCase):
                     ):
                         managed_state.load_document(path)
 
+    def test_writer_serializer_loader_round_trip_outcome_matrix(self) -> None:
+        outcomes = (
+            provider_execution.ActionOutcome.SUCCEEDED,
+            provider_execution.ActionOutcome.VERIFICATION_FAILED,
+            provider_execution.ActionOutcome.COMMAND_FAILED,
+            provider_execution.ActionOutcome.COMMAND_START_FAILED,
+            provider_execution.ActionOutcome.FORCED_KILL,
+            provider_execution.ActionOutcome.SUPERVISOR_FAILED,
+            provider_execution.ActionOutcome.INTERRUPTED,
+        )
+        cases = [(self.plan, self.report(outcome), outcome) for outcome in outcomes]
+        darwin = capabilities.MachineState("Darwin", "arm64", "host")
+        brew = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT, darwin, locator=lambda probe, context: None
+        )
+        timeout_plan = provider_plans.generate_provider_plan(
+            (absent,), ("ghostscript",), package_managers=(brew,)
+        )
+        timeout_action = timeout_plan.actions[0]
+        timeout_report = provider_execution.PlanExecutionReport(
+            darwin,
+            timeout_plan.requested_capabilities,
+            provider_execution.PlanOutcome.PARTIAL_FAILURE,
+            (
+                provider_execution.ActionReport(
+                    timeout_action.capability_id,
+                    timeout_action.provider_id,
+                    timeout_action.manager,
+                    timeout_action.installation_unit,
+                    provider_execution.ActionOutcome.TIMED_OUT,
+                    (
+                        provider_execution.CommandReport(
+                            timeout_action.commands[0],
+                            None,
+                            "partial",
+                            "",
+                            True,
+                        ),
+                    ),
+                    detail="command timed out",
+                ),
+            ),
+        )
+        cases.append(
+            (timeout_plan, timeout_report, provider_execution.ActionOutcome.TIMED_OUT)
+        )
+        with TemporaryDirectory() as directory:
+            for plan, report, outcome in cases:
+                with self.subTest(outcome=outcome.value):
+                    path = Path(directory) / f"{outcome.value}.json"
+                    result = managed_state.execute_provider_plan(
+                        plan,
+                        state_path=path,
+                        executor=Mock(return_value=report),
+                        allow_provider_mutation=True,
+                    )
+                    self.assertEqual(
+                        result.persistence, managed_state.PersistenceOutcome.SUCCEEDED
+                    )
+                    document = managed_state.load_document(path)
+                    self.assertEqual(
+                        document["records"][0]["verification"]["outcome"],
+                        outcome.value,
+                    )
+
+    def test_fractional_timeout_writer_document_reloads_unchanged(self) -> None:
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            self.machine,
+            locator=lambda probe, context: None,
+        )
+        available = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            self.machine,
+            locator=lambda probe, context: f"/tools/{probe.name}",
+            version_reader=lambda probe, path: "1.0",
+            architecture_reader=lambda probe, path: "x86_64",
+        )
+        detector = Mock(side_effect=(absent, available))
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            result = managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                allow_provider_mutation=True,
+                timeout_seconds=0.5,
+                current_context=lambda: self.machine,
+                detector=detector,
+                manager_verifier=lambda state, context: True,
+                privilege_resolver=lambda action: "/usr/bin/sudo",
+                supervisor_resolver=lambda action: "/usr/bin/timeout",
+                privilege_preflight=lambda argv: True,
+                runner=lambda argv, timeout: subprocess.CompletedProcess(
+                    argv, 0, "installed", ""
+                ),
+            )
+            self.assertEqual(
+                result.persistence, managed_state.PersistenceOutcome.SUCCEEDED
+            )
+            document = managed_state.load_document(path)
+            evidence = document["records"][0]["command_evidence"]
+            self.assertTrue(evidence)
+            self.assertTrue(all(item["argv"][6] == "0.5s" for item in evidence))
+
+    def test_executor_writer_loader_reconcile_runner_and_launch_statuses(self) -> None:
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            self.machine,
+            locator=lambda probe, context: None,
+        )
+        cases = (
+            (False, provider_execution.ActionOutcome.SUPERVISOR_FAILED, None),
+            (126, provider_execution.ActionOutcome.COMMAND_START_FAILED, 126),
+            (127, provider_execution.ActionOutcome.COMMAND_START_FAILED, 127),
+        )
+        with TemporaryDirectory() as directory:
+            for returncode, expected_outcome, expected_returncode in cases:
+                with self.subTest(returncode=returncode):
+                    path = Path(directory) / f"status-{returncode}.json"
+                    result = managed_state.execute_provider_plan(
+                        self.plan,
+                        state_path=path,
+                        allow_provider_mutation=True,
+                        current_context=lambda: self.machine,
+                        detector=Mock(return_value=absent),
+                        manager_verifier=lambda state, context: True,
+                        privilege_resolver=lambda action: "/usr/bin/sudo",
+                        supervisor_resolver=lambda action: "/usr/bin/timeout",
+                        privilege_preflight=lambda argv: True,
+                        runner=lambda argv, timeout, code=returncode: (
+                            subprocess.CompletedProcess(argv, code, "output", "")
+                        ),
+                    )
+                    self.assertEqual(
+                        result.persistence, managed_state.PersistenceOutcome.SUCCEEDED
+                    )
+                    self.assertEqual(
+                        result.execution.actions[0].outcome, expected_outcome
+                    )
+                    record = managed_state.load_document(path)["records"][0]
+                    self.assertEqual(
+                        record["command_evidence"][-1]["returncode"],
+                        expected_returncode,
+                    )
+
     def test_preceding_command_evidence_must_show_success(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
@@ -526,36 +765,81 @@ class ManagedStateTests(unittest.TestCase):
             path.write_text(json.dumps(document), encoding="utf-8")
             managed_state.load_document(path)
 
-    def test_command_start_failure_keeps_post_popen_cleanup_status(self) -> None:
+    def test_command_start_failure_accepts_only_writer_reachable_statuses(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
-            report = self.report()
-            action = replace(
-                report.actions[0],
-                outcome=provider_execution.ActionOutcome.COMMAND_START_FAILED,
-                final_verified_paths=(),
-            )
-            report = replace(
-                report,
-                outcome=provider_execution.PlanOutcome.PARTIAL_FAILURE,
-                actions=(action,),
-            )
             managed_state.execute_provider_plan(
                 self.plan,
                 state_path=path,
-                executor=Mock(return_value=report),
+                executor=Mock(
+                    return_value=self.report(
+                        provider_execution.ActionOutcome.COMMAND_START_FAILED
+                    )
+                ),
                 allow_provider_mutation=True,
             )
-            record = managed_state.load_document(path)["records"][0]
+            original = managed_state.load_document(path)
+            terminal = original["records"][0]["command_evidence"][-1]
+            self.assertIsNone(terminal["returncode"])
+
+            for returncode in (0, 1, 125, 137, -9):
+                with self.subTest(returncode=returncode):
+                    damaged = json.loads(json.dumps(original))
+                    damaged["records"][0]["command_evidence"][-1][
+                        "returncode"
+                    ] = returncode
+                    path.write_text(json.dumps(damaged), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError,
+                        "terminal command evidence",
+                    ):
+                        managed_state.load_document(path)
+
+            for returncode in (126, 127):
+                with self.subTest(supervised_returncode=returncode):
+                    allowed = json.loads(json.dumps(original))
+                    allowed["records"][0]["command_evidence"][-1][
+                        "returncode"
+                    ] = returncode
+                    path.write_text(json.dumps(allowed), encoding="utf-8")
+                    managed_state.load_document(path)
+
+    def test_writer_refuses_unloadable_injected_execution_evidence(self) -> None:
+        report = self.report()
+        invalid_action = replace(
+            report.actions[0],
+            outcome=provider_execution.ActionOutcome.COMMAND_START_FAILED,
+            final_verified_paths=(),
+        )
+        invalid_report = replace(
+            report,
+            outcome=provider_execution.PlanOutcome.PARTIAL_FAILURE,
+            actions=(invalid_action,),
+        )
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            first = managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
             self.assertEqual(
-                record["verification"]["outcome"], "command-start-failed"
+                first.persistence, managed_state.PersistenceOutcome.SUCCEEDED
             )
-            self.assertTrue(
-                all(
-                    evidence["returncode"] == 0
-                    for evidence in record["command_evidence"]
-                )
+            original = path.read_text(encoding="utf-8")
+            result = managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=invalid_report),
+                allow_provider_mutation=True,
             )
+            self.assertEqual(
+                result.persistence, managed_state.PersistenceOutcome.FAILED
+            )
+            self.assertIn("violates schema v1", result.persistence_detail)
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
+            self.assertEqual(len(managed_state.load_document(path)["records"]), 1)
 
     def test_preverification_outcomes_cannot_claim_verified_paths(self) -> None:
         with TemporaryDirectory() as directory:
