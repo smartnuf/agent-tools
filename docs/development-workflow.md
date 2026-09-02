@@ -1,8 +1,9 @@
 # Development and review workflow
 
-This is the canonical workflow for changing this repository. It composes two
-loops: an outer roadmap/acceptance-criterion execution loop and an inner pull
-request review-to-merge loop. The [planning protocol](plan/README.md) owns
+This is the canonical workflow for changing this repository. Its top-level
+engineering cycle is **Intent → Characterise → Discover → Map → Plan →
+Specify → Execute → Review → Learn**. Execution contains the existing inner
+pull-request review-to-merge loop. The [planning protocol](plan/README.md) owns
 roadmap status and reporting details; this document owns development,
 validation, review, integration, and cleanup.
 
@@ -64,11 +65,16 @@ while the governance branch was being prepared. This run remains explicitly
 unauthorized to merge, and no successor merge owner has been assigned; the
 governance stream must stop merge-ready and await ownership.
 
-## Outer loop: roadmap and acceptance criteria
+## Top-level engineering cycle
 
-### 1. Inventory and reconcile
+The cycle is a learning loop, not a rigid waterfall. New evidence may return
+work to any earlier appropriate stage. Apply each stage proportionately: a
+small, local, read-only change may need only a few recorded sentences, while a
+novel persistent host mutation may need research, experiments, an ADR, and a
+fault matrix. Repository-wide preservation, validation, exact-head, review,
+authority, and merge-owner gates always remain in force.
 
-Before making changes:
+Before entering the cycle, establish current truth:
 
 1. fetch origin;
 2. inspect the current branch and `HEAD`, `origin/main`, status, stashes,
@@ -82,35 +88,242 @@ Before making changes:
 Confirm that roadmap work has a corresponding open GitHub milestone and that
 the selected issue is assigned to it. Treat an unassigned roadmap issue, a
 closed milestone for active work, or an open milestone whose roadmap gates are
-already complete as stale state to reconcile before implementation.
+already complete as stale state to reconcile before implementation. Record
+pre-existing dirty paths and stashes. Never hide, overwrite, apply, drop, or
+include them unless the task explicitly owns them.
 
-Record pre-existing dirty paths and stashes. Never hide, overwrite, apply,
-drop, or include them unless the task explicitly owns them.
+### 1. Intent
 
-### 2. Select and plan one slice
+Preserve what is actually wanted before translating it into implementation.
+Capture, in proportion to the work, the desired outcome, user or beneficiary,
+success criteria, constraints, non-goals, and important qualities that must not
+be sacrificed. Record the larger vision or ambition when it materially changes
+design choices. The workflow serves the goal; it must not force every goal into
+the same implementation process.
 
-Select one incomplete acceptance criterion, preferring blockers and the
-roadmap's recommended next task. For non-trivial work, state:
+### 2. Characterise
 
-- outcome and acceptance criterion;
-- scope and non-goals;
-- affected platforms and files;
-- dependencies, risks, and external prerequisites;
-- validation plan;
-- effort estimate; and
-- merge owner when autonomous streams overlap in time.
+At project creation, and whenever an existing project materially expands its
+problem envelope, classify the engineering problem before selecting an
+architecture or workflow. Relevant dimensions include:
+
+- computational/read-only versus side-effecting;
+- reversible versus irreversible;
+- local versus externally coupled;
+- deterministic versus observationally uncertain;
+- ephemeral versus persistent;
+- single-platform versus cross-platform;
+- trusted versus hostile or untrusted input;
+- synchronous versus concurrent or asynchronous;
+- bounded versus potentially long-running;
+- internal/private versus persistent/public compatibility surface;
+- ordinary user-level versus privileged or destructive;
+- one actor versus independent processes, users, or services;
+- mature/well-understood versus novel/poorly understood;
+- easily simulated versus dependent on real environments;
+- low consequence versus high consequence; and
+- stable dependencies versus external/provider instability.
+
+Do not require a large form for every task. Use proportional judgment.
+
+Classify significant assumptions where useful as **known and evidenced**,
+**believed but insufficiently evidenced**, **unknown but discoverable**,
+**unknown requiring experiment**, **inherently uncertain**, or **genuinely
+novel**. The purpose is to expose important knowledge gaps before
+implementation.
+
+For work that warrants it, record a compact multidimensional risk profile, not
+one aggregate score. For example, host mutation may be high, reversibility low,
+persistence and platform variance high, provider dependency medium, knowledge
+maturity medium-low, and testability medium. Record the architecture or process
+consequence of every important dimension. The profile may communicate
+complexity, select a workflow, require independent research/review or an
+experiment, and qualify estimates and confidence. It may become a concise
+durable project profile when material uncertainty or risk will outlive the
+task; trivial work does not need that artifact.
+
+Re-characterise instead of merely extending an old plan whenever the work adds
+a materially new regime, including:
+
+- read-only to mutation;
+- in-memory to persistence;
+- private representation to a public or versioned format;
+- single-platform to cross-platform;
+- unprivileged to privileged operation;
+- synchronous to concurrent or asynchronous operation;
+- local to networked, distributed, or external-service operation;
+- reversible to destructive or non-replayable operation;
+- trusted to hostile input; or
+- one process to multi-process coordination.
+
+### 3. Discover
+
+Discovery determines what is true and reduces important uncertainty. Choose
+methods from the characterisation: inspect repository history and existing
+implementations; read primary specifications and platform documentation;
+research relevant prior art and mature patterns; obtain independent
+architecture analysis; prototype or benchmark; run disposable-environment
+experiments, fault injection, adversarial tests, or real-environment exercises;
+and compare platform behaviour empirically. Preserve unresolved uncertainty
+explicitly when resolving it would not be economical.
+
+#### Query and prior-art trigger
+
+Do not research ceremonially. Query or experiment only when the result can
+materially affect design, risk, specification, or workflow. Targeted primary-
+source and prior-art research is especially appropriate for unfamiliar or
+known-hard operating-system semantics, signals, process supervision, privilege,
+crash consistency, filesystem paths, concurrency, persistence, schema/version
+compatibility, package managers, security boundaries, standards/protocols,
+cross-platform runtime differences, or repeated architectural review churn.
+Record conclusions, not a bibliography dump.
+
+#### Experiment trigger
+
+Prefer an experiment, prototype, or real-environment exercise when
+documentation is ambiguous, platform behaviour is empirical, a provider may
+differ from its nominal contract, asynchronous/lifetime behaviour is hard to
+reason about, an important assumption is inexpensive to test, or architecture
+depends on performance or failure behaviour. An experiment gathers evidence;
+it does not automatically become production architecture.
+
+### 4. Map
+
+Translate discovery into both architecture/design choices and process/workflow
+choices. Discovery asks **what is true?** Mapping asks **given that truth, what
+engineering responses follow?**
+
+Architecture mappings are problem-specific, not a fixed cookbook. Examples
+include:
+
+- irreversible external mutation → explicit authority boundary and no blind
+  retry;
+- observational uncertainty → explicit certainty states and monotonic
+  evidence;
+- persistence → schema, version, compatibility, and crash-consistency
+  contracts;
+- asynchronous signal delivery → edge broker and cooperative internal
+  cancellation;
+- externally owned packages → provenance distinct from ownership;
+- filesystem replacement → pathname-integrity classification;
+- cross-platform operation → one semantic contract with platform-specific
+  mechanisms;
+- unbounded command output → bounded evidence retention; and
+- multi-process mutation → an explicit decision whether native manager
+  locking suffices or additional coordination is promised.
+
+Map the workflow from the same profile. Low-risk, local, read-only, mature work
+may use the lightweight task/PR loop. A persistent public contract normally
+needs specification or an ADR before implementation. High novelty calls for
+discovery or a prototype; multiple high-risk boundaries call for a prospective
+closure matrix; privileged/destructive effects call for independent
+architecture and safety adjudication; real-platform dependence calls for
+native or disposable integration evidence; provider instability calls for an
+explicit retry/evidence policy; high uncertainty favors smaller experimental
+slices; and concurrent autonomous streams require explicit merge ownership and
+integration order. The workflow is partly an output of characterisation and
+mapping, while repository-wide minimum safety gates remain mandatory.
+
+#### Prospective closure trigger
+
+Before implementation that materially combines several high-risk dimensions,
+apply the existing architectural closure dimensions prospectively. Typical
+triggers include host mutation, privilege, process lifetime, asynchronous
+cancellation, persistence/durability, filesystem namespace integrity,
+concurrency, external provider/service semantics, persistent/public
+compatibility, and multiple platform execution models.
+
+Inspect applicable identity, authority, ownership/provenance, lifecycle,
+partial failure, retry, idempotence, I/O, verification, persistence,
+compatibility, platform, preservation, privilege, and authorization seams.
+Classify each as addressed, already enforced with evidence, deliberately
+inapplicable, human-reserved, or independently tracked. The sweep remains
+bounded by the intended goal and slice; it does not authorize neighboring
+product features.
+
+### 5. Plan
+
+Planning selects a bounded route through the mapped problem. For non-trivial
+work record proportionately:
+
+- the selected acceptance slice, scope, and non-goals;
+- dependencies and sequencing;
+- affected files and platforms;
+- experiment work versus production work;
+- validation and required evidence;
+- effort and expected external prerequisites; and
+- merge ownership when streams overlap.
 
 Split work exceeding the planning protocol's reviewable-size limit. Use a
 focused issue where GitHub tracking adds useful scope and evidence.
 
-### 3. Execute through the inner loop
+**Plan says what work we intend to do.** It does not replace the behavioural
+contract.
 
-Create a task-owned branch from the reconciled base and follow the PR loop
-below. Several focused commits may implement one acceptance slice. Each commit
-must leave the branch understandable and should state the behaviour or evidence
-it adds.
+### 6. Specify
 
-### 4. Reconcile completion
+Before production implementation of non-trivial or risky behaviour, establish
+what must remain true. Specification is proportional to risk: an ordinary
+change may need only a few explicit invariants, while side-effecting sysadmin
+work should normally specify the relevant authority boundaries, state/phase
+model, invariants, supported and unsupported inputs/contexts, partial failure,
+certainty semantics, retry/idempotence, preservation obligations,
+persistence/public compatibility, concurrency, platform/environment
+distinctions, failure/closure matrix, and required test oracle or evidence.
+
+Product, safety, persistence, or public-policy decisions belong in ADRs when
+appropriate; not every internal contract needs a permanent ADR.
+
+**Plan is what we will do. Specification is what must be true.**
+
+### 7. Execute
+
+Create a task-owned branch from the reconciled base and use the inner loop
+below. Preserve coherent multi-commit/single-push review waves, complete local
+validation before push, exact-head CI and automated review, finding
+adjudication, merge-owner serialization, convergence circuit breakers, the ban
+on empty retrigger commits, and preservation of user state. Several focused
+commits may implement one acceptance slice; each must leave the branch
+understandable.
+
+### 8. Review
+
+Review the model and contract as well as the local implementation. Significant
+findings should return to the layer that failed:
+
+- implementation wrong → Execute;
+- specification incomplete → Specify;
+- architecture mapping wrong → Map;
+- important knowledge missing → Discover;
+- problem incorrectly characterised → Characterise; or
+- goal or constraint misunderstood → Intent.
+
+Do not automatically turn every valid comment into another local patch. When
+repeated exact-head reviews find adjacent valid defects in one decision family,
+treat that churn as evidence that the model or specification may be incomplete.
+Return to Characterise, Discover, Map, or Specify as appropriate and ask whether
+the abstraction should be centralized, a missing fact/state needs explicit
+representation, an invariant is distributed across too many boundaries, prior
+art or an experiment is needed, the architecture is wrong, the requirement is
+economically impossible or too strong, a simpler product contract is better,
+or human authority is required. Resume implementation only after reconciling
+the model. Existing correction-wave and architectural-family limits remain
+circuit breakers.
+
+### 9. Learn
+
+Harvest reusable lessons from execution and review. Learning may update the
+architecture, specification, risk profile, workflow, estimates, or reusable
+engineering knowledge. For routine work it may record that no reusable
+adaptation was found. For significant work, deliberately decide whether each
+lesson belongs in an ADR, a reusable architecture/engineering note, a test or
+fault-injection fixture, a standing workflow instruction, roadmap/risk
+information, or nowhere permanent.
+
+Learning completes a bounded cycle; it does not authorize the next roadmap
+slice.
+
+### Reconcile completion and stop
 
 After durable evidence exists:
 
@@ -131,14 +344,10 @@ reaches zero. Open the next milestone and assign its initial planned issues
 only when roadmap work is ready to begin there.
 
 Do not infer completion from prose, commit count, or issue count. A pull request
-that is merely open or merge-ready is not merged evidence.
-
-### 5. Continue or stop
-
-Always recommend the next task. Execute it only when the governing instruction
-explicitly authorizes continuation. Otherwise report the completed boundary
-and stop. Continuing authority does not override a halt condition or expand
-the permitted scope.
+that is merely open or merge-ready is not merged evidence. Always recommend the
+next task, but execute it only when the governing instruction explicitly
+authorizes continuation. Continuing authority does not override a halt
+condition or expand permitted scope.
 
 ## Inner loop: pull request review to merge
 
