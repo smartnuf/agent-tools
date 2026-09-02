@@ -71,6 +71,18 @@ reports, filesystem access, subprocess work, cleanup, or persistence. A later
 handler invocation marks `FORCE_ABORTED` and raises the private typed force-
 abort carrier immediately.
 
+Broker teardown is the final cancellation handoff, not an unobserved gap after
+the last business-logic checkpoint. The outer boundary first materializes the
+managed result while the broker remains installed. Teardown then restores the
+prior SIGINT disposition and, immediately after that restoration, consumes any
+first request the broker recorded through that cutover by raising
+`ManagedExecutionInterrupted` with the already-materialized result. Restoring
+the disposition is the linearization point: a SIGINT handled by the broker
+before it is restored is guaranteed to be consumed by this handoff; a SIGINT
+delivered after restoration belongs to the prior handler and is outside the
+managed broker interval. No normal return may occur from a request that the
+broker recorded before its disposition was restored.
+
 Python permits signal-handler installation only on the main thread. Managed
 brokerage is therefore supported when the operation runs on the main thread
 and Agent Tools owns normal CLI-style SIGINT handling. The broker may replace
@@ -128,7 +140,7 @@ them immediately, preserving only facts already established.
 | Provenance preparation | When mutation may have occurred, finish preparation or truthfully classify an ordinary preparation failure, then proceed to the persistence decision. | Published execution report and pre-write persistence truth. | Immediate force-abort. |
 | Atomic persistence before replacement | Do not checkpoint inside the atomic transaction; reach `FAILED`, `UNKNOWN`, or `SUCCEEDED` under ADR 0003. | Canonical-file/replacement/durability facts established before force-abort. | Immediate force-abort; current persistence certainty may remain incomplete. |
 | Replacement/durability phase | Finish the current durability classification, publish it, then checkpoint. | The strongest terminal persistence fact that completed publication. | Immediate force-abort; no retry. |
-| Final result materialization | Materialize and attach the result from established facts, then surface controlled cancellation. | Execution report, persistence outcome/detail, recovery guidance. | Immediate force-abort; result publication is not guaranteed. |
+| Final result materialization and broker teardown | Materialize and attach the result from established facts. Restore the prior handler, then consume any request recorded through that restoration cutover before allowing normal return. | Execution report, persistence outcome/detail, recovery guidance. | Immediate force-abort before restoration; after restoration the prior handler is authoritative. |
 
 Polling responsiveness is an internal bounded-execution property, not a new
 public timeout. The implementation must use a small testable wait slice and
