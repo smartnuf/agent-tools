@@ -62,6 +62,27 @@ would require provenance persistence is refused before host mutation unless the
 existing document can be understood and preserved. Read-only detected-state
 diagnostics continue and report provenance failure separately.
 
+Persistent-format compatibility begins when a schema version enters the
+merged or released product contract. After that point, later implementations
+must continue to read every document that the accepted writer could produce
+for that version, or must make an explicit human-authorized version and
+migration decision. An implementation must not silently narrow an already
+released schema language.
+
+Before a persistent schema's first merge or release, transient development
+writers on pull-request heads do not create a permanent compatibility
+obligation. Review may tighten that unreleased schema before acceptance without
+adding speculative migration machinery. Schema v1 is finalized here with
+nondecreasing intra-record UTC wall-clock timestamps:
+
+`requested_at <= completed_at <= recorded_at`
+
+Equality is valid. If the wall clock regresses within one mutation transaction,
+the accepted writer clamps each later timestamp to its predecessor. The v1
+loader rejects reversed timestamps as corrupt and neither rewrites nor deletes
+the document. Earlier unmerged development artifacts are not migrated and do
+not authorize any inference about ownership or current machine state.
+
 Mutation/verification and persistence are independent outcomes. When a
 positively verified mutation is followed by persistence failure, reporting
 preserves the executor result and states either `provenance not recorded` or
