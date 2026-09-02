@@ -7,6 +7,7 @@ class NativeIntegrationSelectionTests(unittest.TestCase):
     def test_selects_native_product_and_workflow_changes(self) -> None:
         for path in (
             "src/agent_tools/capabilities.py",
+            "src/agent_tools/claude_code_integration.py",
             "src/agent_tools/desired_state.py",
             "src/agent_tools/native_setup.py",
             "scripts/bootstrap.ps1",
@@ -14,6 +15,7 @@ class NativeIntegrationSelectionTests(unittest.TestCase):
             ".github/workflows/native-integration.yml",
             "tests/check_preseeded_selection.py",
             "tests/test_desired_state.py",
+            "tests/test_claude_code_integration.py",
         ):
             with self.subTest(path=path):
                 self.assertTrue(requires_native([path]))

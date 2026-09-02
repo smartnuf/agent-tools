@@ -480,11 +480,11 @@ it does not claim control over an agent's shell selection.
 Integrations are separate adapters that consume detected capability state and
 modify only documented agent configuration with explicit authorization,
 backup, and validation. Anthropic documents
-[`CLAUDE_CODE_GIT_BASH_PATH`](https://docs.anthropic.com/en/docs/claude-code/getting-started)
-for native Windows Claude Code, so a future Claude Code adapter may configure
-that supported mechanism. No Codex adapter will be promised until current
-official Codex documentation establishes a
-stable shell-selection interface.
+[`CLAUDE_CODE_GIT_BASH_PATH`](https://code.claude.com/docs/en/installation)
+in native-Windows user settings. [ADR 0006](0006-claude-code-git-bash-integration.md)
+governs the supported Claude Code adapter. No Codex adapter will be promised
+until current official Codex documentation establishes a stable shell-selection
+interface.
 
 ## Consequences
 

@@ -16,6 +16,14 @@ from .capabilities import (
     detect_capabilities,
     get_capability,
 )
+from .claude_code_integration import (
+    ClaudeCodeIntegrationError,
+    ClaudeCodeIntegrationRestorationError,
+    IntegrationOutcome,
+    apply_git_bash_integration,
+    inspect_integration,
+    remove_git_bash_integration,
+)
 from .managed_state import (
     ManagedStateError,
     load_document,
@@ -298,6 +306,53 @@ def _change_desired_capability(
     return 1 if result.outcome is DesiredMutationOutcome.REFUSED else 0
 
 
+def _claude_code_integration_status() -> int:
+    try:
+        status = inspect_integration()
+    except ClaudeCodeIntegrationError as error:
+        print(f"Claude Code integration state unavailable: {error}", file=sys.stderr)
+        return 1
+    print("Claude Code Git Bash integration:")
+    print(f"  settings: {status.settings_path}")
+    print(f"  state: {status.state_path}")
+    print(f"  phase: {status.phase.value if status.phase is not None else 'unmanaged'}")
+    print(f"  managed: {'yes' if status.managed else 'no'}")
+    if status.current_value is not None:
+        print(f"  configured Git Bash: {status.current_value}")
+    return 0
+
+
+def _change_claude_code_integration(*, apply: bool, allow_config_mutation: bool) -> int:
+    try:
+        result = (
+            apply_git_bash_integration(
+                allow_config_mutation=allow_config_mutation
+            )
+            if apply
+            else remove_git_bash_integration(
+                allow_config_mutation=allow_config_mutation
+            )
+        )
+    except ClaudeCodeIntegrationRestorationError as error:
+        print(f"Claude Code integration change failed: {error}", file=sys.stderr)
+        for backup in error.backup_paths:
+            print(f"  recovery backup: {backup}", file=sys.stderr)
+        return 1
+    except ClaudeCodeIntegrationError as error:
+        print(f"Claude Code integration change failed: {error}", file=sys.stderr)
+        return 1
+    print(f"Claude Code integration: {result.outcome.value}")
+    print(f"  settings: {result.settings_path}")
+    print(f"  state: {result.state_path}")
+    if result.phase is not None:
+        print(f"  phase: {result.phase.value}")
+    for backup in result.backup_paths:
+        print(f"  backup: {backup}")
+    if result.detail:
+        print(f"  detail: {result.detail}")
+    return 1 if result.outcome is IntegrationOutcome.REFUSED else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-tools")
     parser.add_argument("--version", action="version", version=f"%(prog)s {_application_version()}")
@@ -327,6 +382,28 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="authorize desired-state configuration mutation",
     )
+    integrations_parser = subparsers.add_parser(
+        "integrations", help="manage explicitly supported agent integrations"
+    )
+    integration_subparsers = integrations_parser.add_subparsers(
+        dest="integration", required=True
+    )
+    claude_parser = integration_subparsers.add_parser(
+        "claude-code", help="manage native-Windows Claude Code Git Bash selection"
+    )
+    claude_subparsers = claude_parser.add_subparsers(
+        dest="integration_command", required=True
+    )
+    claude_subparsers.add_parser("status", help="show separate integration state")
+    for command in ("apply", "remove"):
+        change_parser = claude_subparsers.add_parser(
+            command, help=f"{command} the Claude Code Git Bash setting"
+        )
+        change_parser.add_argument(
+            "--allow-config-mutation",
+            action="store_true",
+            help="authorize Claude Code and integration-state mutation",
+        )
     return parser
 
 
@@ -350,6 +427,13 @@ def main(argv: list[str] | None = None) -> int:
             args.capability,
             enabled=False,
             provider_id=None,
+            allow_config_mutation=args.allow_config_mutation,
+        )
+    if args.command == "integrations" and args.integration == "claude-code":
+        if args.integration_command == "status":
+            return _claude_code_integration_status()
+        return _change_claude_code_integration(
+            apply=args.integration_command == "apply",
             allow_config_mutation=args.allow_config_mutation,
         )
     return 2

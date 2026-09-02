@@ -6,7 +6,13 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from unittest.mock import patch
 
-from agent_tools import capabilities, cli, desired_state, managed_state
+from agent_tools import (
+    capabilities,
+    claude_code_integration,
+    cli,
+    desired_state,
+    managed_state,
+)
 
 
 class CliTests(unittest.TestCase):
@@ -81,6 +87,85 @@ class CliTests(unittest.TestCase):
         change.assert_called_once_with(
             "bash", enabled=False, provider_id=None, allow_config_mutation=True
         )
+
+    def test_claude_code_integration_commands_dispatch_and_report(self) -> None:
+        result = claude_code_integration.IntegrationResult(
+            claude_code_integration.IntegrationOutcome.UPDATED,
+            Path("settings.json"),
+            Path("integration.json"),
+            claude_code_integration.IntegrationPhase.ACTIVE,
+            (Path("settings.backup"),),
+        )
+        with (
+            patch.object(cli, "apply_git_bash_integration", return_value=result) as apply,
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(
+                cli.main(
+                    [
+                        "integrations",
+                        "claude-code",
+                        "apply",
+                        "--allow-config-mutation",
+                    ]
+                ),
+                0,
+            )
+        apply.assert_called_once_with(allow_config_mutation=True)
+        self.assertIn("phase: active", output.getvalue())
+        self.assertIn("backup: settings.backup", output.getvalue())
+
+        removed = claude_code_integration.IntegrationResult(
+            claude_code_integration.IntegrationOutcome.NO_CHANGES,
+            Path("settings.json"),
+            Path("integration.json"),
+            claude_code_integration.IntegrationPhase.REMOVED,
+        )
+        with patch.object(
+            cli, "remove_git_bash_integration", return_value=removed
+        ) as remove:
+            self.assertEqual(
+                cli.main(["integrations", "claude-code", "remove"]), 0
+            )
+        remove.assert_called_once_with(allow_config_mutation=False)
+
+    def test_claude_code_status_and_restoration_error_are_controlled(self) -> None:
+        status = claude_code_integration.IntegrationStatus(
+            Path("settings.json"),
+            Path("integration.json"),
+            claude_code_integration.IntegrationPhase.ACTIVE,
+            r"C:\Git\bin\bash.exe",
+            True,
+        )
+        with (
+            patch.object(cli, "inspect_integration", return_value=status),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(
+                cli.main(["integrations", "claude-code", "status"]), 0
+            )
+        self.assertIn("managed: yes", output.getvalue())
+        self.assertIn(r"C:\Git\bin\bash.exe", output.getvalue())
+
+        error = claude_code_integration.ClaudeCodeIntegrationRestorationError(
+            "restoration uncertain", (Path("recovery.backup"),)
+        )
+        with (
+            patch.object(cli, "apply_git_bash_integration", side_effect=error),
+            redirect_stderr(StringIO()) as errors,
+        ):
+            self.assertEqual(
+                cli.main(
+                    [
+                        "integrations",
+                        "claude-code",
+                        "apply",
+                        "--allow-config-mutation",
+                    ]
+                ),
+                1,
+            )
+        self.assertIn("recovery backup: recovery.backup", errors.getvalue())
 
     def test_tools_status_reports_requested_provenance_without_ownership(self) -> None:
         record = {

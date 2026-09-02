@@ -72,6 +72,13 @@ def run(executable: Path, expected_version: str, require_native: bool) -> None:
             capture_output=True,
             text=True,
         )
+        integration_help = subprocess.run(
+            [executable, "integrations", "claude-code", "apply", "--help"],
+            cwd=unrelated_directory,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
     expected_return_codes = {0} if require_native else {0, 1}
     assert doctor.returncode in expected_return_codes, doctor.stderr or doctor.stdout
     assert "Traceback" not in doctor.stderr
@@ -94,6 +101,7 @@ def run(executable: Path, expected_version: str, require_native: bool) -> None:
     assert "--allow-config-mutation" in enable_help.stdout
     assert "--provider" in enable_help.stdout
     assert "--allow-config-mutation" in disable_help.stdout
+    assert "--allow-config-mutation" in integration_help.stdout
 
 
 def main() -> int:
