@@ -66,7 +66,9 @@ There are currently no optional dependency groups: omitting the document librari
 - Python: 3.11 through 3.13. Python 3.14 is deferred until all supported Windows architectures have binary dependency coverage or a documented compiler toolchain.
 - Platforms: Windows, Linux, and macOS.
 - License: MIT.
-- Maturity: alpha until the release lifecycle milestones are complete.
+- Maturity: alpha. Lifecycle-milestone completion proves the corresponding
+  behaviours but does not itself promote the distribution classifier; maturity
+  promotion requires a separate reviewed release decision.
 
 `tests/check_distribution.py` validates wheel and source-distribution metadata, required contents (including desired-state and Claude Code integration support), archive safety, and exclusion of machine-local state without importing from the checkout. CI installs the wheel and all declared dependencies in a clean environment, then `tests/check_installed_cli.py` requires `--version`, `doctor`, `tools list`, the platform-appropriate Bash provider status, and the non-mutating desired-state and integration command help surfaces to pass from an unrelated directory. Build and smoke-test state is kept outside the checkout, which must remain unchanged.
 

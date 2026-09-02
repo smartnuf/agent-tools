@@ -76,7 +76,7 @@ uv tool install --python 3.13 --reinstall "smartnuf-agent-tools==0.1.2"
 Rollback to the available v0.1.1 GitHub artifact by its exact reviewed URL:
 
 ```sh
-uv tool install --python 3.13 --reinstall "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl"
+uv tool install --python 3.13 --reinstall "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl#sha256=b790d7c30294fae43f57ef6e83de02396489dac97ffe59e3616202dff289c14f"
 ```
 
 To remove it:
