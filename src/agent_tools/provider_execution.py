@@ -199,7 +199,7 @@ class _SigintBroker:
 
     @staticmethod
     def _supported_previous_handler(handler: object) -> bool:
-        return handler in {signal.SIG_DFL, signal.default_int_handler}
+        return handler is signal.SIG_DFL or handler is signal.default_int_handler
 
     def __enter__(self) -> _SigintBroker:
         if threading.current_thread() is not threading.main_thread():

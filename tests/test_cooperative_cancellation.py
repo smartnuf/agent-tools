@@ -112,6 +112,71 @@ class CooperativeCancellationTests(unittest.TestCase):
         finally:
             signal.signal(signal.SIGINT, previous)
 
+    def test_broker_recognizes_sig_dfl_without_comparing_custom_handlers(self) -> None:
+        class HostileCustomHandler:
+            def __call__(self, signum, frame):
+                del signum, frame
+
+            def __hash__(self):
+                raise AssertionError("custom handler must not be hashed")
+
+            def __eq__(self, other):
+                raise AssertionError("custom handler must not be compared")
+
+        previous = signal.getsignal(signal.SIGINT)
+        try:
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            with provider_execution._SigintBroker(
+                provider_execution._CancellationContext()
+            ) as broker:
+                self.assertTrue(broker.installed)
+            self.assertIs(signal.getsignal(signal.SIGINT), signal.SIG_DFL)
+
+            custom = HostileCustomHandler()
+            signal.signal(signal.SIGINT, custom)
+            with provider_execution._SigintBroker(
+                provider_execution._CancellationContext()
+            ) as declined:
+                self.assertFalse(declined.installed)
+                self.assertIs(signal.getsignal(signal.SIGINT), custom)
+            self.assertIs(signal.getsignal(signal.SIGINT), custom)
+        finally:
+            signal.signal(signal.SIGINT, previous)
+
+    def test_broker_declines_unhashable_custom_handler(self) -> None:
+        class UnhashableCustomHandler:
+            __hash__ = None
+
+            def __call__(self, signum, frame):
+                del signum, frame
+
+        previous = signal.getsignal(signal.SIGINT)
+        custom = UnhashableCustomHandler()
+        try:
+            signal.signal(signal.SIGINT, custom)
+            with provider_execution._SigintBroker(
+                provider_execution._CancellationContext()
+            ) as declined:
+                self.assertFalse(declined.installed)
+                self.assertIs(signal.getsignal(signal.SIGINT), custom)
+            self.assertIs(signal.getsignal(signal.SIGINT), custom)
+        finally:
+            signal.signal(signal.SIGINT, previous)
+
+    def test_broker_remains_uninstalled_off_main_thread(self) -> None:
+        observed: list[bool] = []
+
+        def enter_broker() -> None:
+            with provider_execution._SigintBroker(
+                provider_execution._CancellationContext()
+            ) as broker:
+                observed.append(broker.installed)
+
+        thread = threading.Thread(target=enter_broker)
+        thread.start()
+        thread.join()
+        self.assertEqual(observed, [False])
+
     def test_broker_rejects_nested_installation(self) -> None:
         previous = signal.getsignal(signal.SIGINT)
         try:
