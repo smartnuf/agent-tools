@@ -278,6 +278,7 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
             b'{"env":null}',
             b'{"env":{"X":1}}',
             b'{"unrelated":Infinity}',
+            b'{"unrelated":1e400}',
         )
         with TemporaryDirectory() as directory:
             settings, state = self.paths(directory)

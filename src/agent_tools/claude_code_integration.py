@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import ntpath
 import os
 import stat
@@ -153,12 +154,20 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(f"non-finite JSON constant is not permitted: {value}")
 
 
+def _parse_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError(f"non-finite JSON number is not permitted: {value}")
+    return parsed
+
+
 def _parse_json(raw: bytes) -> object:
     try:
         value = json.loads(
             raw.decode("utf-8"),
             object_pairs_hook=_unique_object,
             parse_constant=_reject_json_constant,
+            parse_float=_parse_json_float,
         )
     except (UnicodeError, ValueError, OverflowError, RecursionError) as error:
         raise ClaudeCodeIntegrationError(
