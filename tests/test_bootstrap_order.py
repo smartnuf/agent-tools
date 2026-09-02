@@ -10,15 +10,48 @@ class BootstrapOrderTests(unittest.TestCase):
         script = (ROOT / "scripts" / "bootstrap.ps1").read_text(encoding="utf-8")
         self.assertLess(
             script.index("--verify-final"),
-            script.index("if ($InstallNativeTools)"),
+            script.index("agent_tools.native_setup"),
         )
 
     def test_posix_verifies_environment_before_native_mutation(self) -> None:
         script = (ROOT / "scripts" / "bootstrap.sh").read_text(encoding="utf-8")
         self.assertLess(
             script.index("--verify-final"),
-            script.index('if [ "$INSTALL_NATIVE" -eq 1 ]'),
+            script.index("agent_tools.native_setup"),
         )
+
+    def test_both_wrappers_delegate_native_setup_with_explicit_arguments(self) -> None:
+        powershell = (ROOT / "scripts" / "bootstrap.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "scripts" / "bootstrap.sh").read_text(encoding="utf-8")
+        expected = "agent_tools.native_setup"
+        for script in (powershell, posix):
+            with self.subTest(script=script[:20]):
+                self.assertEqual(script.count(expected), 1)
+                self.assertIn("--allow-provider-mutation poppler ghostscript", script)
+        self.assertLess(powershell.index("uv pip install"), powershell.index(expected))
+        self.assertLess(posix.index("uv pip install"), posix.index(expected))
+
+    def test_clone_wrappers_have_no_native_package_mapping(self) -> None:
+        powershell = (ROOT / "scripts" / "bootstrap.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "scripts" / "bootstrap.sh").read_text(encoding="utf-8")
+        combined = powershell + posix
+        for duplicate in (
+            "oschwartz10612.Poppler",
+            "ArtifexSoftware.GhostScript",
+            "poppler-utils",
+            "brew install poppler",
+            "apt-get install",
+        ):
+            with self.subTest(duplicate=duplicate):
+                self.assertNotIn(duplicate, combined)
+        self.assertFalse((ROOT / "scripts" / "install-native.sh").exists())
+        self.assertFalse((ROOT / "scripts" / "windows-tools.ps1").exists())
+
+    def test_native_delegation_does_not_bypass_explicit_path_flag(self) -> None:
+        powershell = (ROOT / "scripts" / "bootstrap.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "scripts" / "bootstrap.sh").read_text(encoding="utf-8")
+        self.assertLess(powershell.index("agent_tools.native_setup"), powershell.index("if ($AddToPath)"))
+        self.assertLess(posix.index("agent_tools.native_setup"), posix.index('if [ "$ADD_PATH" -eq 1 ]'))
 
     def test_uv_system_filter_is_neutralized_on_both_platforms(self) -> None:
         powershell = (ROOT / "scripts" / "bootstrap.ps1").read_text(encoding="utf-8")

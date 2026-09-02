@@ -368,6 +368,7 @@ def _run(
     timeout: TimeoutSeconds,
     *,
     privileged_supervision: bool = False,
+    environment: Mapping[str, str] | None = None,
     _cancellation: _CancellationContext | None = None,
 ) -> subprocess.CompletedProcess[str]:
     cancellation = _cancellation or _CancellationContext()
@@ -376,6 +377,8 @@ def _run(
         process_options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
     else:
         process_options = {"start_new_session": True}
+    if environment is not None:
+        process_options["env"] = environment
     stdout_tail = _BoundedOutputTail(MAX_CAPTURED_OUTPUT_CHARS)
     stderr_tail = _BoundedOutputTail(MAX_CAPTURED_OUTPUT_CHARS)
     stop_readers = threading.Event()
@@ -428,6 +431,16 @@ def _run(
         )
     except CommandInterruptedError as error:
         raise
+    except KeyboardInterrupt:
+        _best_effort_started_process_cleanup(
+            process,
+            privileged_supervision,
+            tuple(started_readers),
+            stop_readers,
+            reader_errors,
+            cancellation,
+        )
+        raise
     except OSError as error:
         cleanup_established = _best_effort_started_process_cleanup(
             process,
@@ -452,6 +465,17 @@ def _run(
                 lifetime_uncertain=lifetime_uncertain,
             ),
         )
+
+
+def run_bounded_command(
+    argv: tuple[str, ...],
+    timeout_seconds: TimeoutSeconds,
+    *,
+    environment: Mapping[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a non-mutating external evidence probe with bounded lifecycle and output."""
+
+    return _run(argv, timeout_seconds, environment=environment)
 
 
 def _best_effort_started_process_cleanup(

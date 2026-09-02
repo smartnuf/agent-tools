@@ -75,6 +75,28 @@ jobs:
       - name: Install native tools through external providers
         timeout-minutes: 10
         uses: ./.github/actions/install-native
+      - name: Exercise delegated clone native setup twice (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $first = & ./scripts/bootstrap.ps1 -InstallNativeTools 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Delegated bootstrap failed: $first" }
+          $first
+          if ($first -notmatch 'no host changes required') { throw 'Expected an all-satisfied native plan.' }
+          $second = & .venv\Scripts\python.exe -I -m agent_tools.native_setup --allow-provider-mutation poppler ghostscript 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Repeated delegated setup failed: $second" }
+          $second
+          if ($second -notmatch 'no host changes required') { throw 'Expected repeated setup to remain all-satisfied.' }
+      - name: Exercise delegated clone native setup twice (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          first="$(sh scripts/bootstrap.sh --install-native-tools 2>&1)"
+          printf '%s\n' "$first"
+          grep -F 'no host changes required' <<<"$first"
+          second="$(.venv/bin/python -I -m agent_tools.native_setup --allow-provider-mutation poppler ghostscript 2>&1)"
+          printf '%s\n' "$second"
+          grep -F 'no host changes required' <<<"$second"
       - name: Verify repeated pre-seeded native selection
         env:
           PYTHONPATH: src
