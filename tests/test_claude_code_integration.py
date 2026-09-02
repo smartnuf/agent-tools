@@ -632,6 +632,36 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
             self.assertIs(reconciled.phase, integration.IntegrationPhase.REMOVED)
             self.assertFalse(settings.exists())
 
+    def test_removal_publication_failure_preserves_all_recovery_evidence(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings, state = self.paths(directory)
+            settings.parent.mkdir()
+            settings.write_text('{"env":{"KEEP":"yes"}}\n', encoding="utf-8")
+            self.apply(settings, state, allow_config_mutation=True)
+            final_backup = state.with_name("final-state.recovery.json")
+            actual_replace = integration._replace_document
+            calls = 0
+
+            def fail_completion(*args, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 3:
+                    raise integration.ClaudeCodeIntegrationRestorationError(
+                        "completion restoration is uncertain", (final_backup,)
+                    )
+                return actual_replace(*args, **kwargs)
+
+            with (
+                patch.object(integration, "_replace_document", side_effect=fail_completion),
+                self.assertRaises(
+                    integration.ClaudeCodeIntegrationRestorationError
+                ) as raised,
+            ):
+                self.remove(settings, state, allow_config_mutation=True)
+
+            self.assertIn(final_backup, raised.exception.backup_paths)
+            self.assertGreaterEqual(len(raised.exception.backup_paths), 3)
+
     def test_status_keeps_integration_state_distinct(self) -> None:
         with TemporaryDirectory() as directory:
             settings, state = self.paths(directory)

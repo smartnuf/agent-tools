@@ -53,6 +53,17 @@ class ClaudeCodeIntegrationRestorationError(ClaudeCodeIntegrationError):
         self.backup_paths = backup_paths
 
 
+def _combined_recovery_paths(
+    backups: list[Path], error: BaseException
+) -> tuple[Path, ...]:
+    inner = (
+        error.backup_paths
+        if isinstance(error, ClaudeCodeIntegrationRestorationError)
+        else ()
+    )
+    return tuple(dict.fromkeys((*backups, *inner)))
+
+
 class IntegrationOutcome(str, Enum):
     NO_CHANGES = "no-changes"
     REFUSED = "refused"
@@ -1008,11 +1019,7 @@ def _apply_git_bash_integration(
         except _ForceAbort:
             raise
         except (Exception, KeyboardInterrupt) as error:
-            recovery_paths = tuple(backups)
-            if isinstance(error, ClaudeCodeIntegrationRestorationError):
-                recovery_paths = tuple(
-                    dict.fromkeys((*recovery_paths, *error.backup_paths))
-                )
+            recovery_paths = _combined_recovery_paths(backups, error)
             if changed_settings:
                 try:
                     _restore(
@@ -1166,25 +1173,37 @@ def _remove_git_bash_integration(
                 previous_value,
                 preserve_empty_environment=environment_existed,
             )
-            backup = (
-                _remove_document(
-                    settings_path, settings, _parse_settings, cancellation
+            try:
+                backup = (
+                    _remove_document(
+                        settings_path, settings, _parse_settings, cancellation
+                    )
+                    if not settings_existed and not restored_settings
+                    else _replace_document(
+                        settings_path,
+                        settings,
+                        restored_settings,
+                        _parse_settings,
+                        cancellation,
+                    )
                 )
-                if not settings_existed and not restored_settings
-                else _replace_document(
-                    settings_path,
-                    settings,
-                    restored_settings,
-                    _parse_settings,
-                    cancellation,
-                )
-            )
+            except ClaudeCodeIntegrationRestorationError as error:
+                raise ClaudeCodeIntegrationRestorationError(
+                    f"integration removal could not restore settings: {error}",
+                    _combined_recovery_paths(backups, error),
+                ) from error
             if backup is not None:
                 backups.append(backup)
         removed = dict(removing, phase=IntegrationPhase.REMOVED.value)
-        backup = _replace_document(
-            state_path, state, removed, _parse_state, cancellation
-        )
+        try:
+            backup = _replace_document(
+                state_path, state, removed, _parse_state, cancellation
+            )
+        except ClaudeCodeIntegrationRestorationError as error:
+            raise ClaudeCodeIntegrationRestorationError(
+                f"integration removal could not publish completion: {error}",
+                _combined_recovery_paths(backups, error),
+            ) from error
         if backup is not None:
             backups.append(backup)
         return IntegrationResult(
