@@ -73,10 +73,18 @@ Pin the current release when reproducibility matters, or reinstall that exact ve
 uv tool install --python 3.13 --reinstall "smartnuf-agent-tools==0.1.2"
 ```
 
-Rollback to the available v0.1.1 GitHub artifact by its exact reviewed URL:
+Before rolling back to a version that predates integration commands, explicitly
+restore any active managed integration while the current command is available:
 
 ```sh
-uv tool install --python 3.13 --reinstall "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl#sha256=b790d7c30294fae43f57ef6e83de02396489dac97ffe59e3616202dff289c14f"
+agent-tools integrations claude-code remove --allow-config-mutation
+```
+
+Then roll back to the available v0.1.1 GitHub artifact by its exact reviewed,
+checksum-bound requirement:
+
+```sh
+uv tool install --python 3.13 --reinstall "smartnuf-agent-tools @ https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl#sha256=b790d7c30294fae43f57ef6e83de02396489dac97ffe59e3616202dff289c14f"
 ```
 
 To remove it:
@@ -88,8 +96,9 @@ uv tool uninstall smartnuf-agent-tools
 Application removal deletes uv's isolated tool environment and executable. It
 does not delete Agent Tools' per-user desired-state configuration, reverse an
 active agent integration, or uninstall externally owned native providers such
-as Bash. Remove an integration explicitly before uninstalling the application
-when restoration of its managed setting is intended.
+as Bash. Remove an integration explicitly before rollback or application
+uninstall when restoration of its managed setting is intended; older releases
+may not have the integration-removal command.
 
 Poppler and Ghostscript are not bundled. Install them through the operating-system package manager before expecting `agent-tools doctor` to pass completely. See the [v0.1.2 release notes](docs/releases/v0.1.2.md) for current limitations.
 

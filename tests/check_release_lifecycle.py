@@ -187,6 +187,7 @@ def exercise_lifecycle(
     uv_command = [uv, "--no-config", "tool"]
     current_url = current_index.resolve().as_uri()
     executable = tool_bin / CONSOLE_SCRIPT
+    installed_environment = tool_directory / PACKAGE
 
     run_command(
         uv_command + ["install", "--python", python, str(previous_wheel)],
@@ -196,6 +197,10 @@ def exercise_lifecycle(
     assert_version(
         executable, previous_version, environment=environment, cwd=work_directory
     )
+    if not installed_environment.is_dir():
+        raise AssertionError(
+            f"uv tool environment was not created: {installed_environment}"
+        )
     run_command(
         [str(executable), "integrations", "claude-code", "apply", "--help"],
         environment=environment,
@@ -334,9 +339,14 @@ def exercise_lifecycle(
             environment=environment,
             cwd=work_directory,
         )
-        if executable.exists():
+        if os.path.lexists(executable):
             raise AssertionError(
-                f"application executable remains after uninstall: {executable}"
+                f"application launcher remains after uninstall: {executable}"
+            )
+        if os.path.lexists(installed_environment):
+            raise AssertionError(
+                "application tool environment remains after uninstall: "
+                f"{installed_environment}"
             )
         assert_unchanged(config_path, desired_state, "application removal")
         resolved_bash_after = shutil.which("bash", path=environment.get("PATH"))
