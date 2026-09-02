@@ -20,18 +20,33 @@ EXPECTED_DEPENDENCIES = {
     "openpyxl<4,>=3.1",
 }
 EXPECTED_URLS = {
+    "Changelog, https://github.com/smartnuf/agent-tools/releases",
+    "Documentation, https://github.com/smartnuf/agent-tools/tree/main/docs",
     "Homepage, https://github.com/smartnuf/agent-tools",
     "Repository, https://github.com/smartnuf/agent-tools",
     "Issues, https://github.com/smartnuf/agent-tools/issues",
 }
-EXPECTED_SUMMARY = "Agent workstation capability discovery, diagnostics, and reusable document tools"
+EXPECTED_SUMMARY = (
+    "Cross-platform capability discovery and diagnostics for coding-agent workstations"
+)
 EXPECTED_KEYWORDS = {
-    "agents",
     "capability-discovery",
+    "coding-agents",
     "developer-tools",
-    "document-processing",
-    "pdf",
+    "diagnostics",
+    "workstation-setup",
 }
+EXPECTED_DESCRIPTION_SEQUENCE = (
+    "# Agent Tools",
+    "## Quick start",
+    "uv tool install --python 3.13 smartnuf-agent-tools",
+    "`doctor`, `tools list`, and `tools status` are read-only.",
+    "uv tool upgrade smartnuf-agent-tools",
+    "uv tool uninstall smartnuf-agent-tools",
+    "## Advanced use and source development",
+    "## Source checkout and bootstrap",
+    "## Repository policy and layout",
+)
 FORBIDDEN_PARTS = {".git", ".venv", ".tools", ".cache", ".backups", "__pycache__"}
 
 
@@ -53,7 +68,16 @@ def _check_metadata(metadata: Message) -> str:
     }
     assert python_constraints == {">=3.11", "<3.14"}
     assert metadata["License-Expression"] == "MIT"
+    assert metadata.get_all("License-File", []) == ["LICENSE"]
+    assert not any(
+        classifier.startswith("License ::")
+        for classifier in metadata.get_all("Classifier", [])
+    )
     assert set(metadata.get_all("Project-URL", [])) == EXPECTED_URLS
+    assert metadata["Description-Content-Type"] == "text/markdown"
+    description = metadata.get_payload()
+    positions = [description.index(item) for item in EXPECTED_DESCRIPTION_SEQUENCE]
+    assert positions == sorted(positions), "long description is not product-first"
     dependencies = {
         requirement.replace(" ", "").lower()
         for requirement in metadata.get_all("Requires-Dist", [])

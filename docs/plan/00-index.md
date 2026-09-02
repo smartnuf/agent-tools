@@ -102,8 +102,10 @@ review and CI wait were excluded.
 M3 has no remaining implementation task. Keep exact-artifact application
 lifecycle evidence separate from native provider removal, which remains
 unsupported. M4 discovery channels remain deferred until user demand justifies
-their maintenance burden; the independent README presentation and document
-dependency-boundary issues remain backlog work rather than M3 acceptance gates.
+their maintenance burden. Issue #56 supplies the product-first README and PyPI
+metadata presentation before the next release; the independent document
+dependency-boundary decision remains human-reserved backlog rather than an M3
+acceptance gate.
 
 ## Known risks and assumptions
 
