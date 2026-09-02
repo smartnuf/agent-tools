@@ -7,11 +7,13 @@ The public Python distribution is `smartnuf-agent-tools`. It provides agent work
 The wheel is the ordinary-user command-line application. It contains portable Python code from `src/agent_tools/`; it does not contain the repository's clone-oriented `bin/`, `scripts/`, configuration, exact environment lock, or `.venv`.
 
 [Decision 0002](decisions/0002-native-capability-provider-model.md) extends
-this boundary: native capability catalogue, discovery, and future provider
-orchestration belong in packaged Python. Clone-oriented scripts will become
-thin front ends rather than a second implementation. The first read-only
-capability slice precedes PyPI publication; native package mutation remains
-later lifecycle work.
+this boundary: native capability catalogue, discovery, and provider
+orchestration belong in packaged Python. Clone-oriented scripts are thin front
+ends rather than a second implementation. Their explicit native-install flags
+invoke the internal packaged bootstrap module after editable installation, so
+planning, execution, provenance, and final verification use the same reviewed
+implementation. This clone-only entry point is not a public `tools install`
+command or a compatibility promise for direct module callers.
 
 The clone workflow remains supported for contributors and advanced users who want the shared `agent-python` environment. Its bootstrap scripts install the same project editable and synchronize the complete environment from `requirements.txt`. A project-specific environment and lock remain authoritative over either installation.
 
@@ -22,8 +24,8 @@ or changing the host. `agent-tools tools status [CAPABILITY]` reports ephemeral
 detected state. Bash is optional: Git Bash is the preferred Windows-hosted
 provider, normal system Bash serves Linux and macOS, and the default WSL
 distribution is reported separately rather than satisfying Windows-hosted
-Bash. Provider installation, desired state, and agent integration remain
-outside this read-only product boundary.
+Bash. Public provider installation, desired state, and agent integration remain
+outside this read-only console-command boundary.
 
 ## Dependencies
 

@@ -2,7 +2,7 @@
 
 - Last reconciled: 2026-09-02
 - Current milestone: M3 — tested update and capability lifecycle
-- Current state: M2 complete; M3 has completed explicitly authorized provider execution, complete change reporting, and mutation-provenance persistence; clone-bootstrap delegation is next
+- Current state: M2 complete; M3 has completed explicitly authorized provider execution, complete change reporting, mutation-provenance persistence, and clone-bootstrap delegation; desired-state configuration is next
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
 - Target lifecycle: tested upgrade, pin, rollback, safe provider mutation, and removal
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
@@ -15,14 +15,14 @@
 | M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
 | M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
-| M3 | Tested update and capability lifecycle | in-progress | 3/9 | 6.5–11 days | 1.75–5 days |
+| M3 | Tested update and capability lifecycle | in-progress | 4/9 | 6.5–11 days | 1.25–4.25 days |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **1.75–5 person-days remaining**.
+Estimated implementation effort through M3: **1.25–4.25 person-days remaining**.
 The selector and pre-seeded-workstation evidence slices complete the first
 joint M3 gate; read-only provider planning supplies the prerequisite for the
-still-open mutation lifecycle gate. Native discovery channels and the
+completed mutation lifecycle gate. Native discovery channels and the
 independent document-dependency boundary are excluded; review time is reported
 separately.
 
@@ -69,6 +69,11 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
   versioned, atomically replaced managed-state document governed by
   [Decision 0003](../decisions/0003-managed-state-provenance.md), preserving
   append-only Agent Tools mutation-request evidence without package ownership.
+- [Issue #53](https://github.com/smartnuf/agent-tools/issues/53) makes both
+  clone bootstrap wrappers delegate their explicit native-install flags to the
+  packaged planner, managed executor, provenance boundary, and final verifier;
+  unit and native-runner tests cover exact argument delegation, all-satisfied
+  reruns, actionable failure evidence, and the absence of duplicate mappings.
 
 M1 is complete and its factual record is frozen except for corrections. M1.5
 completed on 2026-08-29; M2 completed on 2026-08-30 with the first stable PyPI
@@ -78,10 +83,12 @@ excluded.
 
 ## Recommended next work
 
-Delegate clone bootstrap native setup to packaged capability management in
-[issue #53](https://github.com/smartnuf/agent-tools/issues/53) (M,
-**0.5–0.75 day**). Provider planning, execution, and provenance now provide the
-single packaged boundary that the PowerShell and POSIX wrappers can consume.
+Add the safe desired-state configuration lifecycle in
+[issue #54](https://github.com/smartnuf/agent-tools/issues/54) (L,
+**0.75–1.25 days**). Keep desired configuration distinct from detected state
+and mutation provenance, and prove explicit authorization, backup, atomic
+replacement, validation/restoration, unrelated-state preservation, repeated
+changes, and zero provider uninstall.
 [Issue #26](https://github.com/smartnuf/agent-tools/issues/26) records the
 ordered M3 dependency chain beginning `#50 → #77 → #51`.
 
@@ -103,7 +110,6 @@ The release milestones are the current priority. Existing non-release work remai
 
 - automate reviewed dependency upgrades;
 - add functional PDF extraction and rendering fixtures;
-- test bootstrap native-install branches directly;
 - extend concurrent Windows PATH tests and restoration documentation;
 - report package versions and executable architecture in `doctor`;
 - expand Linux distribution and architecture coverage when justified;
