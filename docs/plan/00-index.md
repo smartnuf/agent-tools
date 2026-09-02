@@ -87,9 +87,9 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
   phases without provider installation or removal.
 - [Issue #55](https://github.com/smartnuf/agent-tools/issues/55) adds the
   checksum-verified, exact-artifact lifecycle test across Windows, Ubuntu, and
-  macOS: direct-wheel v0.1.1 install, current-wheel upgrade and exact reinstall, v0.1.1
-  rollback, and application removal with byte-identical desired state and the
-  externally owned Bash provider preserved.
+  macOS: direct-wheel v0.1.1 install, published-v0.1.2 upgrade and exact
+  reinstall, v0.1.1 rollback, and application removal with byte-identical
+  current desired state and the externally owned Bash provider preserved.
 
 M1 is complete and its factual record is frozen except for corrections. M1.5
 completed on 2026-08-29; M2 completed on 2026-08-30 with the first stable PyPI

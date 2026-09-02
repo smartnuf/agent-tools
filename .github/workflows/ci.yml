@@ -85,14 +85,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p "$RUNNER_TEMP/previous-release"
+          mkdir -p "$RUNNER_TEMP/previous-release" "$RUNNER_TEMP/current-release"
           gh release download v0.1.1 \
             --repo "$GITHUB_REPOSITORY" \
             --dir "$RUNNER_TEMP/previous-release" \
             --pattern '*.whl' \
             --pattern '*.tar.gz' \
             --pattern SHA256SUMS
+          gh release download v0.1.2 \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$RUNNER_TEMP/current-release" \
+            --pattern '*.whl' \
+            --pattern '*.tar.gz' \
+            --pattern SHA256SUMS
           python scripts/release.py verify-checksums "$RUNNER_TEMP/previous-release/SHA256SUMS"
+          python scripts/release.py verify-checksums "$RUNNER_TEMP/current-release/SHA256SUMS"
           python scripts/release.py verify-checksums "$RUNNER_TEMP/release-dist/SHA256SUMS"
 
       - name: Exercise upgrade, pin, rollback, and removal lifecycle
@@ -102,8 +109,9 @@ jobs:
           python tests/check_release_lifecycle.py \
             --previous-wheel "$RUNNER_TEMP"/previous-release/*.whl \
             --previous-version 0.1.1 \
-            --current-wheel "$RUNNER_TEMP"/release-dist/*.whl \
+            --current-wheel "$RUNNER_TEMP"/current-release/*.whl \
             --current-version 0.1.2 \
+            --candidate-wheel "$RUNNER_TEMP"/release-dist/*.whl \
             --work-directory "$RUNNER_TEMP/release-lifecycle" \
             --python 3.13 \
             --allow-home-config-mutation

@@ -134,11 +134,13 @@ def exercise_lifecycle(
     previous_version: str,
     current_wheel: Path,
     current_version: str,
+    candidate_wheel: Path,
     work_directory: Path,
     allow_home_config_mutation: bool,
 ) -> None:
     previous_identity = wheel_identity(previous_wheel)
     current_identity = wheel_identity(current_wheel)
+    candidate_identity = wheel_identity(candidate_wheel)
     if previous_identity != (PACKAGE, previous_version):
         raise AssertionError(
             f"unexpected previous wheel identity: {previous_identity}; "
@@ -147,6 +149,11 @@ def exercise_lifecycle(
     if current_identity != (PACKAGE, current_version):
         raise AssertionError(
             f"unexpected current wheel identity: {current_identity}; "
+            f"expected {(PACKAGE, current_version)}"
+        )
+    if candidate_identity != (PACKAGE, current_version):
+        raise AssertionError(
+            f"unexpected candidate wheel identity: {candidate_identity}; "
             f"expected {(PACKAGE, current_version)}"
         )
     if previous_version == current_version:
@@ -213,13 +220,36 @@ def exercise_lifecycle(
     assert_version(
         executable, current_version, environment=environment, cwd=work_directory
     )
+    tools_list = run_command(
+        [str(executable), "tools", "list"],
+        environment=environment,
+        cwd=work_directory,
+    )
+    if "bash" not in tools_list.stdout:
+        raise AssertionError("upgrade did not install the published current CLI surface")
+
+    run_command(
+        uv_command
+        + [
+            "install",
+            "--python",
+            python,
+            "--reinstall",
+            str(candidate_wheel),
+        ],
+        environment=environment,
+        cwd=work_directory,
+    )
+    assert_version(
+        executable, current_version, environment=environment, cwd=work_directory
+    )
     integration_help = run_command(
         [str(executable), "integrations", "claude-code", "apply", "--help"],
         environment=environment,
         cwd=work_directory,
     )
     if "--allow-config-mutation" not in integration_help.stdout:
-        raise AssertionError("upgrade did not install the current artifact's CLI surface")
+        raise AssertionError("candidate artifact lacks the current CLI surface")
 
     refused = run_command(
         [str(executable), "tools", "enable", "bash"],
@@ -333,6 +363,7 @@ def main() -> int:
     parser.add_argument("--previous-version", required=True)
     parser.add_argument("--current-wheel", required=True, type=Path)
     parser.add_argument("--current-version", required=True)
+    parser.add_argument("--candidate-wheel", required=True, type=Path)
     parser.add_argument("--work-directory", required=True, type=Path)
     parser.add_argument("--python", default="3.13")
     parser.add_argument("--uv", default="uv")
@@ -355,6 +386,7 @@ def main() -> int:
             previous_version=args.previous_version,
             current_wheel=args.current_wheel.resolve(),
             current_version=args.current_version,
+            candidate_wheel=args.candidate_wheel.resolve(),
             work_directory=Path(temporary),
             allow_home_config_mutation=args.allow_home_config_mutation,
         )
