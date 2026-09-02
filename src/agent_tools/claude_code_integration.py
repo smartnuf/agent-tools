@@ -1008,6 +1008,11 @@ def _apply_git_bash_integration(
         except _ForceAbort:
             raise
         except (Exception, KeyboardInterrupt) as error:
+            recovery_paths = tuple(backups)
+            if isinstance(error, ClaudeCodeIntegrationRestorationError):
+                recovery_paths = tuple(
+                    dict.fromkeys((*recovery_paths, *error.backup_paths))
+                )
             if changed_settings:
                 try:
                     _restore(
@@ -1020,12 +1025,9 @@ def _apply_git_bash_integration(
                     raise ClaudeCodeIntegrationRestorationError(
                         "integration activation failed and settings restoration is "
                         f"uncertain: {restoration_error}",
-                        tuple(backups),
+                        recovery_paths,
                     ) from error
             if isinstance(error, ClaudeCodeIntegrationRestorationError):
-                recovery_paths = tuple(
-                    dict.fromkeys((*backups, *error.backup_paths))
-                )
                 raise ClaudeCodeIntegrationRestorationError(
                     f"integration activation failed; prior settings restored; {error}",
                     recovery_paths,

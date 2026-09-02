@@ -421,6 +421,41 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
             self.assertEqual(settings.read_bytes(), raw)
             self.assertIn(recovery_backup, raised.exception.backup_paths)
 
+    def test_combined_restoration_failure_preserves_ledger_recovery_evidence(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings, state = self.paths(directory)
+            settings.parent.mkdir()
+            settings.write_text('{"env":{"KEEP":"yes"}}\n', encoding="utf-8")
+            actual_replace = integration._replace_document
+            ledger_backup = state.with_name("state.recovery.json")
+            calls = 0
+
+            def fail_activation(*args, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 3:
+                    raise integration.ClaudeCodeIntegrationRestorationError(
+                        "ledger restoration is uncertain", (ledger_backup,)
+                    )
+                return actual_replace(*args, **kwargs)
+
+            with (
+                patch.object(integration, "_replace_document", side_effect=fail_activation),
+                patch.object(
+                    integration,
+                    "_restore",
+                    side_effect=integration.ClaudeCodeIntegrationError(
+                        "settings restoration is uncertain"
+                    ),
+                ),
+                self.assertRaises(
+                    integration.ClaudeCodeIntegrationRestorationError
+                ) as raised,
+            ):
+                self.apply(settings, state, allow_config_mutation=True)
+
+            self.assertIn(ledger_backup, raised.exception.backup_paths)
+
     def test_prepared_reconciliation_refreshes_unchanged_file_existence(self) -> None:
         with TemporaryDirectory() as directory:
             settings, state = self.paths(directory)
