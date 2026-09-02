@@ -69,6 +69,7 @@ Schema v1 is a closed object:
   "phase": "active",
   "settings_path": "C:\\Users\\person\\.claude\\settings.json",
   "settings_existed": true,
+  "environment_existed": true,
   "applied_value": "C:\\Program Files\\Git\\bin\\bash.exe",
   "previous": {
     "present": false
@@ -77,18 +78,27 @@ Schema v1 is a closed object:
 ```
 
 `previous` distinguishes an absent member from its exact prior string value;
-`settings_existed` separately distinguishes an absent settings file. The
-accepted phases are:
+`settings_existed` separately distinguishes an absent settings file, and
+`environment_existed` preserves a pre-existing empty `env` object. The accepted
+phases are:
 
 - `prepared`: prior facts are durable before the Claude setting is changed;
 - `active`: the recorded path is the setting Agent Tools applied;
 - `removing`: restoration was requested and may need reconciliation; and
-- `removed`: the recorded prior member/file state has been restored.
+- `removed`: the recorded prior member/file state has been restored; and
+- `unclaimed`: a matching value appeared after `prepared`, but its origin could
+  not be established and Agent Tools conservatively claimed no effect.
 
 The removed record is retained as a tombstone so a crash after restoring
 Claude settings but before final record publication can be reconciled without
 repeating or guessing the external change. A later apply may replace the
 tombstone through the same prepared phase.
+
+Removed and unclaimed records are history, not continuing authority over the
+settings pathname or member. A later apply may follow a relocated
+`CLAUDE_CONFIG_DIR` and snapshots the then-current file, `env` container, and
+member as a new baseline. If the new baseline already matches selected Git
+Bash, it remains unclaimed.
 
 Apply writes `prepared`, changes and verifies Claude settings, then writes
 `active`. If active publication fails, it restores Claude settings and reports
@@ -99,6 +109,12 @@ without replaying the settings change. Any value outside the recorded prior or
 applied facts is external divergence and is preserved while the operation
 fails closed. A changed selected Git Bash path requires remove followed by a
 fresh apply; it is not silently adopted.
+
+There is an unavoidable crash boundary between replacing Claude settings and
+publishing `active`. On recovery, `prepared` plus a matching value cannot prove
+whether Agent Tools wrote the value or a user independently supplied it. The
+adapter therefore transitions that evidence to `unclaimed` under explicit
+authority and never removes the value. Equality is not ownership evidence.
 
 ### Persistence, authority, and cancellation
 

@@ -63,6 +63,7 @@ class IntegrationPhase(str, Enum):
     ACTIVE = "active"
     REMOVING = "removing"
     REMOVED = "removed"
+    UNCLAIMED = "unclaimed"
 
 
 @dataclass(frozen=True)
@@ -244,6 +245,7 @@ def _parse_state(raw: bytes) -> dict[str, Any]:
         "phase",
         "settings_path",
         "settings_existed",
+        "environment_existed",
         "applied_value",
         "previous",
     }
@@ -263,6 +265,8 @@ def _parse_state(raw: bytes) -> dict[str, Any]:
         raise ClaudeCodeIntegrationError("integration state contains an invalid path")
     if type(value["settings_existed"]) is not bool:
         raise ClaudeCodeIntegrationError("integration state has invalid settings history")
+    if type(value["environment_existed"]) is not bool:
+        raise ClaudeCodeIntegrationError("integration state has invalid environment history")
     previous = value["previous"]
     if not isinstance(previous, dict) or type(previous.get("present")) is not bool:
         raise ClaudeCodeIntegrationError("integration state has invalid prior value")
@@ -273,6 +277,10 @@ def _parse_state(raw: bytes) -> dict[str, Any]:
         raise ClaudeCodeIntegrationError("integration state has invalid prior value")
     if not value["settings_existed"] and previous["present"]:
         raise ClaudeCodeIntegrationError("integration state has invalid settings history")
+    if not value["settings_existed"] and value["environment_existed"]:
+        raise ClaudeCodeIntegrationError("integration state has invalid environment history")
+    if previous["present"] and not value["environment_existed"]:
+        raise ClaudeCodeIntegrationError("integration state has invalid environment history")
     return value
 
 
@@ -658,14 +666,20 @@ def _current_member(document: dict[str, Any]) -> tuple[bool, str | None]:
     return True, environment[SETTING_NAME]
 
 
-def _with_member(document: dict[str, Any], present: bool, value: str | None) -> dict[str, Any]:
+def _with_member(
+    document: dict[str, Any],
+    present: bool,
+    value: str | None,
+    *,
+    preserve_empty_environment: bool = False,
+) -> dict[str, Any]:
     updated = copy.deepcopy(document)
     environment = dict(updated.get("env", {}))
     if present:
         environment[SETTING_NAME] = value
     else:
         environment.pop(SETTING_NAME, None)
-    if environment:
+    if environment or preserve_empty_environment:
         updated["env"] = environment
     else:
         updated.pop("env", None)
@@ -677,6 +691,7 @@ def _record(
     settings_path: Path,
     applied_value: str,
     settings_existed: bool,
+    environment_existed: bool,
     previous_present: bool,
     previous_value: str | None,
 ) -> dict[str, Any]:
@@ -688,6 +703,7 @@ def _record(
         "phase": phase.value,
         "settings_path": str(settings_path),
         "settings_existed": settings_existed,
+        "environment_existed": environment_existed,
         "applied_value": applied_value,
         "previous": previous,
     }
@@ -695,12 +711,13 @@ def _record(
 
 def _record_facts(
     document: dict[str, Any],
-) -> tuple[IntegrationPhase, str, bool, bool, str | None]:
+) -> tuple[IntegrationPhase, str, bool, bool, bool, str | None]:
     previous = document["previous"]
     return (
         IntegrationPhase(document["phase"]),
         document["applied_value"],
         document["settings_existed"],
+        document["environment_existed"],
         previous["present"],
         previous.get("value"),
     )
@@ -750,16 +767,23 @@ def inspect_integration(
     present, current = _current_member(settings.document)
     if not state.exists:
         return IntegrationStatus(settings_path, state_path, None, current, False)
-    phase, applied, settings_existed, previous_present, previous_value = _record_facts(
-        state.document
-    )
-    if not _same_path_identity(state.document["settings_path"], str(settings_path)):
+    (
+        phase,
+        applied,
+        _settings_existed,
+        _environment_existed,
+        _previous_present,
+        _previous_value,
+    ) = _record_facts(state.document)
+    inactive = phase in {IntegrationPhase.REMOVED, IntegrationPhase.UNCLAIMED}
+    if not inactive and not _same_path_identity(
+        state.document["settings_path"], str(settings_path)
+    ):
         raise ClaudeCodeIntegrationError("integration state names another settings path")
-    expected = (True, applied) if phase in {
-        IntegrationPhase.PREPARED,
+    managed = phase in {
         IntegrationPhase.ACTIVE,
-    } else (previous_present, previous_value)
-    managed = _same_member(present, current, *expected)
+        IntegrationPhase.REMOVING,
+    } and _same_member(present, current, True, applied)
     return IntegrationStatus(settings_path, state_path, phase, current, managed)
 
 
@@ -800,6 +824,7 @@ def _apply_git_bash_integration(
         settings = _snapshot(settings_path, _parse_settings)
         state = _snapshot(state_path, _parse_state)
         current_present, current_value = _current_member(settings.document)
+        reconcile_unclaimed = False
         if not state.exists:
             if _same_member(current_present, current_value, True, applied):
                 return IntegrationResult(
@@ -810,22 +835,28 @@ def _apply_git_bash_integration(
                     detail="matching Claude Code setting already exists and is not claimed",
                 )
             settings_existed = settings.exists
+            environment_existed = "env" in settings.document
             previous_present, previous_value = current_present, current_value
             phase = None
         else:
-            if not _same_path_identity(
+            (
+                phase,
+                recorded_applied,
+                settings_existed,
+                environment_existed,
+                previous_present,
+                previous_value,
+            ) = _record_facts(state.document)
+            inactive = phase in {
+                IntegrationPhase.REMOVED,
+                IntegrationPhase.UNCLAIMED,
+            }
+            if not inactive and not _same_path_identity(
                 state.document["settings_path"], str(settings_path)
             ):
                 raise ClaudeCodeIntegrationError(
                     "integration state names another settings path"
                 )
-            (
-                phase,
-                recorded_applied,
-                settings_existed,
-                previous_present,
-                previous_value,
-            ) = _record_facts(state.document)
             if phase is IntegrationPhase.ACTIVE:
                 if not _same_path_identity(recorded_applied, applied):
                     raise ClaudeCodeIntegrationError(
@@ -863,8 +894,17 @@ def _apply_git_bash_integration(
                     raise ClaudeCodeIntegrationError(
                         "Claude Code setting diverged from prepared integration state"
                     )
-                if matches_previous:
+                if matches_applied:
                     settings_existed = settings.exists
+                    environment_existed = "env" in settings.document
+                    previous_present, previous_value = (
+                        current_present,
+                        current_value,
+                    )
+                    reconcile_unclaimed = True
+                else:
+                    settings_existed = settings.exists
+                    environment_existed = "env" in settings.document
                     previous_present, previous_value = (
                         current_present,
                         current_value,
@@ -882,6 +922,7 @@ def _apply_git_bash_integration(
                         ),
                     )
                 settings_existed = settings.exists
+                environment_existed = "env" in settings.document
                 previous_present, previous_value = current_present, current_value
         if not allow_config_mutation:
             return IntegrationResult(
@@ -892,11 +933,38 @@ def _apply_git_bash_integration(
                 detail="integration mutation was not explicitly authorized",
             )
         backups: list[Path] = []
+        if reconcile_unclaimed:
+            unclaimed = _record(
+                IntegrationPhase.UNCLAIMED,
+                settings_path,
+                applied,
+                settings_existed,
+                environment_existed,
+                previous_present,
+                previous_value,
+            )
+            backup = _replace_document(
+                state_path, state, unclaimed, _parse_state, cancellation
+            )
+            if backup is not None:
+                backups.append(backup)
+            return IntegrationResult(
+                IntegrationOutcome.NO_CHANGES,
+                settings_path,
+                state_path,
+                IntegrationPhase.UNCLAIMED,
+                tuple(backups),
+                detail=(
+                    "a matching setting appeared after preparation; its origin is "
+                    "uncertain and Agent Tools does not claim it"
+                ),
+            )
         prepared = _record(
             IntegrationPhase.PREPARED,
             settings_path,
             applied,
             settings_existed,
+            environment_existed,
             previous_present,
             previous_value,
         )
@@ -1009,30 +1077,27 @@ def _remove_git_bash_integration(
                 None,
                 detail="no Agent Tools-managed Claude Code integration exists",
             )
-        if not _same_path_identity(
-            state.document["settings_path"], str(settings_path)
-        ):
-            raise ClaudeCodeIntegrationError("integration state names another settings path")
         (
             phase,
             applied,
             settings_existed,
+            environment_existed,
             previous_present,
             previous_value,
         ) = _record_facts(state.document)
         current = _current_member(settings.document)
         previous = (previous_present, previous_value)
-        if phase is IntegrationPhase.REMOVED:
-            if not _same_member(*current, *previous):
-                raise ClaudeCodeIntegrationError(
-                    "Claude Code setting diverged from removed integration state"
-                )
+        if phase in {IntegrationPhase.REMOVED, IntegrationPhase.UNCLAIMED}:
             return IntegrationResult(
                 IntegrationOutcome.NO_CHANGES,
                 settings_path,
                 state_path,
                 phase,
             )
+        if not _same_path_identity(
+            state.document["settings_path"], str(settings_path)
+        ):
+            raise ClaudeCodeIntegrationError("integration state names another settings path")
         matches_applied = _same_member(*current, True, applied)
         matches_previous = _same_member(*current, *previous)
         if not (matches_applied or matches_previous):
@@ -1048,6 +1113,31 @@ def _remove_git_bash_integration(
                 detail="integration mutation was not explicitly authorized",
             )
         backups: list[Path] = []
+        if phase is IntegrationPhase.PREPARED and matches_applied:
+            unclaimed = _record(
+                IntegrationPhase.UNCLAIMED,
+                settings_path,
+                applied,
+                settings.exists,
+                "env" in settings.document,
+                *current,
+            )
+            backup = _replace_document(
+                state_path, state, unclaimed, _parse_state, cancellation
+            )
+            if backup is not None:
+                backups.append(backup)
+            return IntegrationResult(
+                IntegrationOutcome.NO_CHANGES,
+                settings_path,
+                state_path,
+                IntegrationPhase.UNCLAIMED,
+                tuple(backups),
+                detail=(
+                    "a matching setting appeared after preparation; its origin is "
+                    "uncertain and Agent Tools does not remove it"
+                ),
+            )
         removing = dict(state.document, phase=IntegrationPhase.REMOVING.value)
         if phase is not IntegrationPhase.REMOVING:
             backup = _replace_document(
@@ -1058,7 +1148,10 @@ def _remove_git_bash_integration(
             state = _snapshot(state_path, _parse_state)
         if matches_applied:
             restored_settings = _with_member(
-                settings.document, previous_present, previous_value
+                settings.document,
+                previous_present,
+                previous_value,
+                preserve_empty_environment=environment_existed,
             )
             backup = (
                 _remove_document(

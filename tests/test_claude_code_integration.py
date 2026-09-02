@@ -121,6 +121,19 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
                 integration._parse_state(state.read_bytes())["phase"], "removed"
             )
 
+    def test_remove_preserves_preexisting_empty_environment_object(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings, state = self.paths(directory)
+            settings.parent.mkdir()
+            settings.write_text('{"env": {}}\n', encoding="utf-8")
+
+            self.apply(settings, state, allow_config_mutation=True)
+            self.remove(settings, state, allow_config_mutation=True)
+
+            self.assertEqual(
+                integration._parse_settings(settings.read_bytes()), {"env": {}}
+            )
+
     def test_apply_and_remove_are_safe_to_repeat(self) -> None:
         with TemporaryDirectory() as directory:
             settings, state = self.paths(directory)
@@ -195,6 +208,18 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
             self.assertEqual(
                 integration._parse_state(state.read_bytes())["phase"], "removed"
             )
+
+    def test_removed_history_allows_settings_path_relocation(self) -> None:
+        with TemporaryDirectory() as directory:
+            first, state = self.paths(directory)
+            second = Path(directory) / "relocated" / "settings.json"
+            self.apply(first, state, allow_config_mutation=True)
+            self.remove(first, state, allow_config_mutation=True)
+
+            applied = self.apply(second, state, allow_config_mutation=True)
+            self.assertIs(applied.phase, integration.IntegrationPhase.ACTIVE)
+            self.remove(second, state, allow_config_mutation=True)
+            self.assertFalse(second.exists())
 
     def test_preexisting_matching_value_is_not_claimed(self) -> None:
         with TemporaryDirectory() as directory:
@@ -307,6 +332,7 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
             "phase": "active",
             "settings_path": r"C:\Users\person\.claude\settings.json",
             "settings_existed": False,
+            "environment_existed": False,
             "applied_value": GIT_BASH,
             "previous": {"present": True, "value": r"D:\Old\bash.exe"},
         }
@@ -481,6 +507,48 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
             self.assertFalse(settings.exists())
             self.assertEqual(
                 integration._parse_state(state.read_bytes())["phase"], "prepared"
+            )
+
+    def test_matching_file_created_after_preparation_remains_unclaimed(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings, state = self.paths(directory)
+            actual_replace = integration._replace_document
+            calls = 0
+
+            def request_after_prepared(*args, **kwargs):
+                nonlocal calls
+                calls += 1
+                result = actual_replace(*args, **kwargs)
+                if calls == 1:
+                    args[-1].request()
+                return result
+
+            with (
+                patch.object(
+                    integration,
+                    "_replace_document",
+                    side_effect=request_after_prepared,
+                ),
+                self.assertRaises(KeyboardInterrupt),
+            ):
+                self.apply(settings, state, allow_config_mutation=True)
+
+            settings.parent.mkdir(exist_ok=True)
+            settings.write_text(
+                json.dumps({"env": {integration.SETTING_NAME: GIT_BASH}}),
+                encoding="utf-8",
+            )
+            reconciled = self.apply(settings, state, allow_config_mutation=True)
+            self.assertIs(reconciled.phase, integration.IntegrationPhase.UNCLAIMED)
+            self.assertIn("does not claim", reconciled.detail)
+
+            removed = self.remove(settings, state, allow_config_mutation=True)
+            self.assertIs(removed.outcome, integration.IntegrationOutcome.NO_CHANGES)
+            self.assertEqual(
+                integration._parse_settings(settings.read_bytes())["env"][
+                    integration.SETTING_NAME
+                ],
+                GIT_BASH,
             )
 
     def test_interrupted_remove_can_finalize_without_repeating_setting_change(self) -> None:
