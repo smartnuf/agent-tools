@@ -80,6 +80,32 @@ jobs:
           name: release-dist
           path: ${{ runner.temp }}/release-dist
 
+      - name: Download and verify previous supported release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous-release"
+          gh release download v0.1.1 \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$RUNNER_TEMP/previous-release" \
+            --pattern '*.whl' \
+            --pattern '*.tar.gz' \
+            --pattern SHA256SUMS
+          python scripts/release.py verify-checksums "$RUNNER_TEMP/previous-release/SHA256SUMS"
+
+      - name: Exercise upgrade, pin, rollback, and removal lifecycle
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          python tests/check_release_lifecycle.py \
+            --previous-wheel "$RUNNER_TEMP"/previous-release/*.whl \
+            --previous-version 0.1.1 \
+            --current-wheel "$RUNNER_TEMP"/release-dist/*.whl \
+            --current-version 0.1.2 \
+            --work-directory "$RUNNER_TEMP/release-lifecycle" \
+            --python 3.13
+
       - name: Install and test shared release wheel (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
