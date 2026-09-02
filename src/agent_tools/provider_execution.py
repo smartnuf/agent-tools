@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import codecs
+from decimal import Decimal, InvalidOperation
+import math
 import ntpath
 import os
 import posixpath
+import re
 import select
 import signal
 import shutil
@@ -48,6 +51,10 @@ from .python_selection import NativeStatus, normalize_architecture
 
 
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 300
+MAX_COMMAND_TIMEOUT_SECONDS = 999_999_999
+MAX_COMMAND_TIMEOUT_FRACTION_DIGITS = 6
+MIN_PROCESS_RETURNCODE = -(2**31)
+MAX_PROCESS_RETURNCODE = (2**32) - 1
 MAX_CAPTURED_OUTPUT_CHARS = 1024 * 1024
 OUTPUT_TRUNCATION_MARKER = "[earlier output truncated]\n"
 ELEVATED_TERM_TO_KILL_GRACE_SECONDS = 5
@@ -56,6 +63,10 @@ OUTPUT_PIPE_CLOSURE_GUARD_SECONDS = 1
 POSIX_SIGKILL_RETURNCODE = -9
 _ENVIRONMENT_LOCK = threading.RLock()
 _EXECUTION_LOCK = threading.RLock()
+_TIMEOUT_TOKEN = re.compile(
+    rf"(?:0\.\d{{1,{MAX_COMMAND_TIMEOUT_FRACTION_DIGITS}}}|"
+    rf"[1-9]\d{{0,8}}(?:\.\d{{1,{MAX_COMMAND_TIMEOUT_FRACTION_DIGITS}}})?)s"
+)
 
 
 class ExecutionContractError(RuntimeError):
@@ -290,7 +301,8 @@ class PlanExecutionReport:
     recovery_guidance: tuple[str, ...] = ()
 
 
-Runner = Callable[[tuple[str, ...], int], subprocess.CompletedProcess[str]]
+TimeoutSeconds = int | float
+Runner = Callable[[tuple[str, ...], TimeoutSeconds], subprocess.CompletedProcess[str]]
 Detector = Callable[[CapabilitySpec, MachineState], CapabilityState]
 ContextReader = Callable[[], MachineState]
 ManagerVerifier = Callable[[PackageManagerState, MachineState], bool]
@@ -353,7 +365,7 @@ def _started_process_result(
 
 def _run(
     argv: tuple[str, ...],
-    timeout: int,
+    timeout: TimeoutSeconds,
     *,
     privileged_supervision: bool = False,
     _cancellation: _CancellationContext | None = None,
@@ -486,7 +498,7 @@ def _best_effort_started_process_cleanup(
 def _supervise_started_process(
     process: subprocess.Popen[str],
     argv: tuple[str, ...],
-    timeout: int,
+    timeout: TimeoutSeconds,
     privileged_supervision: bool,
     stdout_tail: _BoundedOutputTail,
     stderr_tail: _BoundedOutputTail,
@@ -1077,16 +1089,65 @@ def _elevated_argv(
     *,
     elevation: str,
     supervisor: str,
-    timeout_seconds: int,
+    timeout_seconds: TimeoutSeconds,
 ) -> tuple[str, ...]:
     supervised = (
         supervisor,
         "--signal=TERM",
         f"--kill-after={ELEVATED_TERM_TO_KILL_GRACE_SECONDS}s",
-        f"{timeout_seconds}s",
+        _format_timeout_seconds(timeout_seconds),
         *reviewed_argv,
     )
     return (elevation, "-n", "--", *supervised) if elevation else supervised
+
+
+def _validate_timeout_seconds(value: object) -> TimeoutSeconds:
+    """Return a supported timeout without accepting bool or non-finite values."""
+
+    if type(value) not in {int, float}:
+        raise ValueError("timeout_seconds must be an exact integer or float")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("timeout_seconds must be finite")
+    decimal = Decimal(str(value))
+    if decimal <= 0 or decimal > MAX_COMMAND_TIMEOUT_SECONDS:
+        raise ValueError(
+            f"timeout_seconds must be positive and at most {MAX_COMMAND_TIMEOUT_SECONDS}"
+        )
+    if decimal.as_tuple().exponent < -MAX_COMMAND_TIMEOUT_FRACTION_DIGITS:
+        raise ValueError(
+            "timeout_seconds supports at most "
+            f"{MAX_COMMAND_TIMEOUT_FRACTION_DIGITS} fractional digits"
+        )
+    return value
+
+
+def _format_timeout_seconds(value: TimeoutSeconds) -> str:
+    """Serialize one validated timeout in the canonical GNU duration grammar."""
+
+    value = _validate_timeout_seconds(value)
+    decimal = Decimal(str(value))
+    rendered = format(decimal, "f")
+    if "." in rendered:
+        rendered = rendered.rstrip("0").rstrip(".")
+    return f"{rendered}s"
+
+
+def _is_canonical_timeout_token(value: object) -> bool:
+    """Recognize exactly the bounded duration language emitted by the writer."""
+
+    if not isinstance(value, str) or _TIMEOUT_TOKEN.fullmatch(value) is None:
+        return False
+    numeric = value[:-1]
+    try:
+        decimal = Decimal(numeric)
+    except InvalidOperation:
+        return False
+    if decimal <= 0 or decimal > MAX_COMMAND_TIMEOUT_SECONDS:
+        return False
+    rendered = format(decimal, "f")
+    if "." in rendered:
+        rendered = rendered.rstrip("0").rstrip(".")
+    return value == f"{rendered}s"
 
 
 def _windows_persisted_path() -> str:
@@ -1407,6 +1468,48 @@ def _command_report(
     )
 
 
+def _runner_contract_failure(
+    argv: tuple[str, ...], result: object
+) -> tuple[CommandReport, str] | None:
+    """Convert malformed injected runner output into uncertain structured evidence."""
+
+    if not isinstance(result, subprocess.CompletedProcess):
+        return (
+            CommandReport(argv, None, "", ""),
+            "runner returned an object that is not subprocess.CompletedProcess",
+        )
+    invalid_fields: list[str] = []
+    if not _is_valid_returncode(result.returncode):
+        invalid_fields.append("returncode")
+    if result.stdout is not None and not isinstance(result.stdout, str):
+        invalid_fields.append("stdout")
+    if result.stderr is not None and not isinstance(result.stderr, str):
+        invalid_fields.append("stderr")
+    if not invalid_fields:
+        return None
+    stdout = result.stdout if isinstance(result.stdout, str) else ""
+    stderr = result.stderr if isinstance(result.stderr, str) else ""
+    return (
+        CommandReport(
+            argv,
+            None,
+            _bounded_command_output(stdout),
+            _bounded_command_output(stderr),
+        ),
+        "runner returned malformed completed-process evidence: "
+        + ", ".join(invalid_fields),
+    )
+
+
+def _is_valid_returncode(value: object) -> bool:
+    """Recognize the bounded cross-platform subprocess return-code domain."""
+
+    return (
+        type(value) is int
+        and MIN_PROCESS_RETURNCODE <= value <= MAX_PROCESS_RETURNCODE
+    )
+
+
 def _bounded_command_output(value: str) -> str:
     if len(value) <= MAX_CAPTURED_OUTPUT_CHARS:
         return value
@@ -1559,7 +1662,7 @@ def _execute_provider_plan_unmanaged(
     plan: ProviderPlan,
     *,
     allow_provider_mutation: bool = False,
-    timeout_seconds: int = DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    timeout_seconds: TimeoutSeconds = DEFAULT_COMMAND_TIMEOUT_SECONDS,
     runner: Runner = _run,
     detector: Detector = _detect,
     current_context: ContextReader = current_machine,
@@ -1574,8 +1677,7 @@ def _execute_provider_plan_unmanaged(
     """Internal executor primitive; callers must use the managed-state boundary."""
 
     cancellation = _cancellation or _CancellationContext()
-    if timeout_seconds <= 0:
-        raise ValueError("timeout_seconds must be positive")
+    timeout_seconds = _validate_timeout_seconds(timeout_seconds)
     with _provider_execution_transaction():
         try:
             return _execute_provider_plan(
@@ -1601,7 +1703,7 @@ def _execute_provider_plan(
     plan: ProviderPlan,
     *,
     allow_provider_mutation: bool,
-    timeout_seconds: int,
+    timeout_seconds: TimeoutSeconds,
     runner: Runner,
     detector: Detector,
     current_context: ContextReader,
@@ -2044,6 +2146,25 @@ def _execute_provider_plan(
                     context,
                     reports,
                     mutation_may_have_started=earlier_command_completed,
+                )
+            runner_failure = _runner_contract_failure(argv, result)
+            if runner_failure is not None:
+                command_report, detail = runner_failure
+                commands.append(command_report)
+                reports.append(
+                    _action_report(
+                        action,
+                        ActionOutcome.SUPERVISOR_FAILED,
+                        tuple(commands),
+                        detail=detail,
+                    )
+                )
+                return _failed_report(
+                    plan,
+                    context,
+                    reports,
+                    mutation_may_have_started=True,
+                    uncertain_external_state=True,
                 )
             command_report = _command_report(argv, result)
             commands.append(command_report)
