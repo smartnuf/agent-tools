@@ -11,6 +11,7 @@ import shutil
 import subprocess
 from email.parser import BytesParser
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import quote
 from zipfile import ZipFile
 
@@ -151,11 +152,6 @@ def exercise_lifecycle(
     if previous_version == current_version:
         raise AssertionError("previous and current release versions must differ")
 
-    work_directory.mkdir(parents=True, exist_ok=True)
-    if any(work_directory.iterdir()):
-        raise AssertionError(
-            f"lifecycle work directory must be empty: {work_directory}"
-        )
     current_index = work_directory / "current-index"
     write_simple_index(current_index, (current_wheel,))
 
@@ -349,16 +345,19 @@ def main() -> int:
         ),
     )
     args = parser.parse_args()
-    exercise_lifecycle(
-        uv=args.uv,
-        python=args.python,
-        previous_wheel=args.previous_wheel.resolve(),
-        previous_version=args.previous_version,
-        current_wheel=args.current_wheel.resolve(),
-        current_version=args.current_version,
-        work_directory=args.work_directory.resolve(),
-        allow_home_config_mutation=args.allow_home_config_mutation,
-    )
+    work_root = args.work_directory.resolve()
+    work_root.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix="run-", dir=work_root) as temporary:
+        exercise_lifecycle(
+            uv=args.uv,
+            python=args.python,
+            previous_wheel=args.previous_wheel.resolve(),
+            previous_version=args.previous_version,
+            current_wheel=args.current_wheel.resolve(),
+            current_version=args.current_version,
+            work_directory=Path(temporary),
+            allow_home_config_mutation=args.allow_home_config_mutation,
+        )
     print(
         "release lifecycle passed: "
         f"{args.previous_version} -> {args.current_version} -> "
