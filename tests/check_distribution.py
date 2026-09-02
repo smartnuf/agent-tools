@@ -83,6 +83,7 @@ def check_wheel(wheel: Path) -> str:
     assert not unexpected, f"unexpected wheel content: {unexpected}"
     assert "agent_tools/managed_state.py" in names
     assert "agent_tools/desired_state.py" in names
+    assert "agent_tools/claude_code_integration.py" in names
     assert "agent_tools/native_setup.py" in names
     return version
 
@@ -112,6 +113,7 @@ def check_sdist(sdist: Path) -> str:
             f"{expected_root}/src/agent_tools/__main__.py",
             f"{expected_root}/src/agent_tools/capabilities.py",
             f"{expected_root}/src/agent_tools/cli.py",
+            f"{expected_root}/src/agent_tools/claude_code_integration.py",
             f"{expected_root}/src/agent_tools/managed_state.py",
             f"{expected_root}/src/agent_tools/desired_state.py",
             f"{expected_root}/src/agent_tools/native_setup.py",

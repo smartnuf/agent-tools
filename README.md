@@ -88,6 +88,9 @@ agent-tools tools status
 agent-tools tools status bash
 agent-tools tools enable bash --allow-config-mutation
 agent-tools tools disable bash --allow-config-mutation
+agent-tools integrations claude-code status
+agent-tools integrations claude-code apply --allow-config-mutation
+agent-tools integrations claude-code remove --allow-config-mutation
 ```
 
 `tools status bash` reports desired state separately and verifies the detected
@@ -99,8 +102,17 @@ Windows-hosted Bash. `tools enable` and `tools disable` change only the
 versioned per-user desired-capability document, require the dedicated mutation
 flag for a real change, and back up an existing document before replacement.
 Disable never uninstalls a provider. The status and list commands do not
-install software, alter `PATH`, or configure an agent. Version 0.1.2 is the
-first packaged release containing the read-only commands; the desired-state
+install software or alter `PATH`.
+
+On native Windows, the Claude Code integration commands can explicitly bind
+Claude Code's documented user setting to the same selected, verified Git Bash
+path. Apply and remove require the dedicated configuration-mutation flag,
+preserve unrelated Claude settings, and restore the exact prior setting; they
+never install or uninstall Git for Windows. A matching setting not created by
+Agent Tools remains unowned and is not removed. See
+[Decision 0006](docs/decisions/0006-claude-code-git-bash-integration.md) for
+the recovery and compatibility contract. Version 0.1.2 is the first packaged
+release containing the read-only commands; desired-state and integration
 commands are currently available from `main` pending the next release.
 
 ## Get the source
@@ -173,4 +185,4 @@ For routine operation:
 
 The maintained roadmap is [`docs/plan/00-index.md`](docs/plan/00-index.md). It records the current milestone, acceptance gates, estimates, evidence, remaining effort, and recommended next work. [`docs/plan/README.md`](docs/plan/README.md) defines how humans and agents plan tasks and report progress consistently.
 
-The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md) and the first stable PyPI publication in M2 are complete. M3 now includes tested native/system-first selection, clone bootstrap delegation through the explicitly authorized managed provider lifecycle, and a reversible desired-capability configuration boundary. Agent integration and release-lifecycle evidence remain. See the maintained roadmap for the ordered work. The packaged release and clone-based shared development environment remain supported entry points.
+The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md) and the first stable PyPI publication in M2 are complete. M3 now includes tested native/system-first selection, clone bootstrap delegation through the explicitly authorized managed provider lifecycle, reversible desired-capability configuration, and the native-Windows Claude Code Git Bash adapter. Release-lifecycle evidence remains. See the maintained roadmap for the ordered work. The packaged release and clone-based shared development environment remain supported entry points.

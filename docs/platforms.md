@@ -55,6 +55,30 @@ Unreadable, malformed, unknown-version, symlinked, or non-regular state fails
 closed and is preserved. See [Decision 0005](decisions/0005-desired-capability-state.md)
 for the schema and failure contract.
 
+## Claude Code Git Bash integration
+
+On a native Windows host, Claude Code documents
+`env.CLAUDE_CODE_GIT_BASH_PATH` in its user `settings.json` for selecting Git
+Bash when automatic discovery is insufficient. Agent Tools can manage that one
+member using the same selected, verified `git-bash` capability evidence:
+
+```powershell
+agent-tools integrations claude-code status
+agent-tools integrations claude-code apply --allow-config-mutation
+agent-tools integrations claude-code remove --allow-config-mutation
+```
+
+Claude settings are read from `%USERPROFILE%\.claude\settings.json`, or
+`settings.json` below an absolute `CLAUDE_CONFIG_DIR`. The independent Agent
+Tools phase record is
+`%LOCALAPPDATA%\agent-tools\integrations\claude-code.json`. Apply and remove
+preserve unrelated settings, back up existing files, validate replacements,
+and reconcile interrupted cross-file phases without blindly replaying a
+change. A matching unrecorded setting is not claimed. Linux, macOS, WSL, an
+unverified/non-Git-Bash provider, and provider installation or removal remain
+outside this adapter. See
+[Decision 0006](decisions/0006-claude-code-git-bash-integration.md).
+
 ## Read-only capability discovery
 
 The reviewed M1.5 package build supports `agent-tools tools list` and

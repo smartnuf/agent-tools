@@ -2,7 +2,7 @@
 
 - Last reconciled: 2026-09-02
 - Current milestone: M3 — tested update and capability lifecycle
-- Current state: M2 complete; M3 has completed explicitly authorized provider execution, complete change reporting, mutation-provenance persistence, clone-bootstrap delegation, and safe desired-capability configuration; Claude Code Git Bash integration evaluation is next
+- Current state: M2 complete; M3 has completed provider execution and reporting, provenance persistence, clone-bootstrap delegation, desired-capability configuration, and the Claude Code Git Bash integration; release-lifecycle evidence is next
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
 - Target lifecycle: tested upgrade, pin, rollback, safe provider mutation, and removal
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
@@ -15,11 +15,11 @@
 | M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
 | M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
-| M3 | Tested update and capability lifecycle | in-progress | 4/9 | 6.5–11 days | 1–2 days |
+| M3 | Tested update and capability lifecycle | in-progress | 5/9 | 6.5–11 days | 0.5–1 day |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **1–2 person-days remaining**.
+Estimated implementation effort through M3: **0.5–1 person-day remaining**.
 The selector and pre-seeded-workstation evidence slices complete the first
 joint M3 gate; read-only provider planning supplies the prerequisite for the
 completed mutation lifecycle gate. Native discovery channels and the
@@ -81,6 +81,13 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
   validation/restoration, unrelated-entry preservation, exact provider
   preferences, status reporting, and clone-bootstrap consumption without any
   provider-removal path.
+- [Issue #27](https://github.com/smartnuf/agent-tools/issues/27) adds the
+  native-Windows Claude Code adapter governed by
+  [Decision 0006](../decisions/0006-claude-code-git-bash-integration.md): it
+  consumes selected verified Git Bash evidence, mutates only the documented
+  setting behind explicit authority, preserves unrelated configuration,
+  restores prior state, and records independently reconcilable lifecycle
+  phases without provider installation or removal.
 
 M1 is complete and its factual record is frozen except for corrections. M1.5
 completed on 2026-08-29; M2 completed on 2026-08-30 with the first stable PyPI
@@ -90,11 +97,10 @@ excluded.
 
 ## Recommended next work
 
-Evaluate the documented native-Windows Claude Code Git Bash integration in
-[issue #27](https://github.com/smartnuf/agent-tools/issues/27) (M,
-**0.5–1 day**). Re-verify current primary Anthropic documentation and either
-ship an explicitly authorized, reversible adapter that consumes selected
-Windows-hosted Git Bash state or record why no adapter should ship.
+Complete the automated earlier-release upgrade, pin, rollback, and removal
+evidence in [issue #55](https://github.com/smartnuf/agent-tools/issues/55) (M,
+**0.5–1 day**). Keep published-artifact lifecycle evidence separate from native
+provider removal, which remains unsupported.
 [Issue #26](https://github.com/smartnuf/agent-tools/issues/26) records the
 ordered M3 dependency chain beginning `#50 → #77 → #51`.
 
