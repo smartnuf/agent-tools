@@ -167,6 +167,19 @@ class CliTests(unittest.TestCase):
             )
         self.assertIn("recovery backup: recovery.backup", errors.getvalue())
 
+        with (
+            patch.dict(
+                "os.environ",
+                {"USERPROFILE": r"C:\Users\person"},
+                clear=True,
+            ),
+            redirect_stderr(StringIO()) as errors,
+        ):
+            self.assertEqual(
+                cli.main(["integrations", "claude-code", "status"]), 1
+            )
+        self.assertIn("integration state path is unavailable", errors.getvalue())
+
     def test_tools_status_reports_requested_provenance_without_ownership(self) -> None:
         record = {
             "capability_id": "bash",

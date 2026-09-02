@@ -29,7 +29,7 @@ from .cooperative_cancellation import (
     _ForceAbort,
     _SigintBroker,
 )
-from .desired_state import desired_state_path
+from .desired_state import DesiredStateError, desired_state_path
 
 
 SCHEMA_VERSION = 1
@@ -126,15 +126,17 @@ def integration_state_path(
 ) -> Path:
     """Resolve Agent Tools' separate Claude Code integration ledger."""
 
-    return (
-        desired_state_path(
+    try:
+        configuration = desired_state_path(
             platform_name="Windows",
             environment=environment,
             home=home,
-        ).parent
-        / "integrations"
-        / "claude-code.json"
-    )
+        )
+    except DesiredStateError as error:
+        raise ClaudeCodeIntegrationError(
+            f"integration state path is unavailable: {error}"
+        ) from error
+    return configuration.parent / "integrations" / "claude-code.json"
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

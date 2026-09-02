@@ -71,6 +71,14 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
             / "claude-code.json",
         )
 
+    def test_integration_state_path_errors_use_the_integration_boundary(self) -> None:
+        for environment in ({}, {"LOCALAPPDATA": "relative"}):
+            with self.subTest(environment=environment), self.assertRaisesRegex(
+                integration.ClaudeCodeIntegrationError,
+                "integration state path is unavailable",
+            ):
+                integration.integration_state_path(environment=environment)
+
     def test_changed_apply_requires_authority_without_writing(self) -> None:
         with TemporaryDirectory() as directory:
             settings, state = self.paths(directory)
