@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-31
 - Decision owners: project maintainer (human-authorized for issue #52)
-- Related: ADR 0002, issues #26 and #52
+- Related: ADR 0002, ADR 0004, issues #26 and #52
 
 ## Context
 
@@ -70,42 +70,28 @@ uncertain, claim ownership, automatically retry mutation, or attempt uninstall
 or rollback. Any later mutation requires fresh rediscovery and a newly generated
 plan.
 
-The first `KeyboardInterrupt` observed by the supported managed mutation
-boundary is a request for controlled cancellation. That boundary preserves the
-strongest authoritatively published execution evidence and monotonic
-persistence outcome, then attempts to publish a structured managed result. A
-transaction fact becomes authoritative to this boundary only when it has been
-successfully published to the managed transaction snapshot. If cancellation
-races publication of a stronger fact, the strongest predecessor fact already
-in that snapshot remains truthful and may be conservatively terminalized.
+ADR 0004 governs managed cancellation. The first SIGINT is captured at the
+outer supported boundary as a cooperative request and is accepted only at an
+explicit safe checkpoint; it is not injected as `KeyboardInterrupt` into
+transaction bytecode. One operation-scoped controller remains authoritative
+from provider execution through managed finalization. Provider execution and
+persistence publish truthful transaction facts before the outer boundary
+materializes and raises the controlled `ManagedExecutionInterrupted` result.
 
-Consequently, exact completed executor evidence is not guaranteed when
-cancellation prevents its publication; mutation-uncertain evidence must not
-claim that no provider command started and provider mutation is never rerun.
-Similarly, `succeeded` means durable completion was published as the terminal
-transaction fact. When replacement has occurred and durability work may have
-physically completed but cancellation prevents that publication, the last
-authoritative post-replacement fact may remain `unknown`. `Unknown` does not
-assert physical non-durability. Neither uncertainty authorizes automatic
-mutation or persistence retry, ownership, rollback, uninstall, or removal. Any
-later mutation requires fresh machine-state rediscovery and a newly generated
-plan.
+A transaction fact becomes authoritative when it has been successfully
+published to the managed transaction snapshot. `Succeeded` means durable
+completion was published as the terminal persistence fact. `Unknown` means the
+boundary cannot prove durability from its published facts; it does not assert
+physical non-durability. Cancellation never authorizes automatic mutation or
+persistence retry, ownership, rollback, uninstall, or removal. Any later
+mutation requires fresh machine-state rediscovery and a newly generated plan.
 
-Any later `KeyboardInterrupt` while that controlled cancellation, recovery, or
-result publication is active is an explicit force-abort. It propagates
-immediately; structured result construction or attachment is not guaranteed,
-and Agent Tools performs no recovery-of-recovery, further cleanup recovery,
-provenance preparation, persistence retry, or finalization retry. Already
-completed host mutation and already durable provenance remain as they are. In
-particular, absence of a durable provenance record after force-abort is not
-evidence that no host mutation occurred. A later Agent Tools mutation requires
-fresh machine-state rediscovery and a newly generated plan.
-
-One supported managed mutation operation therefore uses one operation-scoped
-internal cancellation context from provider execution through managed
-finalization. That context is the authoritative cancellation phase; individual
-layers do not reconstruct first cancellation versus force-abort from local
-exception type, stack position, or caller-supplied flags.
+A second SIGINT after the first request is explicit force-abort. It propagates
+immediately; structured result construction, attachment, cleanup, environment
+restoration, provenance preparation, persistence completion, and finalization
+are not guaranteed. Already completed host mutation and already durable
+provenance remain as they are. Absence of a durable provenance record after
+force-abort is not evidence that no host mutation occurred.
 
 Process-local serialization protects one read–execute–write transaction from
 lost updates within Agent Tools. Portable cross-process locking is outside
@@ -124,8 +110,8 @@ interleave with another supported mutation in the same process.
   Agent Tools mutation requests without treating either as ownership.
 - A persistence error after successful mutation is a structured partial
   success with both outcomes retained.
-- One cancellation request receives controlled structured handling; another
-  interrupt during that handling is an immediate force-abort with no managed-
+- One SIGINT request receives cooperative controlled handling at ADR 0004's
+  safe checkpoints; another SIGINT is immediate force-abort with no managed-
   result guarantee.
 - Schema evolution requires an explicit, tested migration for each supported
   older version.
