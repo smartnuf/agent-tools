@@ -28,6 +28,8 @@ from .provider_execution import (
     _ForceAbort,
     _SigintBroker,
     _execute_provider_plan_unmanaged,
+    _is_canonical_timeout_token,
+    _is_valid_returncode,
     _preflight_interrupted_report,
     _provider_execution_transaction,
 )
@@ -42,6 +44,7 @@ from .python_selection import normalize_architecture
 
 
 SCHEMA_VERSION = 1
+MAX_MANAGED_STATE_JSON_DEPTH = 64
 _MANAGED_STATE_LOCK = threading.RLock()
 _PERSISTED_ATTEMPT_OUTCOMES = {
     ActionOutcome.SUCCEEDED.value,
@@ -287,8 +290,9 @@ def load_document(path: Path) -> dict[str, Any]:
         raise ManagedStateError(f"managed state is unreadable or corrupt: {error}") from error
     try:
         value = json.loads(text, object_pairs_hook=_unique_json_object)
-    except json.JSONDecodeError as error:
+    except (ValueError, OverflowError, RecursionError) as error:
         raise ManagedStateError(f"managed state is unreadable or corrupt: {error}") from error
+    _validate_json_depth(value)
     if not isinstance(value, dict):
         raise ManagedStateError("managed state root must be a JSON object")
     version = value.get("schema_version")
@@ -325,10 +329,11 @@ def load_document(path: Path) -> dict[str, Any]:
         if record_id in record_ids:
             raise ManagedStateError(f"managed-state record {index} has a duplicate id")
         record_ids.add(record_id)
+        timestamps: dict[str, datetime] = {}
         for timestamp_name in ("requested_at", "completed_at", "recorded_at"):
             try:
                 parsed = datetime.fromisoformat(record[timestamp_name].replace("Z", "+00:00"))
-            except ValueError as error:
+            except (ValueError, OverflowError) as error:
                 raise ManagedStateError(
                     f"managed-state record {index} has an invalid {timestamp_name}"
                 ) from error
@@ -336,6 +341,15 @@ def load_document(path: Path) -> dict[str, Any]:
                 raise ManagedStateError(
                     f"managed-state record {index} has a timezone-free {timestamp_name}"
                 )
+            timestamps[timestamp_name] = parsed
+        if not (
+            timestamps["requested_at"]
+            <= timestamps["completed_at"]
+            <= timestamps["recorded_at"]
+        ):
+            raise ManagedStateError(
+                f"managed-state record {index} has impossible timestamp ordering"
+            )
         if record["ownership"] is not False:
             raise ManagedStateError(f"managed-state record {index} makes an ownership claim")
         provider = record["provider"]
@@ -535,7 +549,7 @@ def load_document(path: Path) -> dict[str, Any]:
                 and "returncode" in evidence
                 and (
                     evidence.get("returncode") is None
-                    or type(evidence["returncode"]) is int
+                    or _is_valid_returncode(evidence["returncode"])
                 )
                 and isinstance(evidence.get("stdout"), str)
                 and isinstance(evidence.get("stderr"), str)
@@ -631,7 +645,12 @@ def load_document(path: Path) -> dict[str, Any]:
             )
         ) or (
             outcome == ActionOutcome.COMMAND_START_FAILED.value
-            and (terminal is None or terminal["timed_out"])
+            and (
+                terminal is None
+                or terminal["timed_out"]
+                or terminal["returncode"]
+                not in ({None, 126, 127} if supervised_linux else {None})
+            )
         ) or (
             outcome == ActionOutcome.FORCED_KILL.value
             and (
@@ -707,6 +726,27 @@ def _is_absolute_for_platform(value: str, platform_name: object) -> bool:
     return posixpath.isabs(value)
 
 
+def _validate_json_depth(value: object) -> None:
+    """Bound every parsed JSON container; the root container has depth one."""
+
+    if not isinstance(value, (dict, list)):
+        return
+    pending: list[tuple[dict[str, Any] | list[Any], int]] = [(value, 1)]
+    while pending:
+        container, depth = pending.pop()
+        if depth > MAX_MANAGED_STATE_JSON_DEPTH:
+            raise ManagedStateError(
+                "managed state is unreadable or corrupt: JSON container depth "
+                f"exceeds {MAX_MANAGED_STATE_JSON_DEPTH}"
+            )
+        children = container.values() if isinstance(container, dict) else container
+        pending.extend(
+            (child, depth + 1)
+            for child in children
+            if isinstance(child, (dict, list))
+        )
+
+
 def _command_output_is_bounded(value: str) -> bool:
     return len(value) <= MAX_CAPTURED_OUTPUT_CHARS or (
         value.startswith(OUTPUT_TRUNCATION_MARKER)
@@ -741,9 +781,7 @@ def _matches_recorded_command(
         and supervisor[1] == "--signal=TERM"
         and supervisor[2]
         == f"--kill-after={ELEVATED_TERM_TO_KILL_GRACE_SECONDS}s"
-        and supervisor[3].endswith("s")
-        and supervisor[3][:-1].isdigit()
-        and int(supervisor[3][:-1]) > 0
+        and _is_canonical_timeout_token(supervisor[3])
     )
 
 
@@ -781,6 +819,17 @@ def _atomic_write(
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
+        try:
+            load_document(temporary)
+        except ManagedStateError as error:
+            base_detail = "prepared managed-state document violates schema v1"
+            transaction.record_persistence(
+                PersistenceOutcome.FAILED,
+                _safe_exception_detail(base_detail, error),
+                terminal=True,
+            )
+            _best_effort_discard_temporary(temporary)
+            return
         transaction.record_persistence(
             PersistenceOutcome.UNKNOWN,
             "managed-state replacement or durability was not confirmed",
@@ -858,6 +907,15 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _timestamp_not_before(floor: str) -> str:
+    """Publish a UTC timestamp while preserving the writer's intra-record order."""
+
+    current = _timestamp()
+    current_instant = datetime.fromisoformat(current.replace("Z", "+00:00"))
+    floor_instant = datetime.fromisoformat(floor.replace("Z", "+00:00"))
+    return current if current_instant >= floor_instant else floor
+
+
 def _record(
     plan: ProviderPlan,
     report: PlanExecutionReport,
@@ -883,7 +941,7 @@ def _record(
         "id": str(uuid.uuid4()),
         "requested_at": requested_at,
         "completed_at": completed_at,
-        "recorded_at": _timestamp(),
+        "recorded_at": _timestamp_not_before(completed_at),
         "capability_id": action.capability_id,
         "provider": {"id": action.provider_id, "origin": provider.origin.value},
         "package_manager": {
@@ -1142,7 +1200,7 @@ def _prepare_update(
     report: PlanExecutionReport,
     requested_at: str,
 ) -> tuple[str, tuple[int, ...], dict[str, Any]]:
-    completed_at = _timestamp()
+    completed_at = _timestamp_not_before(requested_at)
     attempted_indexes = tuple(
         index
         for index, action in enumerate(report.actions)

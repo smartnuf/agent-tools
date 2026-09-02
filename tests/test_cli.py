@@ -1,3 +1,4 @@
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -71,6 +72,39 @@ class CliTests(unittest.TestCase):
             self.assertEqual(cli.tools_status("bash"), 0)
         self.assertIn("bash: available", output.getvalue())
         self.assertIn("managed provenance unavailable: corrupt state", errors.getvalue())
+
+    def test_tools_status_reports_explicit_json_depth_corruption_without_traceback(self) -> None:
+        nested: object = None
+        for _ in range(managed_state.MAX_MANAGED_STATE_JSON_DEPTH):
+            nested = [nested]
+        document = {
+            "schema_version": managed_state.SCHEMA_VERSION,
+            "records": [],
+            "ignored_extra": nested,
+        }
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with (
+                patch.object(cli, "managed_state_path", return_value=path),
+                patch.object(
+                    cli,
+                    "load_document",
+                    side_effect=managed_state.load_document,
+                ),
+                patch.object(
+                    capabilities.shutil, "which", return_value="/tools/bash"
+                ),
+                patch.object(
+                    capabilities, "read_executable_version", return_value="5.2"
+                ),
+                redirect_stdout(StringIO()) as output,
+                redirect_stderr(StringIO()) as errors,
+            ):
+                self.assertEqual(cli.tools_status("bash"), 0)
+        self.assertIn("bash: available", output.getvalue())
+        self.assertIn("JSON container depth", errors.getvalue())
+        self.assertNotIn("Traceback", errors.getvalue())
 
     def test_version_prefers_installed_distribution_metadata(self) -> None:
         with patch.object(cli.importlib.metadata, "version", return_value="2.3.4") as version:

@@ -377,6 +377,70 @@ class ProviderExecutionTests(unittest.TestCase):
             ("/tools/gs", "/tools/gswin64c", "/tools/gswin32c"),
         )
 
+    def test_fractional_timeout_uses_one_canonical_supervisor_grammar(self):
+        plan = self.plan()
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        available = self.state(capabilities.GHOSTSCRIPT, available=True)
+        runner = Mock(
+            side_effect=lambda argv, timeout: subprocess.CompletedProcess(
+                argv, 0, "installed", ""
+            )
+        )
+
+        report = self.execute(
+            plan,
+            detector=self.detector_sequence(absent, available),
+            runner=runner,
+            timeout_seconds=0.5,
+        )
+
+        argv, timeout = runner.call_args.args
+        self.assertEqual(argv[6], "0.5s")
+        self.assertEqual(timeout, 15.5)
+        self.assertEqual(report.outcome, provider_execution.PlanOutcome.SUCCEEDED)
+
+    def test_timeout_contract_rejects_noncanonical_or_unbounded_values(self):
+        for value in (
+            False,
+            None,
+            "1",
+            0,
+            -1,
+            float("nan"),
+            float("inf"),
+            0.0000001,
+            provider_execution.MAX_COMMAND_TIMEOUT_SECONDS + 1,
+        ):
+            with self.subTest(value=value):
+                runner = Mock()
+                with self.assertRaises(ValueError):
+                    self.execute(self.plan(), runner=runner, timeout_seconds=value)
+                runner.assert_not_called()
+
+    def test_malformed_runner_return_code_is_supervisor_uncertainty(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        for returncode in (False, None, 1.0, "0", 2**32):
+            with self.subTest(returncode=returncode):
+                runner = Mock(
+                    return_value=subprocess.CompletedProcess(
+                        (), returncode, "bounded-out", "bounded-err"
+                    )
+                )
+                report = self.execute(
+                    self.plan(), detector=Mock(return_value=absent), runner=runner
+                )
+                action = report.actions[0]
+                self.assertEqual(
+                    action.outcome,
+                    provider_execution.ActionOutcome.SUPERVISOR_FAILED,
+                )
+                self.assertEqual(action.commands[0].returncode, None)
+                self.assertIn("malformed", action.detail)
+                self.assertEqual(runner.call_count, 1)
+                self.assertTrue(
+                    any("do not retry" in item for item in report.recovery_guidance)
+                )
+
     def test_false_success_is_reported_as_partial_failure(self):
         plan = self.plan()
         absent = self.state(capabilities.GHOSTSCRIPT)
