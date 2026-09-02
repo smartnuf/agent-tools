@@ -128,6 +128,21 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
             )
             self.assertFalse(settings.exists())
 
+    def test_new_lifecycle_does_not_inherit_absent_file_ownership(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings, state = self.paths(directory)
+            self.apply(settings, state, allow_config_mutation=True)
+            self.remove(settings, state, allow_config_mutation=True)
+            self.assertFalse(settings.exists())
+
+            settings.parent.mkdir(exist_ok=True)
+            settings.write_text("{}\n", encoding="utf-8")
+            self.apply(settings, state, allow_config_mutation=True)
+            self.remove(settings, state, allow_config_mutation=True)
+
+            self.assertTrue(settings.exists())
+            self.assertEqual(integration._parse_settings(settings.read_bytes()), {})
+
     def test_preexisting_matching_value_is_not_claimed(self) -> None:
         with TemporaryDirectory() as directory:
             settings, state = self.paths(directory)
@@ -295,6 +310,37 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
             self.assertEqual(
                 integration._parse_state(state.read_bytes())["phase"], "prepared"
             )
+
+    def test_prepared_reconciliation_refreshes_unchanged_file_existence(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings, state = self.paths(directory)
+            actual_replace = integration._replace_document
+            calls = 0
+
+            def fail_activation(*args, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 3:
+                    raise integration.ClaudeCodeIntegrationError("state denied")
+                return actual_replace(*args, **kwargs)
+
+            with (
+                patch.object(
+                    integration,
+                    "_replace_document",
+                    side_effect=fail_activation,
+                ),
+                self.assertRaises(integration.ClaudeCodeIntegrationError),
+            ):
+                self.apply(settings, state, allow_config_mutation=True)
+            self.assertFalse(settings.exists())
+
+            settings.parent.mkdir(exist_ok=True)
+            settings.write_text("{}\n", encoding="utf-8")
+            self.apply(settings, state, allow_config_mutation=True)
+            self.remove(settings, state, allow_config_mutation=True)
+            self.assertTrue(settings.exists())
+            self.assertEqual(integration._parse_settings(settings.read_bytes()), {})
 
     def test_first_interrupt_during_activation_restores_settings(self) -> None:
         with TemporaryDirectory() as directory:

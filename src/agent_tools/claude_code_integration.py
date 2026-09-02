@@ -811,10 +811,19 @@ def _apply_git_bash_integration(
                     raise ClaudeCodeIntegrationError(
                         "Claude Code setting diverged from prepared integration state"
                     )
-            elif (current_present, current_value) != expected_previous:
-                raise ClaudeCodeIntegrationError(
-                    "Claude Code setting diverged from removed integration state"
-                )
+                if (current_present, current_value) == expected_previous:
+                    settings_existed = settings.exists
+                    previous_present, previous_value = (
+                        current_present,
+                        current_value,
+                    )
+            else:
+                if (current_present, current_value) != expected_previous:
+                    raise ClaudeCodeIntegrationError(
+                        "Claude Code setting diverged from removed integration state"
+                    )
+                settings_existed = settings.exists
+                previous_present, previous_value = current_present, current_value
         if not allow_config_mutation:
             return IntegrationResult(
                 IntegrationOutcome.REFUSED,
