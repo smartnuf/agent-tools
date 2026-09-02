@@ -151,6 +151,51 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
             self.assertTrue(settings.exists())
             self.assertEqual(integration._parse_settings(settings.read_bytes()), {})
 
+    def test_new_lifecycle_snapshots_user_change_after_removal(self) -> None:
+        user_value = r"D:\User\bin\bash.exe"
+        with TemporaryDirectory() as directory:
+            settings, state = self.paths(directory)
+            self.apply(settings, state, allow_config_mutation=True)
+            self.remove(settings, state, allow_config_mutation=True)
+
+            settings.parent.mkdir(exist_ok=True)
+            settings.write_text(
+                json.dumps(
+                    {
+                        "env": {
+                            "KEEP": "yes",
+                            integration.SETTING_NAME: user_value,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.apply(settings, state, allow_config_mutation=True)
+            self.remove(settings, state, allow_config_mutation=True)
+
+            restored = integration._parse_settings(settings.read_bytes())
+            self.assertEqual(restored["env"][integration.SETTING_NAME], user_value)
+            self.assertEqual(restored["env"]["KEEP"], "yes")
+
+    def test_matching_user_change_after_removal_is_not_claimed(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings, state = self.paths(directory)
+            self.apply(settings, state, allow_config_mutation=True)
+            self.remove(settings, state, allow_config_mutation=True)
+
+            settings.parent.mkdir(exist_ok=True)
+            settings.write_text(
+                json.dumps({"env": {integration.SETTING_NAME: GIT_BASH}}),
+                encoding="utf-8",
+            )
+            result = self.apply(settings, state, allow_config_mutation=True)
+
+            self.assertIs(result.outcome, integration.IntegrationOutcome.NO_CHANGES)
+            self.assertIn("not claimed", result.detail)
+            self.assertEqual(
+                integration._parse_state(state.read_bytes())["phase"], "removed"
+            )
+
     def test_preexisting_matching_value_is_not_claimed(self) -> None:
         with TemporaryDirectory() as directory:
             settings, state = self.paths(directory)

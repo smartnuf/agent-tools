@@ -870,11 +870,16 @@ def _apply_git_bash_integration(
                         current_value,
                     )
             else:
-                if not _same_member(
-                    current_present, current_value, *expected_previous
-                ):
-                    raise ClaudeCodeIntegrationError(
-                        "Claude Code setting diverged from removed integration state"
+                if _same_member(current_present, current_value, True, applied):
+                    return IntegrationResult(
+                        IntegrationOutcome.NO_CHANGES,
+                        settings_path,
+                        state_path,
+                        phase,
+                        detail=(
+                            "matching Claude Code setting exists after the completed "
+                            "lifecycle and is not claimed"
+                        ),
                     )
                 settings_existed = settings.exists
                 previous_present, previous_value = current_present, current_value
