@@ -949,7 +949,7 @@ def _apply_git_bash_integration(
             if backup is not None:
                 backups.append(backup)
             return IntegrationResult(
-                IntegrationOutcome.NO_CHANGES,
+                IntegrationOutcome.UPDATED,
                 settings_path,
                 state_path,
                 IntegrationPhase.UNCLAIMED,
@@ -1064,12 +1064,11 @@ def _remove_git_bash_integration(
 ) -> IntegrationResult:
     machine = machine or current_machine()
     _require_native_windows(machine)
-    settings_path = settings_path or claude_settings_path()
     state_path = state_path or integration_state_path()
     with _MUTATION_LOCK:
-        settings = _snapshot(settings_path, _parse_settings)
         state = _snapshot(state_path, _parse_state)
         if not state.exists:
+            settings_path = settings_path or claude_settings_path()
             return IntegrationResult(
                 IntegrationOutcome.NO_CHANGES,
                 settings_path,
@@ -1085,19 +1084,22 @@ def _remove_git_bash_integration(
             previous_present,
             previous_value,
         ) = _record_facts(state.document)
-        current = _current_member(settings.document)
-        previous = (previous_present, previous_value)
         if phase in {IntegrationPhase.REMOVED, IntegrationPhase.UNCLAIMED}:
+            settings_path = settings_path or Path(state.document["settings_path"])
             return IntegrationResult(
                 IntegrationOutcome.NO_CHANGES,
                 settings_path,
                 state_path,
                 phase,
             )
+        settings_path = settings_path or claude_settings_path()
         if not _same_path_identity(
             state.document["settings_path"], str(settings_path)
         ):
             raise ClaudeCodeIntegrationError("integration state names another settings path")
+        settings = _snapshot(settings_path, _parse_settings)
+        current = _current_member(settings.document)
+        previous = (previous_present, previous_value)
         matches_applied = _same_member(*current, True, applied)
         matches_previous = _same_member(*current, *previous)
         if not (matches_applied or matches_previous):
@@ -1128,7 +1130,7 @@ def _remove_git_bash_integration(
             if backup is not None:
                 backups.append(backup)
             return IntegrationResult(
-                IntegrationOutcome.NO_CHANGES,
+                IntegrationOutcome.UPDATED,
                 settings_path,
                 state_path,
                 IntegrationPhase.UNCLAIMED,

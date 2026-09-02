@@ -539,6 +539,7 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
                 encoding="utf-8",
             )
             reconciled = self.apply(settings, state, allow_config_mutation=True)
+            self.assertIs(reconciled.outcome, integration.IntegrationOutcome.UPDATED)
             self.assertIs(reconciled.phase, integration.IntegrationPhase.UNCLAIMED)
             self.assertIn("does not claim", reconciled.detail)
 
@@ -550,6 +551,23 @@ class ClaudeCodeIntegrationTests(unittest.TestCase):
                 ],
                 GIT_BASH,
             )
+
+    def test_remove_without_active_record_does_not_parse_settings(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings, state = self.paths(directory)
+            settings.parent.mkdir()
+            settings.write_text("not json", encoding="utf-8")
+            absent = self.remove(settings, state)
+            self.assertIs(absent.outcome, integration.IntegrationOutcome.NO_CHANGES)
+
+        with TemporaryDirectory() as directory:
+            settings, state = self.paths(directory)
+            self.apply(settings, state, allow_config_mutation=True)
+            self.remove(settings, state, allow_config_mutation=True)
+            settings.mkdir()
+            inactive = self.remove(settings, state)
+            self.assertIs(inactive.outcome, integration.IntegrationOutcome.NO_CHANGES)
+            self.assertIs(inactive.phase, integration.IntegrationPhase.REMOVED)
 
     def test_interrupted_remove_can_finalize_without_repeating_setting_change(self) -> None:
         with TemporaryDirectory() as directory:
