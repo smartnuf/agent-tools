@@ -427,6 +427,52 @@ class ManagedStateTests(unittest.TestCase):
                     ):
                         managed_state.load_document(path)
 
+    def test_schema_v1_timestamps_require_semantic_utc(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            canonical = managed_state.load_document(path)
+            self.assertTrue(
+                all(
+                    canonical["records"][0][name].endswith("Z")
+                    for name in ("requested_at", "completed_at", "recorded_at")
+                )
+            )
+
+            zero_offset = json.loads(json.dumps(canonical))
+            for name in ("requested_at", "completed_at", "recorded_at"):
+                zero_offset["records"][0][name] = "2026-09-02T12:00:00+00:00"
+            path.write_text(json.dumps(zero_offset), encoding="utf-8")
+            managed_state.load_document(path)
+
+            for timestamp in (
+                "2026-09-02T12:00:00+01:00",
+                "2026-09-02T12:00:00+14:00",
+                "2026-09-02T12:00:00-05:30",
+            ):
+                with self.subTest(timestamp=timestamp):
+                    damaged = json.loads(json.dumps(canonical))
+                    for name in ("requested_at", "completed_at", "recorded_at"):
+                        damaged["records"][0][name] = timestamp
+                    path.write_text(json.dumps(damaged), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError, "non-UTC"
+                    ):
+                        managed_state.load_document(path)
+
+            timezone_free = json.loads(json.dumps(canonical))
+            timezone_free["records"][0]["requested_at"] = "2026-09-02T12:00:00"
+            path.write_text(json.dumps(timezone_free), encoding="utf-8")
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError, "timezone-free"
+            ):
+                managed_state.load_document(path)
+
     def test_container_discriminators_are_managed_schema_errors(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "managed-state.json"
@@ -1526,10 +1572,33 @@ class ManagedStateTests(unittest.TestCase):
             all_record["requested_action"]["kind"] = "native-replacement"
             all_record["requested_action"]["target_architecture"] = "x86_64"
             all_record["requested_action"]["displaces_verified_paths"] = [
-                "/translated/pdfinfo"
+                "/translated/pdfinfo",
+                "/translated/pdftotext",
+                "/translated/pdftoppm",
             ]
             path.write_text(json.dumps(all_document), encoding="utf-8")
             managed_state.load_document(path)
+
+            for displaced in (
+                ["/translated/pdfinfo"],
+                [
+                    "/translated/pdfinfo",
+                    "/translated/pdftotext",
+                    "/translated/pdftoppm",
+                    "/translated/extra",
+                ],
+            ):
+                with self.subTest(poppler_displaced_count=len(displaced)):
+                    damaged = json.loads(json.dumps(all_document))
+                    damaged["records"][0]["requested_action"][
+                        "displaces_verified_paths"
+                    ] = displaced
+                    path.write_text(json.dumps(damaged), encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError,
+                        "native-replacement semantics",
+                    ):
+                        managed_state.load_document(path)
 
             all_record["requested_action"]["kind"] = "install"
             all_record["requested_action"]["target_architecture"] = None
@@ -2329,6 +2398,30 @@ class ManagedStateTests(unittest.TestCase):
             self.assertEqual(requested["target_architecture"], "x86_64")
             self.assertEqual(requested["displaces_verified_paths"], ["/translated/gs"])
 
+            document = managed_state.load_document(path)
+            document["records"][0]["requested_action"][
+                "displaces_verified_paths"
+            ] = ["/translated/gs", "/translated/gswin64c", "/translated/gswin32c"]
+            path.write_text(json.dumps(document), encoding="utf-8")
+            managed_state.load_document(path)
+
+            document["records"][0]["requested_action"][
+                "displaces_verified_paths"
+            ].append("/translated/extra")
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError, "native-replacement semantics"
+            ):
+                managed_state.load_document(path)
+
+            path.unlink()
+            managed_state.execute_provider_plan(
+                plan,
+                state_path=path,
+                executor=Mock(return_value=report),
+                allow_provider_mutation=True,
+            )
+
             for field, value in (
                 ("kind", "install"),
                 ("target_architecture", None),
@@ -2352,6 +2445,43 @@ class ManagedStateTests(unittest.TestCase):
                         executor=Mock(return_value=report),
                         allow_provider_mutation=True,
                     )
+
+    def test_displaced_path_counts_union_possible_source_provider_policies(self) -> None:
+        all_provider = capabilities.ProviderSpec(
+            provider_id="all-source",
+            label="all source",
+            platforms=frozenset({"Linux"}),
+            execution_environments=frozenset({"host"}),
+            probes=(
+                capabilities.ExecutableProbe("one", ("--version",)),
+                capabilities.ExecutableProbe("two", ("--version",)),
+            ),
+            probe_policy=capabilities.ProbePolicy.ALL,
+        )
+        any_provider = capabilities.ProviderSpec(
+            provider_id="any-source",
+            label="any source",
+            platforms=frozenset({"Linux"}),
+            execution_environments=frozenset({"host"}),
+            probes=(
+                capabilities.ExecutableProbe("one", ("--version",)),
+                capabilities.ExecutableProbe("two", ("--version",)),
+                capabilities.ExecutableProbe("three", ("--version",)),
+            ),
+            probe_policy=capabilities.ProbePolicy.ANY,
+        )
+        capability = capabilities.CapabilitySpec(
+            capability_id="multi-source",
+            label="multi source",
+            required_by_default=False,
+            providers=(all_provider, any_provider),
+        )
+        self.assertEqual(
+            managed_state._reachable_displaced_path_counts(
+                capability, self.machine
+            ),
+            frozenset({1, 2, 3}),
+        )
 
 
 if __name__ == "__main__":
