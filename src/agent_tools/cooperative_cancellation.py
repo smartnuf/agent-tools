@@ -69,8 +69,14 @@ class _CancellationContext:
 class _SigintBroker:
     """Translate a supported first SIGINT into one cooperative request."""
 
-    def __init__(self, cancellation: _CancellationContext) -> None:
+    def __init__(
+        self,
+        cancellation: _CancellationContext,
+        *,
+        propagate_pending_on_exit: bool = False,
+    ) -> None:
         self._cancellation = cancellation
+        self._propagate_pending_on_exit = propagate_pending_on_exit
         self._previous: object | None = None
         self.installed = False
 
@@ -96,7 +102,14 @@ class _SigintBroker:
         self._cancellation.request(KeyboardInterrupt())
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
-        del exc_type, exc, traceback
+        del exc, traceback
+        consume_pending = (
+            self.installed
+            and exc_type is None
+            and self._propagate_pending_on_exit
+        )
         if self.installed:
             signal.signal(signal.SIGINT, self._previous)
             self.installed = False
+        if consume_pending and self._cancellation.checkpoint():
+            raise self._cancellation.first_interruption or KeyboardInterrupt()

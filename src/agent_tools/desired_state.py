@@ -370,75 +370,106 @@ def _replace_document(
     document: dict[str, Any],
 ) -> Path | None:
     cancellation = _CancellationContext()
-    with _SigintBroker(cancellation):
-        missing_directories = _missing_directories(path.parent)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        current = _snapshot(path)
-        if not _same_snapshot(current, original):
-            raise DesiredStateError("desired state changed before mutation could begin")
-        backup = _write_backup(path, original.raw) if original.exists else None
-        _raise_if_cancelled(cancellation)
-        raw = _serialize(document)
-        temporary = _prepare_temporary(path, raw)
-        replaced = False
-        try:
-            current = _snapshot(path)
-            if not _same_snapshot(current, original):
-                raise DesiredStateError("desired state changed before atomic replacement")
-            _raise_if_cancelled(cancellation)
-            os.replace(temporary, path)
-            replaced = True
-            temporary = None
-            _raise_if_cancelled(cancellation)
-            _sync_directory(path.parent)
-            _raise_if_cancelled(cancellation)
-            for directory in reversed(missing_directories):
-                _sync_directory(directory.parent)
-                _raise_if_cancelled(cancellation)
-            persisted = _snapshot(path)
-            if persisted.raw != raw or persisted.document != document:
-                raise DesiredStateError(
-                    "updated desired state failed resulting-state validation"
+    backup: Path | None = None
+    raw = b""
+    temporary: Path | None = None
+    replaced = False
+    restored = False
+    try:
+        with _SigintBroker(cancellation, propagate_pending_on_exit=True):
+            try:
+                missing_directories = _missing_directories(path.parent)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                current = _snapshot(path)
+                if not _same_snapshot(current, original):
+                    raise DesiredStateError(
+                        "desired state changed before mutation could begin"
+                    )
+                backup = (
+                    _write_backup(path, original.raw) if original.exists else None
                 )
-            _raise_if_cancelled(cancellation)
-            return backup
-        except _ForceAbort:
-            raise
-        except KeyboardInterrupt as error:
-            if replaced:
-                try:
-                    _restore(path, original, raw)
-                except _ForceAbort:
-                    raise
-                except Exception as restoration_error:
-                    raise DesiredStateRestorationError(
-                        "desired-state update was interrupted and restoration is "
-                        f"uncertain: {restoration_error}",
-                        backup,
-                    ) from error
-            raise
-        except Exception as error:
-            if replaced:
-                try:
-                    _restore(path, original, raw)
-                except Exception as restoration_error:
-                    raise DesiredStateRestorationError(
-                        "desired-state update failed and restoration is uncertain: "
-                        f"{restoration_error}",
-                        backup,
+                _raise_if_cancelled(cancellation)
+                raw = _serialize(document)
+                temporary = _prepare_temporary(path, raw)
+                current = _snapshot(path)
+                if not _same_snapshot(current, original):
+                    raise DesiredStateError(
+                        "desired state changed before atomic replacement"
+                    )
+                _raise_if_cancelled(cancellation)
+                os.replace(temporary, path)
+                replaced = True
+                temporary = None
+                _raise_if_cancelled(cancellation)
+                _sync_directory(path.parent)
+                _raise_if_cancelled(cancellation)
+                for directory in reversed(missing_directories):
+                    _sync_directory(directory.parent)
+                    _raise_if_cancelled(cancellation)
+                persisted = _snapshot(path)
+                if persisted.raw != raw or persisted.document != document:
+                    raise DesiredStateError(
+                        "updated desired state failed resulting-state validation"
+                    )
+                _raise_if_cancelled(cancellation)
+                return backup
+            except _ForceAbort:
+                raise
+            except KeyboardInterrupt as error:
+                if replaced:
+                    try:
+                        _restore(path, original, raw)
+                        restored = True
+                    except _ForceAbort:
+                        raise
+                    except Exception as restoration_error:
+                        raise DesiredStateRestorationError(
+                            "desired-state update was interrupted and restoration "
+                            f"is uncertain: {restoration_error}",
+                            backup,
+                        ) from error
+                raise
+            except Exception as error:
+                if replaced:
+                    try:
+                        _restore(path, original, raw)
+                        restored = True
+                        _raise_if_cancelled(cancellation)
+                    except _ForceAbort:
+                        raise
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception as restoration_error:
+                        raise DesiredStateRestorationError(
+                            "desired-state update failed and restoration is uncertain: "
+                            f"{restoration_error}",
+                            backup,
+                        ) from error
+                    raise DesiredStateError(
+                        f"desired-state update failed; previous state restored: {error}"
                     ) from error
                 raise DesiredStateError(
-                    f"desired-state update failed; previous state restored: {error}"
+                    f"desired-state update failed before replacement: {error}"
                 ) from error
-            raise DesiredStateError(
-                f"desired-state update failed before replacement: {error}"
-            ) from error
-        finally:
-            if temporary is not None:
-                try:
-                    temporary.unlink()
-                except OSError:
-                    pass
+    except _ForceAbort:
+        raise
+    except KeyboardInterrupt as error:
+        if replaced and not restored:
+            try:
+                _restore(path, original, raw)
+            except Exception as restoration_error:
+                raise DesiredStateRestorationError(
+                    "desired-state update was interrupted and restoration is "
+                    f"uncertain: {restoration_error}",
+                    backup,
+                ) from error
+        raise
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
 
 
 def _request_spec(

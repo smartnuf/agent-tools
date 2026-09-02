@@ -417,6 +417,62 @@ class DesiredStateTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), raw)
             self.assertEqual(replacement_count, 2)
 
+    def test_sigint_recorded_at_broker_teardown_restores_prior_bytes(self) -> None:
+        raw = b'{ "schema_version": 1, "capabilities": {} }\n'
+        actual_broker = desired_state._SigintBroker
+
+        class RequestAtExitBroker(actual_broker):
+            def __exit__(self, exc_type, exc, traceback):
+                if exc_type is None:
+                    self._cancellation.request(KeyboardInterrupt())
+                return super().__exit__(exc_type, exc, traceback)
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_bytes(raw)
+            with (
+                patch.object(desired_state, "_SigintBroker", RequestAtExitBroker),
+                self.assertRaises(KeyboardInterrupt),
+            ):
+                desired_state.set_capability(
+                    "bash",
+                    enabled=True,
+                    allow_config_mutation=True,
+                    path=path,
+                    machine=LINUX,
+                )
+            self.assertEqual(path.read_bytes(), raw)
+
+    def test_broker_teardown_restoration_failure_reports_backup(self) -> None:
+        raw = b'{"schema_version":1,"capabilities":{}}\n'
+        actual_broker = desired_state._SigintBroker
+
+        class RequestAtExitBroker(actual_broker):
+            def __exit__(self, exc_type, exc, traceback):
+                if exc_type is None:
+                    self._cancellation.request(KeyboardInterrupt())
+                return super().__exit__(exc_type, exc, traceback)
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_bytes(raw)
+            with (
+                patch.object(desired_state, "_SigintBroker", RequestAtExitBroker),
+                patch.object(desired_state, "_restore", side_effect=OSError("denied")),
+                self.assertRaises(
+                    desired_state.DesiredStateRestorationError
+                ) as raised,
+            ):
+                desired_state.set_capability(
+                    "bash",
+                    enabled=True,
+                    allow_config_mutation=True,
+                    path=path,
+                    machine=LINUX,
+                )
+            self.assertIsNotNone(raised.exception.backup_path)
+            self.assertEqual(raised.exception.backup_path.read_bytes(), raw)
+
     def test_restoration_failure_reports_uncertainty_and_backup(self) -> None:
         raw = b'{"schema_version":1,"capabilities":{}}\n'
         with TemporaryDirectory() as directory:
