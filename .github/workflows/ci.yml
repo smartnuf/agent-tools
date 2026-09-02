@@ -105,7 +105,8 @@ jobs:
             --current-wheel "$RUNNER_TEMP"/release-dist/*.whl \
             --current-version 0.1.2 \
             --work-directory "$RUNNER_TEMP/release-lifecycle" \
-            --python 3.13
+            --python 3.13 \
+            --allow-home-config-mutation
 
       - name: Install and test shared release wheel (Windows)
         if: runner.os == 'Windows'

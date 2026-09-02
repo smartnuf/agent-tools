@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import html
 import os
+import platform
 import shutil
 import subprocess
 from email.parser import BytesParser
@@ -133,6 +134,7 @@ def exercise_lifecycle(
     current_wheel: Path,
     current_version: str,
     work_directory: Path,
+    allow_home_config_mutation: bool,
 ) -> None:
     previous_identity = wheel_identity(previous_wheel)
     current_identity = wheel_identity(current_wheel)
@@ -154,10 +156,8 @@ def exercise_lifecycle(
         raise AssertionError(
             f"lifecycle work directory must be empty: {work_directory}"
         )
-    earlier_index = work_directory / "earlier-index"
     current_index = work_directory / "current-index"
-    write_simple_index(earlier_index, (previous_wheel,))
-    write_simple_index(current_index, (previous_wheel, current_wheel))
+    write_simple_index(current_index, (current_wheel,))
 
     tool_directory = work_directory / "uv-tools"
     tool_bin = work_directory / "uv-bin"
@@ -182,12 +182,11 @@ def exercise_lifecycle(
     ).stdout
 
     uv_command = [uv, "--no-config", "tool"]
-    earlier_url = earlier_index.resolve().as_uri()
     current_url = current_index.resolve().as_uri()
     executable = tool_bin / CONSOLE_SCRIPT
 
     run_command(
-        uv_command + ["install", "--python", python, "--index", earlier_url, PACKAGE],
+        uv_command + ["install", "--python", python, str(previous_wheel)],
         environment=environment,
         cwd=work_directory,
     )
@@ -202,7 +201,16 @@ def exercise_lifecycle(
     )
 
     run_command(
-        uv_command + ["upgrade", "--index", current_url, PACKAGE],
+        uv_command
+        + [
+            "install",
+            "--python",
+            python,
+            "--upgrade",
+            "--index",
+            current_url,
+            PACKAGE,
+        ],
         environment=environment,
         cwd=work_directory,
     )
@@ -228,6 +236,13 @@ def exercise_lifecycle(
         raise AssertionError(
             f"disposable lifecycle host already has desired state: {config_path}"
         )
+    home_config = platform.system() == "Darwin"
+    if home_config and not allow_home_config_mutation:
+        raise AssertionError(
+            "macOS lifecycle evidence requires --allow-home-config-mutation; "
+            "the platform configuration path is under the current user home"
+        )
+    config_parent_existed = config_path.parent.exists()
     enabled = run_command(
         [
             str(executable),
@@ -247,65 +262,73 @@ def exercise_lifecycle(
     if b'"bash"' not in desired_state:
         raise AssertionError("created desired state does not enable Bash")
 
-    current_pin = f"{PACKAGE}=={current_version}"
-    run_command(
-        uv_command
-        + [
-            "install",
-            "--python",
-            python,
-            "--reinstall",
-            "--index",
-            current_url,
-            current_pin,
-        ],
-        environment=environment,
-        cwd=work_directory,
-    )
-    assert_version(
-        executable, current_version, environment=environment, cwd=work_directory
-    )
-    assert_unchanged(config_path, desired_state, "exact-version reinstall")
-
-    previous_pin = f"{PACKAGE}=={previous_version}"
-    run_command(
-        uv_command
-        + [
-            "install",
-            "--python",
-            python,
-            "--reinstall",
-            "--index",
-            current_url,
-            previous_pin,
-        ],
-        environment=environment,
-        cwd=work_directory,
-    )
-    assert_version(
-        executable, previous_version, environment=environment, cwd=work_directory
-    )
-    assert_unchanged(config_path, desired_state, "rollback")
-
-    run_command(
-        uv_command + ["uninstall", PACKAGE],
-        environment=environment,
-        cwd=work_directory,
-    )
-    if executable.exists():
-        raise AssertionError(f"application executable remains after uninstall: {executable}")
-    assert_unchanged(config_path, desired_state, "application removal")
-    resolved_bash_after = shutil.which("bash", path=environment.get("PATH"))
-    if resolved_bash_after != bash:
-        raise AssertionError(
-            f"Bash provider path changed after application removal: {bash!r} -> "
-            f"{resolved_bash_after!r}"
+    try:
+        current_pin = f"{PACKAGE}=={current_version}"
+        run_command(
+            uv_command
+            + [
+                "install",
+                "--python",
+                python,
+                "--reinstall",
+                "--index",
+                current_url,
+                current_pin,
+            ],
+            environment=environment,
+            cwd=work_directory,
         )
-    bash_after = run_command(
-        [bash, "--version"], environment=environment, cwd=work_directory
-    ).stdout
-    if bash_after != bash_before:
-        raise AssertionError("Bash provider version output changed after application removal")
+        assert_version(
+            executable, current_version, environment=environment, cwd=work_directory
+        )
+        assert_unchanged(config_path, desired_state, "exact-version reinstall")
+
+        run_command(
+            uv_command
+            + [
+                "install",
+                "--python",
+                python,
+                "--reinstall",
+                str(previous_wheel),
+            ],
+            environment=environment,
+            cwd=work_directory,
+        )
+        assert_version(
+            executable, previous_version, environment=environment, cwd=work_directory
+        )
+        assert_unchanged(config_path, desired_state, "rollback")
+
+        run_command(
+            uv_command + ["uninstall", PACKAGE],
+            environment=environment,
+            cwd=work_directory,
+        )
+        if executable.exists():
+            raise AssertionError(
+                f"application executable remains after uninstall: {executable}"
+            )
+        assert_unchanged(config_path, desired_state, "application removal")
+        resolved_bash_after = shutil.which("bash", path=environment.get("PATH"))
+        if resolved_bash_after != bash:
+            raise AssertionError(
+                f"Bash provider path changed after application removal: {bash!r} -> "
+                f"{resolved_bash_after!r}"
+            )
+        bash_after = run_command(
+            [bash, "--version"], environment=environment, cwd=work_directory
+        ).stdout
+        if bash_after != bash_before:
+            raise AssertionError(
+                "Bash provider version output changed after application removal"
+            )
+    finally:
+        if home_config and config_path.is_file() and config_path.read_bytes() == desired_state:
+            config_path.unlink()
+            print(f"cleaned lifecycle-created macOS desired state: {config_path}")
+            if not config_parent_existed:
+                config_path.parent.rmdir()
 
 
 def main() -> int:
@@ -317,6 +340,14 @@ def main() -> int:
     parser.add_argument("--work-directory", required=True, type=Path)
     parser.add_argument("--python", default="3.13")
     parser.add_argument("--uv", default="uv")
+    parser.add_argument(
+        "--allow-home-config-mutation",
+        action="store_true",
+        help=(
+            "authorize temporary creation and cleanup of the documented macOS "
+            "desired-state file"
+        ),
+    )
     args = parser.parse_args()
     exercise_lifecycle(
         uv=args.uv,
@@ -326,6 +357,7 @@ def main() -> int:
         current_wheel=args.current_wheel.resolve(),
         current_version=args.current_version,
         work_directory=args.work_directory.resolve(),
+        allow_home_config_mutation=args.allow_home_config_mutation,
     )
     print(
         "release lifecycle passed: "

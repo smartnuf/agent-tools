@@ -60,16 +60,23 @@ Upgrade an unpinned installation to the latest compatible release:
 uv tool upgrade smartnuf-agent-tools
 ```
 
+The v0.1.1 prerelease used a direct GitHub wheel rather than PyPI. Replace that
+recorded direct-wheel requirement while upgrading it to the current release:
+
+```sh
+uv tool install --python 3.13 --upgrade smartnuf-agent-tools
+```
+
 Pin the current release when reproducibility matters, or reinstall that exact version if its isolated environment is damaged:
 
 ```sh
 uv tool install --python 3.13 --reinstall "smartnuf-agent-tools==0.1.2"
 ```
 
-Rollback uses the same exact-version command with an earlier available release:
+Rollback to the available v0.1.1 GitHub artifact by its exact reviewed URL:
 
 ```sh
-uv tool install --python 3.13 --reinstall "smartnuf-agent-tools==0.1.1"
+uv tool install --python 3.13 --reinstall "https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl"
 ```
 
 To remove it:
@@ -197,4 +204,4 @@ For routine operation:
 
 The maintained roadmap is [`docs/plan/00-index.md`](docs/plan/00-index.md). It records the current milestone, acceptance gates, estimates, evidence, remaining effort, and recommended next work. [`docs/plan/README.md`](docs/plan/README.md) defines how humans and agents plan tasks and report progress consistently.
 
-The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md) and the first stable PyPI publication in M2 are complete. M3 now includes tested native/system-first selection, clone bootstrap delegation through the explicitly authorized managed provider lifecycle, reversible desired-capability configuration, and the native-Windows Claude Code Git Bash adapter. Release-lifecycle evidence remains. See the maintained roadmap for the ordered work. The packaged release and clone-based shared development environment remain supported entry points.
+The bounded [M1.5 packaged capability-discovery milestone](docs/plan/09-capabilities/README.md), the first stable PyPI publication in M2, and the tested update and capability lifecycle in M3 are complete. M3 includes native/system-first selection, clone bootstrap delegation through the explicitly authorized managed provider lifecycle, reversible desired-capability configuration, the native-Windows Claude Code Git Bash adapter, and exact-artifact upgrade, pin, rollback, and removal evidence. See the maintained roadmap for the acceptance record. The packaged release and clone-based shared development environment remain supported entry points.

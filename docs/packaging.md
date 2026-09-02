@@ -74,16 +74,20 @@ CI builds one release bundle on Ubuntu, verifies its checksum manifest, and pass
 
 The same platform jobs download the complete published v0.1.1 release bundle
 and verify its release checksum manifest. The
-[release lifecycle driver](../tests/check_release_lifecycle.py) then exposes
-that exact earlier wheel and the checksum-verified current CI
-wheel through disposable PEP 503 indexes. It proves an unpinned earlier-release
-install, upgrade to the current artifact, exact current-version reinstall,
-exact earlier-version rollback, and application uninstall. The test creates
+[release lifecycle driver](../tests/check_release_lifecycle.py) then installs
+that exact earlier wheel directly, matching its documented GitHub-release
+installation, and exposes the checksum-verified current CI wheel through a
+disposable PEP 503 index. It proves replacement of the earlier direct-wheel
+receipt during upgrade, exact current-version reinstall, exact direct-wheel
+rollback, and application uninstall. The test creates
 desired-capability state only after exercising the command's refusal without
 explicit mutation authority; the exact state bytes must then survive reinstall,
 rollback, and removal. It also records and rechecks the externally owned Bash
 executable and version after uninstall. This is an application lifecycle
-contract, not a native-provider removal promise.
+contract, not a native-provider removal promise. On macOS, where the documented
+configuration path is under the current user home, the test requires separate
+home-configuration mutation authority and removes only the file it created
+after proving application removal preserved it; it never redirects `HOME`.
 
 ## PyPI presentation review
 

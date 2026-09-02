@@ -87,7 +87,7 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
   phases without provider installation or removal.
 - [Issue #55](https://github.com/smartnuf/agent-tools/issues/55) adds the
   checksum-verified, exact-artifact lifecycle test across Windows, Ubuntu, and
-  macOS: v0.1.1 install, current-wheel upgrade and exact reinstall, v0.1.1
+  macOS: direct-wheel v0.1.1 install, current-wheel upgrade and exact reinstall, v0.1.1
   rollback, and application removal with byte-identical desired state and the
   externally owned Bash provider preserved.
 
