@@ -70,20 +70,22 @@ Outcome: installation is not a one-off; supported upgrading, pinning, rollback, 
 | Acceptance criterion | State | Required evidence |
 |---|---|---|
 | Fresh and repeated installation are tested | complete | [PyPI lifecycle run 33313165322](https://github.com/smartnuf/agent-tools/actions/runs/33313165322) installs, upgrades/reconciles, exactly reinstalls, and removes v0.1.2 on Windows, Ubuntu, and macOS |
-| Upgrade from the previous supported release is tested | not-started | Automated upgrade test |
-| Version pinning and rollback are tested | not-started | Automated lifecycle test |
-| Removal leaves documented user-owned state untouched | not-started | Automated or disposable-host test |
-| Native dependency failures are actionable | not-started | `doctor` tests with absent/partial tools |
+| Upgrade from the previous supported release is tested | complete | Issue #55's cross-platform lifecycle test checksum-verifies the published v0.1.1 bundle, installs its exact wheel from an isolated index, upgrades to the shared current CI wheel, and verifies the current-only CLI surface |
+| Version pinning and rollback are tested | complete | The [release lifecycle driver](../../../tests/check_release_lifecycle.py) exactly reinstalls the current version, rolls back to the exact earlier version, and verifies the reported version at each boundary on Windows, Ubuntu, and macOS |
+| Removal leaves documented user-owned state untouched | complete | Issue #55's disposable-host test creates explicitly authorized desired-capability state, requires its exact bytes to survive reinstall, rollback, and uninstall, and rechecks the same externally owned Bash provider after application removal |
+| Native dependency failures are actionable | complete | `tests/test_cli.py` covers every unavailable requirement, partial Poppler installation, failed executable verification, and missing tools without a traceback; every platform CI job exercises checkout and installed `doctor` behavior |
 | Release procedure requires no unpublished local step | complete | [v0.1.2 publication run 33312422488](https://github.com/smartnuf/agent-tools/actions/runs/33312422488) verified the signed GitHub release artifacts against tag checksums/attestations and published them through GitHub OIDC/Trusted Publishing |
 | Native/system-first final-provider selection reuses suitable pre-seeded providers independently of bootstrap process architecture | complete | #14 supplies pure selection fixtures; #49 adds repeatable pre-seeded Python and capability fixtures plus Windows, Ubuntu, and macOS runner evidence. ARM64/translation combinations remain fixture or locally reported evidence and are not claimed as hosted ARM64 coverage. Native-provisioning overrides and zero-action provider plans belong to #50; managed mutation provenance belongs to #52. |
 | Provider mutation consumes an inspectable plan, requires a flag, reports changes, records provenance, and is shared by clone wrappers | complete | #50 supplies canonical plans, #51 supplies explicitly authorized execution and complete verification reports, #52 persists non-owning provenance, and #53 delegates both clone wrappers without duplicate package mappings; unit, disposable-filesystem, and Windows/Ubuntu/macOS native-runner tests cover the combined boundary |
 | Desired-state and integration configuration changes are authorized, backed up, validated, reversible, preserve unrelated state, and never uninstall providers | complete | #54 provides the versioned desired-capability contract; #27 and [ADR 0006](../../decisions/0006-claude-code-git-bash-integration.md) provide the native-Windows Claude Code adapter. Tests cover explicit authority, backups, production-reader validation, restoration, unrelated-state preservation, unowned matching settings, Git for Windows selection, interruption reconciliation, and absence of provider removal. |
 
-Estimate: **0.5–1 person-day remaining** after the #14, #49, #50, #77,
-#51, #52, #53, and #54 selection, seeded-evidence, read-only-planning,
-governance, explicit execution, provenance, clone-delegation, and safe
-desired-capability configuration slices, plus the #27 documented Claude Code
-Git Bash integration.
+Estimate: **6.5–11 person-days**. Complete on 2026-09-02 after the #14, #49,
+#50, #77, #51, #52, #53, and #54 selection, seeded-evidence,
+read-only-planning, governance, explicit execution, provenance,
+clone-delegation, and safe desired-capability configuration slices; the #27
+documented Claude Code Git Bash integration; and #55 exact-artifact release
+lifecycle evidence. Actual engineering effort was not recorded; the accepted
+estimate remains the historical forecast.
 [Issue #26](https://github.com/smartnuf/agent-tools/issues/26)
 records the reviewed dependency order. Native/system-first selection (#14) and
 pre-seeded workstation evidence (#49) precede read-only provider planning

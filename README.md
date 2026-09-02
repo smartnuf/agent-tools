@@ -66,11 +66,23 @@ Pin the current release when reproducibility matters, or reinstall that exact ve
 uv tool install --python 3.13 --reinstall "smartnuf-agent-tools==0.1.2"
 ```
 
+Rollback uses the same exact-version command with an earlier available release:
+
+```sh
+uv tool install --python 3.13 --reinstall "smartnuf-agent-tools==0.1.1"
+```
+
 To remove it:
 
 ```sh
 uv tool uninstall smartnuf-agent-tools
 ```
+
+Application removal deletes uv's isolated tool environment and executable. It
+does not delete Agent Tools' per-user desired-state configuration, reverse an
+active agent integration, or uninstall externally owned native providers such
+as Bash. Remove an integration explicitly before uninstalling the application
+when restoration of its managed setting is intended.
 
 Poppler and Ghostscript are not bundled. Install them through the operating-system package manager before expecting `agent-tools doctor` to pass completely. See the [v0.1.2 release notes](docs/releases/v0.1.2.md) for current limitations.
 

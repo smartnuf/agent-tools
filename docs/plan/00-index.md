@@ -1,8 +1,8 @@
 # Plan status
 
 - Last reconciled: 2026-09-02
-- Current milestone: M3 — tested update and capability lifecycle
-- Current state: M2 complete; M3 has completed provider execution and reporting, provenance persistence, clone-bootstrap delegation, desired-capability configuration, and the Claude Code Git Bash integration; release-lifecycle evidence is next
+- Current milestone: M3 — complete
+- Current state: M3 completes tested upgrade, pin, rollback, safe provider mutation, desired-capability and agent-integration configuration, and removal preservation
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
 - Target lifecycle: tested upgrade, pin, rollback, safe provider mutation, and removal
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
@@ -15,16 +15,13 @@
 | M1 | Installable GitHub prerelease | complete | 9/9 | 4–7 days | none |
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
 | M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
-| M3 | Tested update and capability lifecycle | in-progress | 5/9 | 6.5–11 days | 0.5–1 day |
+| M3 | Tested update and capability lifecycle | complete | 9/9 | 6.5–11 days | none |
 | M4a | WinGet discovery | deferred | 0/4 | 2–4 days | 2–4 days |
 | M4b | Homebrew discovery | deferred | 0/4 | 1.5–3 days | 1.5–3 days |
 
-Estimated implementation effort through M3: **0.5–1 person-day remaining**.
-The selector and pre-seeded-workstation evidence slices complete the first
-joint M3 gate; read-only provider planning supplies the prerequisite for the
-completed mutation lifecycle gate. Native discovery channels and the
-independent document-dependency boundary are excluded; review time is reported
-separately.
+Estimated implementation effort through M3: **complete**. Native discovery
+channels and the independent document-dependency boundary are excluded; review
+time is reported separately.
 
 Gate counts are binary readiness measures. Estimates are ranges and must be revised when implementation reveals new facts.
 
@@ -88,21 +85,25 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
   setting behind explicit authority, preserves unrelated configuration,
   restores prior state, and records independently reconcilable lifecycle
   phases without provider installation or removal.
+- [Issue #55](https://github.com/smartnuf/agent-tools/issues/55) adds the
+  checksum-verified, exact-artifact lifecycle test across Windows, Ubuntu, and
+  macOS: v0.1.1 install, current-wheel upgrade and exact reinstall, v0.1.1
+  rollback, and application removal with byte-identical desired state and the
+  externally owned Bash provider preserved.
 
 M1 is complete and its factual record is frozen except for corrections. M1.5
 completed on 2026-08-29; M2 completed on 2026-08-30 with the first stable PyPI
-release. Actual M1.5 and M2 engineering effort was not recorded, so their
-accepted estimates remain the historical forecasts; review and CI wait were
-excluded.
+release; M3 completed on 2026-09-02. Actual M1.5, M2, and M3 engineering effort
+was not recorded, so their accepted estimates remain the historical forecasts;
+review and CI wait were excluded.
 
 ## Recommended next work
 
-Complete the automated earlier-release upgrade, pin, rollback, and removal
-evidence in [issue #55](https://github.com/smartnuf/agent-tools/issues/55) (M,
-**0.5–1 day**). Keep published-artifact lifecycle evidence separate from native
-provider removal, which remains unsupported.
-[Issue #26](https://github.com/smartnuf/agent-tools/issues/26) records the
-ordered M3 dependency chain beginning `#50 → #77 → #51`.
+M3 has no remaining implementation task. Keep exact-artifact application
+lifecycle evidence separate from native provider removal, which remains
+unsupported. M4 discovery channels remain deferred until user demand justifies
+their maintenance burden; the independent README presentation and document
+dependency-boundary issues remain backlog work rather than M3 acceptance gates.
 
 ## Known risks and assumptions
 
