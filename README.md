@@ -76,8 +76,12 @@ uv tool install --python 3.13 --reinstall "smartnuf-agent-tools==0.1.2"
 Before rolling back to a version that predates integration commands, explicitly
 restore any active managed integration while the current command is available:
 
+```powershell
+& "$(uv tool dir --bin)\agent-tools.exe" integrations claude-code remove --allow-config-mutation
+```
+
 ```sh
-agent-tools integrations claude-code remove --allow-config-mutation
+"$(uv tool dir --bin)/agent-tools" integrations claude-code remove --allow-config-mutation
 ```
 
 Then roll back to the available v0.1.1 GitHub artifact by its exact reviewed,
