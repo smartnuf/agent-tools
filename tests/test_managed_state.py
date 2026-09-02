@@ -48,6 +48,12 @@ class ManagedStateTests(unittest.TestCase):
             (absent,), ("ghostscript",), package_managers=(manager,)
         )
 
+    def create_symlink_or_skip(self, link: Path, target: Path) -> None:
+        try:
+            link.symlink_to(target)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"filesystem symlinks are unavailable: {error}")
+
     def report(
         self,
         outcome: provider_execution.ActionOutcome = provider_execution.ActionOutcome.SUCCEEDED,
@@ -255,6 +261,142 @@ class ManagedStateTests(unittest.TestCase):
             with self.assertRaisesRegex(managed_state.ManagedStateError, "corrupt"):
                 managed_state.load_document(path)
 
+    def test_dangling_symlink_is_not_an_absent_document(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "managed-state.json"
+            missing_target = root / "missing-state.json"
+            self.create_symlink_or_skip(path, missing_target)
+
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError, "absent or an ordinary regular file"
+            ):
+                managed_state.load_document(path)
+
+            self.assertTrue(path.is_symlink())
+            self.assertEqual(os.readlink(path), str(missing_target))
+            self.assertFalse(missing_target.exists())
+
+    def test_symlink_to_regular_document_is_rejected_without_modification(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "external-state.json"
+            original = json.dumps(managed_state.empty_document()).encode()
+            target.write_bytes(original)
+            path = root / "managed-state.json"
+            self.create_symlink_or_skip(path, target)
+
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError, "absent or an ordinary regular file"
+            ):
+                managed_state.load_document(path)
+
+            self.assertTrue(path.is_symlink())
+            self.assertEqual(os.readlink(path), str(target))
+            self.assertEqual(target.read_bytes(), original)
+
+    def test_directory_at_state_path_is_rejected_and_preserved(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            path.mkdir()
+
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError, "absent or an ordinary regular file"
+            ):
+                managed_state.load_document(path)
+
+            self.assertTrue(path.is_dir())
+
+    def test_nonregular_state_path_blocks_before_provider_execution(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "managed-state.json"
+            missing_target = root / "missing-state.json"
+            self.create_symlink_or_skip(path, missing_target)
+            executor = Mock(side_effect=AssertionError("must not mutate"))
+
+            result = managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=executor,
+                allow_provider_mutation=True,
+            )
+
+            self.assertEqual(result.persistence, managed_state.PersistenceOutcome.BLOCKED)
+            self.assertIn("ordinary regular file", result.persistence_detail)
+            self.assertIsNone(result.execution)
+            executor.assert_not_called()
+            self.assertTrue(path.is_symlink())
+            self.assertFalse(missing_target.exists())
+
+    def test_destination_revalidation_preserves_new_dangling_symlink(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "managed-state.json"
+            path.write_text(json.dumps(managed_state.empty_document()), encoding="utf-8")
+            missing_target = root / "missing-state.json"
+            execution = self.report()
+            executor = Mock(return_value=execution)
+            original_inspect = managed_state._managed_state_entry_exists
+            destination_inspections = 0
+
+            def inspect(candidate: Path) -> bool:
+                nonlocal destination_inspections
+                if candidate == path:
+                    destination_inspections += 1
+                    if destination_inspections == 3:
+                        path.unlink()
+                        self.create_symlink_or_skip(path, missing_target)
+                return original_inspect(candidate)
+
+            with (
+                patch.object(
+                    managed_state, "_managed_state_entry_exists", side_effect=inspect
+                ),
+                patch.object(
+                    managed_state.os,
+                    "replace",
+                    side_effect=AssertionError("must not replace rejected entry"),
+                ) as replace_entry,
+            ):
+                result = managed_state.execute_provider_plan(
+                    self.plan,
+                    state_path=path,
+                    executor=executor,
+                    allow_provider_mutation=True,
+                )
+
+            self.assertIs(result.execution, execution)
+            self.assertEqual(result.persistence, managed_state.PersistenceOutcome.FAILED)
+            self.assertIn("ordinary regular file", result.persistence_detail)
+            self.assertIn("provenance was not durably recorded", result.recovery_guidance)
+            executor.assert_called_once()
+            replace_entry.assert_not_called()
+            self.assertEqual(destination_inspections, 3)
+            self.assertTrue(path.is_symlink())
+            self.assertFalse(missing_target.exists())
+            self.assertFalse(tuple(root.glob(".managed-state.json.*")))
+
+    def test_absent_and_regular_state_paths_remain_writable(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            first = managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            second = managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+
+            self.assertEqual(first.persistence, managed_state.PersistenceOutcome.SUCCEEDED)
+            self.assertEqual(second.persistence, managed_state.PersistenceOutcome.SUCCEEDED)
+            self.assertEqual(len(managed_state.load_document(path)["records"]), 2)
+
     def test_json_depth_bound_covers_every_container_and_blocks_mutation(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
@@ -327,10 +469,20 @@ class ManagedStateTests(unittest.TestCase):
                         managed_state.load_document(path)
 
     def test_inaccessible_document_is_not_treated_as_absent(self) -> None:
-        path = Path("/inaccessible/managed-state.json")
-        with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
-            with self.assertRaisesRegex(managed_state.ManagedStateError, "denied"):
-                managed_state.load_document(path)
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            path.write_text(json.dumps(managed_state.empty_document()), encoding="utf-8")
+            with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
+                with self.assertRaisesRegex(managed_state.ManagedStateError, "denied"):
+                    managed_state.load_document(path)
+
+    def test_file_disappearing_after_entry_inspection_is_not_absent(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            path.write_text(json.dumps(managed_state.empty_document()), encoding="utf-8")
+            with patch.object(Path, "read_text", side_effect=FileNotFoundError("vanished")):
+                with self.assertRaisesRegex(managed_state.ManagedStateError, "vanished"):
+                    managed_state.load_document(path)
 
     def test_malformed_v1_record_is_rejected_without_speculative_migration(self) -> None:
         with TemporaryDirectory() as directory:

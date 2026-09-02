@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import posixpath
+import stat
 import tempfile
 import threading
 import uuid
@@ -281,11 +282,29 @@ def empty_document() -> dict[str, Any]:
     return {"schema_version": SCHEMA_VERSION, "records": []}
 
 
+def _managed_state_entry_exists(path: Path) -> bool:
+    """Return whether the state pathname names an ordinary regular file."""
+
+    try:
+        entry = path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise ManagedStateError(
+            f"managed-state path cannot be inspected safely: {error}"
+        ) from error
+    if not stat.S_ISREG(entry.st_mode):
+        raise ManagedStateError(
+            "managed-state path must be absent or an ordinary regular file"
+        )
+    return True
+
+
 def load_document(path: Path) -> dict[str, Any]:
+    if not _managed_state_entry_exists(path):
+        return empty_document()
     try:
         text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return empty_document()
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ManagedStateError(f"managed state is unreadable or corrupt: {error}") from error
     try:
@@ -830,6 +849,7 @@ def _atomic_write(
     cancellation = cancellation or _CancellationContext()
     temporary: Path | None = None
     try:
+        _managed_state_entry_exists(path)
         missing_directories = _missing_directories(path.parent)
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
@@ -855,6 +875,7 @@ def _atomic_write(
             )
             _best_effort_discard_temporary(temporary)
             return
+        _managed_state_entry_exists(path)
         transaction.record_persistence(
             PersistenceOutcome.UNKNOWN,
             "managed-state replacement or durability was not confirmed",
@@ -868,7 +889,7 @@ def _atomic_write(
         transaction.record_persistence(
             PersistenceOutcome.SUCCEEDED, terminal=True
         )
-    except OSError as error:
+    except (ManagedStateError, OSError) as error:
         outcome = (
             PersistenceOutcome.UNKNOWN
             if transaction.persistence is PersistenceOutcome.UNKNOWN

@@ -55,6 +55,12 @@ is preserved when failure occurs before replacement. A failure known to precede
 replacement is `failed`; failure after replacement but before durability can be
 confirmed is `unknown`.
 
+The managed-state pathname is an integrity boundary. It may be absent or name
+an ordinary regular file only. Symlinks, directories, and every other
+non-regular entry are unsupported and rejected without following, replacing,
+repairing, or deleting the entry. Rejection preserves the entry, performs no
+state mutation, and is reported separately from an absent document.
+
 An absent document is an empty history. Current v1 is validated before use.
 There is no speculative legacy migration. Corrupt documents and unknown schema
 versions are visible and are never automatically overwritten. A mutation that
