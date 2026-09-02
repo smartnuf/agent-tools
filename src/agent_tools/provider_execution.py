@@ -522,10 +522,26 @@ def _supervise_started_process(
         deadline = time.monotonic() + timeout
         while True:
             if cancellation.checkpoint():
-                if privileged_supervision:
-                    _terminate_privileged_supervisor(process)
-                else:
-                    _terminate_process_tree(process)
+                try:
+                    if privileged_supervision:
+                        _terminate_privileged_supervisor(process)
+                    else:
+                        _terminate_process_tree(process)
+                except (ExecutionContractError, OSError) as error:
+                    stop_readers.set()
+                    _join_output_readers(
+                        readers, stop_readers, reader_errors, cancellation
+                    )
+                    raise CommandInterruptedError(
+                        _started_process_result(
+                            argv, process, stdout_tail, stderr_tail
+                        ),
+                        (
+                            "provider command cancellation was accepted after launch, "
+                            f"but termination or reaping failed: {error}"
+                        ),
+                        lifetime_uncertain=True,
+                    ) from error
                 readers_clean = _join_output_readers(
                     readers, stop_readers, reader_errors, cancellation
                 )
@@ -875,11 +891,25 @@ def _join_output_readers(
     deadline = time.monotonic() + OUTPUT_PIPE_CLOSURE_GUARD_SECONDS
     try:
         for reader in readers:
-            reader.join(timeout=max(0, deadline - time.monotonic()))
+            while True:
+                if cancellation.phase is _CancellationPhase.CANCEL_REQUESTED:
+                    cancellation.checkpoint()
+                    stop.set()
+                    return False
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                reader.join(timeout=min(0.1, remaining))
+                if not reader.is_alive():
+                    break
     except Exception:
         stop.set()
         for reader in readers:
             reader.join(timeout=1)
+        return False
+    if cancellation.phase is _CancellationPhase.CANCEL_REQUESTED:
+        cancellation.checkpoint()
+        stop.set()
         return False
     if not any(reader.is_alive() for reader in readers):
         return not errors
@@ -1700,6 +1730,25 @@ def _execute_provider_plan(
             return _failed_report(
                 plan, context, reports, mutation_may_have_started=True
             )
+
+        if cancellation.checkpoint():
+            reports.append(
+                _action_report(
+                    action,
+                    ActionOutcome.NOT_ATTEMPTED,
+                    detail=(
+                        "cancellation accepted after pre-action detection; no "
+                        "command started for this action"
+                    ),
+                )
+            )
+            return _failed_report(
+                plan,
+                context,
+                reports,
+                mutation_may_have_started=any(report.commands for report in reports),
+            )
+
         def precommand(operation):
             try:
                 return operation()

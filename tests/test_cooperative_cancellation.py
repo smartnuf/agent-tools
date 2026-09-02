@@ -183,6 +183,9 @@ class CooperativeCancellationTests(unittest.TestCase):
 
     def test_request_during_preaction_detection_prevents_command_launch(self) -> None:
         runner = Mock(side_effect=AssertionError("provider command must not launch"))
+        manager_verifier = Mock(
+            side_effect=AssertionError("post-detection preflight must not run")
+        )
 
         def request_during_detection(capability, machine):
             signal.raise_signal(signal.SIGINT)
@@ -196,7 +199,10 @@ class CooperativeCancellationTests(unittest.TestCase):
                     state_path=path,
                     detector=request_during_detection,
                     runner=runner,
-                    **self.managed_arguments(),
+                    **{
+                        **self.managed_arguments(),
+                        "manager_verifier": manager_verifier,
+                    },
                 )
 
         action = raised.exception.managed_result.execution.actions[0]
@@ -207,6 +213,40 @@ class CooperativeCancellationTests(unittest.TestCase):
             managed_state.PersistenceOutcome.NOT_REQUIRED,
         )
         runner.assert_not_called()
+        manager_verifier.assert_not_called()
+
+    def test_pending_request_before_executor_entry_prevents_injected_mutation(self) -> None:
+        executor = Mock(side_effect=AssertionError("executor must not run"))
+        original_timestamp = managed_state._timestamp
+        signalled = False
+
+        def request_at_timestamp():
+            nonlocal signalled
+            if not signalled:
+                signalled = True
+                signal.raise_signal(signal.SIGINT)
+            return original_timestamp()
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            with (
+                patch.object(managed_state, "_timestamp", request_at_timestamp),
+                self.assertRaises(managed_state.ManagedExecutionInterrupted) as raised,
+            ):
+                managed_state.execute_provider_plan(
+                    self.plan,
+                    state_path=path,
+                    executor=executor,
+                    allow_provider_mutation=True,
+                )
+
+        executor.assert_not_called()
+        action = raised.exception.managed_result.execution.actions[0]
+        self.assertEqual(action.outcome, provider_execution.ActionOutcome.NOT_ATTEMPTED)
+        self.assertEqual(
+            raised.exception.managed_result.persistence,
+            managed_state.PersistenceOutcome.NOT_REQUIRED,
+        )
 
     def test_second_signal_during_formatting_force_aborts_without_persistence(self) -> None:
         detector = Mock(side_effect=(self.absent, _ForceAbortOnString("stale")))
@@ -309,6 +349,61 @@ class CooperativeCancellationTests(unittest.TestCase):
             timer.join()
 
         self.assertIsNotNone(raised.exception.result.returncode)
+        self.assertEqual(
+            cancellation.phase, provider_execution._CancellationPhase.CANCELLING
+        )
+
+    def test_active_cancellation_termination_failure_retains_launch_evidence(self) -> None:
+        cancellation = provider_execution._CancellationContext()
+        process = Mock(returncode=None, stdout=Mock(), stderr=Mock())
+
+        def request_during_wait(timeout):
+            signal.raise_signal(signal.SIGINT)
+            raise subprocess.TimeoutExpired(("provider",), timeout)
+
+        process.wait.side_effect = request_during_wait
+        with (
+            provider_execution._SigintBroker(cancellation),
+            patch.object(provider_execution.subprocess, "Popen", return_value=process),
+            patch.object(provider_execution, "_start_output_readers", return_value=()),
+            patch.object(
+                provider_execution,
+                "_terminate_process_tree",
+                side_effect=provider_execution.ExecutionContractError(
+                    "termination unavailable"
+                ),
+            ),
+            self.assertRaises(provider_execution.CommandInterruptedError) as raised,
+        ):
+            provider_execution._run(
+                ("provider",), 5, _cancellation=cancellation
+            )
+
+        self.assertTrue(raised.exception.lifetime_uncertain)
+        self.assertIsNone(raised.exception.result.returncode)
+        self.assertIn("termination or reaping failed", raised.exception.detail)
+        self.assertEqual(
+            cancellation.phase, provider_execution._CancellationPhase.CANCELLING
+        )
+
+    def test_reader_join_accepts_request_before_clean_completion(self) -> None:
+        cancellation = provider_execution._CancellationContext()
+        stop = threading.Event()
+        reader = Mock()
+        reader.is_alive.return_value = True
+
+        def request_during_join(timeout):
+            signal.raise_signal(signal.SIGINT)
+
+        reader.join.side_effect = request_during_join
+        with provider_execution._SigintBroker(cancellation):
+            clean = provider_execution._join_output_readers(
+                (reader,), stop, [], cancellation
+            )
+
+        self.assertFalse(clean)
+        self.assertTrue(stop.is_set())
+        reader.join.assert_called_once()
         self.assertEqual(
             cancellation.phase, provider_execution._CancellationPhase.CANCELLING
         )

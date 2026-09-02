@@ -28,6 +28,7 @@ from .provider_execution import (
     _ForceAbort,
     _SigintBroker,
     _execute_provider_plan_unmanaged,
+    _preflight_interrupted_report,
     _provider_execution_transaction,
 )
 from .provider_plans import (
@@ -927,6 +928,19 @@ def _invoke_executor(
     return executor(plan, **arguments)
 
 
+def _invoke_executor_or_cancel(
+    executor: Callable[..., PlanExecutionReport],
+    plan: ProviderPlan,
+    arguments: dict[str, Any],
+    cancellation: _CancellationContext,
+) -> PlanExecutionReport:
+    """Stop before executor entry when the broker already recorded SIGINT."""
+
+    if cancellation.checkpoint():
+        return _preflight_interrupted_report(plan, plan.context)
+    return _invoke_executor(executor, plan, arguments, cancellation)
+
+
 def execute_provider_plan(
     plan: ProviderPlan,
     *,
@@ -980,7 +994,7 @@ def _execute_provider_plan_managed(
             }
         provider_interruption: ProviderPlanInterrupted | None = None
         try:
-            execution = _invoke_executor(
+            execution = _invoke_executor_or_cancel(
                 executor, plan, executor_arguments, cancellation
             )
         except ProviderPlanInterrupted as error:
@@ -1019,7 +1033,7 @@ def _execute_provider_plan_managed(
         requested_at = _timestamp()
         provider_interruption = None
         try:
-            execution = _invoke_executor(
+            execution = _invoke_executor_or_cancel(
                 executor, plan, executor_arguments, cancellation
             )
         except ProviderPlanInterrupted as error:
