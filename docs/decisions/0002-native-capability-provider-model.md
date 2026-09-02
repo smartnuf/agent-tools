@@ -502,6 +502,10 @@ stable shell-selection interface.
   Managed mutation provenance now has the provider executor as its consumer and
   is governed by [ADR 0003](0003-managed-state-provenance.md).
 
+Issue #54 supplies that desired-state consumer and its persistence contract in
+[ADR 0005](0005-desired-capability-state.md). Desired configuration remains
+separate from detected state and managed provenance.
+
 Issue #53 completed the clone-wrapper part of this decision. The explicit
 PowerShell and POSIX native-install flags now invoke the internal packaged
 bootstrap orchestration after editable installation; the obsolete independent

@@ -79,9 +79,11 @@ Outcome: installation is not a one-off; supported upgrading, pinning, rollback, 
 | Provider mutation consumes an inspectable plan, requires a flag, reports changes, records provenance, and is shared by clone wrappers | complete | #50 supplies canonical plans, #51 supplies explicitly authorized execution and complete verification reports, #52 persists non-owning provenance, and #53 delegates both clone wrappers without duplicate package mappings; unit, disposable-filesystem, and Windows/Ubuntu/macOS native-runner tests cover the combined boundary |
 | Desired-state and integration configuration changes are authorized, backed up, validated, reversible, preserve unrelated state, and never uninstall providers | not-started | Tests for existing configuration prove explicit authorization, recoverable backup, resulting-state validation, failure restoration, unrelated-state preservation, and no provider uninstall; integration cases cover shared/dedicated providers and Git for Windows |
 
-Estimate: **1.25–4.25 person-days remaining** after the #14, #49, #50, #77,
-#51, #52, and #53 selection, seeded-evidence, read-only-planning, governance,
-explicit execution, provenance, and clone-delegation slices.
+Estimate: **1–2 person-days remaining** after the #14, #49, #50, #77,
+#51, #52, #53, and #54 selection, seeded-evidence, read-only-planning,
+governance, explicit execution, provenance, clone-delegation, and safe
+desired-capability configuration slices. The combined desired-state and
+integration gate remains open until #27 is decided and evidenced.
 [Issue #26](https://github.com/smartnuf/agent-tools/issues/26)
 records the reviewed dependency order. Native/system-first selection (#14) and
 pre-seeded workstation evidence (#49) precede read-only provider planning

@@ -962,6 +962,86 @@ class ProviderPlanTests(unittest.TestCase):
         )
         self.assertNotIn("translated package-manager fallback", plan.actions[0].reason)
 
+    def test_exact_preference_selects_verified_nondefault_provider(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, context: (
+                "/bin/bash"
+                if probe.locator_strategy == "system-bash"
+                else "/opt/homebrew/bin/bash"
+                if probe.locator_strategy == "homebrew-bash"
+                else None
+            ),
+            version_reader=lambda probe, path: "GNU bash 5.2",
+            architecture_reader=lambda probe, path: "arm64",
+        )
+        plan = provider_plans.generate_provider_plan(
+            (state,),
+            ("bash",),
+            package_managers=(self.manager("brew"),),
+            provider_preferences={"bash": "homebrew-bash"},
+        )
+        self.assertEqual(plan.actions, ())
+        self.assertEqual(plan.provider_preferences, (("bash", "homebrew-bash"),))
+
+    def test_unverified_exact_preference_plans_only_that_provider(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH,
+            machine,
+            locator=lambda probe, context: (
+                "/bin/bash" if probe.locator_strategy == "system-bash" else None
+            ),
+            version_reader=lambda probe, path: "GNU bash 3.2",
+            architecture_reader=lambda probe, path: "arm64",
+        )
+        plan = provider_plans.generate_provider_plan(
+            (state,),
+            ("bash",),
+            package_managers=(self.manager("brew"),),
+            provider_preferences={"bash": "homebrew-bash"},
+        )
+        self.assertEqual(len(plan.actions), 1)
+        self.assertEqual(plan.actions[0].provider_id, "homebrew-bash")
+        self.assertIn("explicit provider preference", plan.actions[0].reason)
+
+    def test_preference_never_falls_back_to_another_provider(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        state = capabilities.detect_capability(
+            capabilities.BASH, machine, locator=lambda probe, context: None
+        )
+        with self.assertRaisesRegex(
+            provider_plans.NoSupportedProviderPlanError, "no supported provider plan"
+        ):
+            provider_plans.generate_provider_plan(
+                (state,),
+                ("bash",),
+                package_managers=(self.manager("brew"),),
+                provider_preferences={"bash": "system-bash"},
+            )
+
+    def test_preferences_reject_incompatible_unknown_and_conflicting_requests(self):
+        linux = self.state(capabilities.BASH)
+        cases = (
+            ({"bash": "git-bash"}, (), "incompatible"),
+            ({"ghostscript": "host-ghostscript"}, (), "not requested"),
+            ({1: "system-bash"}, (), "identity is invalid"),
+            ({"bash": "system-bash"}, ("bash",), "conflicts"),
+        )
+        for preferences, overrides, message in cases:
+            with self.subTest(preferences=preferences), self.assertRaisesRegex(
+                provider_plans.PlanningError, message
+            ):
+                provider_plans.generate_provider_plan(
+                    (linux,),
+                    ("bash",),
+                    package_managers=(self.manager("apt"),),
+                    native_provisioning=overrides,
+                    provider_preferences=preferences,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

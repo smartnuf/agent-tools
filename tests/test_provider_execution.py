@@ -1344,6 +1344,140 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(action.final_verified_paths, ("/bin/bash",))
         runner.assert_not_called()
 
+    def test_exact_preference_prevents_fresh_other_provider_skip(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        manager = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+
+        def bash_state(*, system=False, homebrew=False):
+            return capabilities.detect_capability(
+                capabilities.BASH,
+                machine,
+                locator=lambda probe, context: (
+                    "/bin/bash"
+                    if system and probe.locator_strategy == "system-bash"
+                    else "/opt/homebrew/bin/bash"
+                    if homebrew and probe.locator_strategy == "homebrew-bash"
+                    else None
+                ),
+                version_reader=lambda probe, path: "GNU bash 5.2",
+                architecture_reader=lambda probe, path: "arm64",
+            )
+
+        absent = bash_state()
+        plan = provider_plans.generate_provider_plan(
+            (absent,),
+            ("bash",),
+            package_managers=(manager,),
+            provider_preferences={"bash": "homebrew-bash"},
+        )
+        runner = Mock(return_value=subprocess.CompletedProcess((), 0, "", ""))
+        report = provider_execution._execute_provider_plan_unmanaged(
+            plan,
+            allow_provider_mutation=True,
+            current_context=lambda: machine,
+            detector=self.detector_sequence_for_machine(
+                machine, bash_state(system=True), bash_state(system=True, homebrew=True)
+            ),
+            manager_verifier=lambda state, context: True,
+            manager_architecture_reader=lambda state: "arm64",
+            privilege_resolver=lambda action: "",
+            runner=runner,
+        )
+        self.assertEqual(report.outcome, provider_execution.PlanOutcome.SUCCEEDED)
+        self.assertEqual(report.actions[0].provider_id, "homebrew-bash")
+        runner.assert_called_once()
+
+    def test_zero_action_exact_preference_is_reverified_at_execution(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+
+        def bash_state(*, system=False, homebrew=False):
+            return capabilities.detect_capability(
+                capabilities.BASH,
+                machine,
+                locator=lambda probe, context: (
+                    "/bin/bash"
+                    if system and probe.locator_strategy == "system-bash"
+                    else "/opt/homebrew/bin/bash"
+                    if homebrew and probe.locator_strategy == "homebrew-bash"
+                    else None
+                ),
+                version_reader=lambda probe, path: "GNU bash 5.2",
+                architecture_reader=lambda probe, path: "arm64",
+            )
+
+        plan = provider_plans.generate_provider_plan(
+            (bash_state(homebrew=True),),
+            ("bash",),
+            package_managers=(),
+            provider_preferences={"bash": "homebrew-bash"},
+        )
+        report = provider_execution._execute_provider_plan_unmanaged(
+            plan,
+            current_context=lambda: machine,
+            detector=lambda capability, context: bash_state(system=True),
+            runner=Mock(side_effect=AssertionError("must not run")),
+        )
+        self.assertEqual(report.outcome, provider_execution.PlanOutcome.PREFLIGHT_FAILED)
+        self.assertIn("no longer verifies", report.recovery_guidance[0])
+
+    def test_malformed_preference_shape_fails_as_execution_contract(self):
+        plan = provider_plans.ProviderPlan(
+            ("bash",), self.machine, (), (("bash", "system-bash", "extra"),)
+        )
+        with self.assertRaisesRegex(
+            provider_execution.ExecutionContractError, "malformed provider preferences"
+        ):
+            provider_execution._execute_provider_plan_unmanaged(
+                plan,
+                current_context=lambda: self.machine,
+                detector=Mock(),
+            )
+
+    def test_context_free_plan_still_validates_preference_shape(self):
+        plan = provider_plans.ProviderPlan(
+            ("bash",), None, (), (("bash", "system-bash", "extra"),)
+        )
+        with self.assertRaisesRegex(
+            provider_execution.ExecutionContractError,
+            "malformed provider preferences",
+        ):
+            provider_execution._execute_provider_plan_unmanaged(
+                plan,
+                current_context=lambda: self.machine,
+                detector=Mock(),
+            )
+
+    def test_action_that_contradicts_exact_preference_is_rejected(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        manager = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+        absent = capabilities.detect_capability(
+            capabilities.BASH, machine, locator=lambda probe, context: None
+        )
+        generated = provider_plans.generate_provider_plan(
+            (absent,),
+            ("bash",),
+            package_managers=(manager,),
+            provider_preferences={"bash": "homebrew-bash"},
+        )
+        contradictory = replace(
+            generated,
+            provider_preferences=(("bash", "system-bash"),),
+        )
+        with self.assertRaisesRegex(
+            provider_execution.ExecutionContractError, "contradicts"
+        ):
+            provider_execution._execute_provider_plan_unmanaged(
+                contradictory,
+                allow_provider_mutation=True,
+                current_context=lambda: machine,
+                detector=Mock(),
+                runner=Mock(side_effect=AssertionError("must not run")),
+            )
+
     def test_fresh_provider_skip_rejects_relative_identity(self):
         machine = capabilities.MachineState("Darwin", "arm64")
         relative = capabilities.detect_capability(

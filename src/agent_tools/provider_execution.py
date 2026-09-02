@@ -34,6 +34,12 @@ from .capabilities import (
     detect_capability,
     get_capability,
 )
+from .cooperative_cancellation import (
+    _CancellationContext,
+    _CancellationPhase,
+    _ForceAbort,
+    _SigintBroker,
+)
 from .provider_plans import (
     EnvironmentRefresh,
     ExecutionPrivilege,
@@ -129,100 +135,6 @@ class CommandInterruptedError(ExecutionContractError):
         self.result = result
         self.detail = detail
         self.lifetime_uncertain = lifetime_uncertain
-
-
-class _ForceAbort(KeyboardInterrupt):
-    """Carry a later interrupt through an active cancellation unchanged."""
-
-    def __init__(self, interruption: KeyboardInterrupt) -> None:
-        super().__init__("force-abort during provider cancellation")
-        self.interruption = interruption
-
-
-class _CancellationPhase(str, Enum):
-    RUNNING = "running"
-    CANCEL_REQUESTED = "cancel-requested"
-    CANCELLING = "cancelling"
-    FORCE_ABORTED = "force-aborted"
-
-
-@dataclass
-class _CancellationContext:
-    """Own cancellation phase for one provider operation."""
-
-    phase: _CancellationPhase = _CancellationPhase.RUNNING
-    first_interruption: KeyboardInterrupt | None = None
-    force_abort: _ForceAbort | None = None
-
-    @property
-    def requested(self) -> bool:
-        return self.phase in {
-            _CancellationPhase.CANCEL_REQUESTED,
-            _CancellationPhase.CANCELLING,
-        }
-
-    def request(self, interruption: KeyboardInterrupt | None = None) -> None:
-        """Record a signal request without raising into transaction code."""
-
-        interruption = interruption or KeyboardInterrupt()
-        if self.phase is _CancellationPhase.RUNNING:
-            self.phase = _CancellationPhase.CANCEL_REQUESTED
-            self.first_interruption = interruption
-            return
-        self._raise_force_abort(interruption)
-
-    def checkpoint(self) -> bool:
-        """Accept a pending request at a semantically safe boundary."""
-
-        if self.phase is _CancellationPhase.CANCEL_REQUESTED:
-            self.phase = _CancellationPhase.CANCELLING
-        if self.phase is _CancellationPhase.FORCE_ABORTED:
-            if self.force_abort is None:
-                raise RuntimeError("force-aborted context has no carrier")
-            raise self.force_abort
-        return self.phase is _CancellationPhase.CANCELLING
-
-    def _raise_force_abort(self, interruption: KeyboardInterrupt) -> None:
-        if self.force_abort is None:
-            self.force_abort = _ForceAbort(interruption)
-        self.phase = _CancellationPhase.FORCE_ABORTED
-        raise self.force_abort from interruption
-
-
-class _SigintBroker:
-    """Translate supported first SIGINT into one cooperative request."""
-
-    def __init__(self, cancellation: _CancellationContext) -> None:
-        self._cancellation = cancellation
-        self._previous: object | None = None
-        self.installed = False
-
-    @staticmethod
-    def _supported_previous_handler(handler: object) -> bool:
-        return handler is signal.SIG_DFL or handler is signal.default_int_handler
-
-    def __enter__(self) -> _SigintBroker:
-        if threading.current_thread() is not threading.main_thread():
-            return self
-        previous = signal.getsignal(signal.SIGINT)
-        if isinstance(getattr(previous, "__self__", None), _SigintBroker):
-            raise RuntimeError("managed SIGINT brokerage cannot be nested")
-        if not self._supported_previous_handler(previous):
-            return self
-        self._previous = previous
-        signal.signal(signal.SIGINT, self._handle)
-        self.installed = True
-        return self
-
-    def _handle(self, signum: int, frame: object) -> None:
-        del signum, frame
-        self._cancellation.request(KeyboardInterrupt())
-
-    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
-        del exc_type, exc, traceback
-        if self.installed:
-            signal.signal(signal.SIGINT, self._previous)
-            self.installed = False
 
 
 class ProviderPlanInterrupted(_ControlledCancellation):
@@ -1377,6 +1289,25 @@ def _validate_action(action: ProviderAction, context: MachineState) -> None:
 
 
 def _validate_plan(plan: ProviderPlan, current: MachineState) -> MachineState:
+    if len(plan.requested_capabilities) != len(set(plan.requested_capabilities)):
+        raise ExecutionContractError("provider plan has duplicate requested capabilities")
+    try:
+        preferences = dict(plan.provider_preferences)
+    except (TypeError, ValueError) as error:
+        raise ExecutionContractError(
+            "provider plan has malformed provider preferences"
+        ) from error
+    if (
+        len(preferences) != len(plan.provider_preferences)
+        or any(
+            not isinstance(capability_id, str)
+            or not isinstance(provider_id, str)
+            or capability_id not in plan.requested_capabilities
+            or not provider_id
+            for capability_id, provider_id in plan.provider_preferences
+        )
+    ):
+        raise ExecutionContractError("provider plan has invalid provider preferences")
     if plan.context is None:
         if plan.actions:
             raise ExecutionContractError("mutating plan has no execution context")
@@ -1384,12 +1315,17 @@ def _validate_plan(plan: ProviderPlan, current: MachineState) -> MachineState:
     context = _normalized_context(plan.context)
     if context != _normalized_context(current):
         raise ExecutionContractError("provider plan is for a different execution context")
-    if len(plan.requested_capabilities) != len(set(plan.requested_capabilities)):
-        raise ExecutionContractError("provider plan has duplicate requested capabilities")
     seen: set[str] = set()
     for action in plan.actions:
         if action.capability_id not in plan.requested_capabilities:
             raise ExecutionContractError("action capability was not requested")
+        if (
+            action.capability_id in preferences
+            and action.provider_id != preferences[action.capability_id]
+        ):
+            raise ExecutionContractError(
+                "provider action contradicts its exact provider preference"
+            )
         if action.capability_id in seen:
             raise ExecutionContractError("provider plan has duplicate capability actions")
         seen.add(action.capability_id)
@@ -1444,10 +1380,16 @@ def _acceptable_provider_paths(
 def _acceptable_current_provider(
     state: CapabilityState,
     target_architecture: str | None,
+    preferred_provider_id: str | None = None,
 ) -> tuple[str, tuple[str, ...]] | None:
     """Select fresh satisfying evidence using catalogue provider priority."""
 
     for provider in state.providers:
+        if (
+            preferred_provider_id is not None
+            and provider.provider.provider_id != preferred_provider_id
+        ):
+            continue
         paths = _acceptable_provider_paths(
             provider, state.machine, target_architecture
         )
@@ -1652,6 +1594,7 @@ def _omitted_request_failure(
     detector: Detector,
 ) -> str | None:
     action_capabilities = {action.capability_id for action in plan.actions}
+    preferences = dict(plan.provider_preferences)
     for capability_id in plan.requested_capabilities:
         if capability_id in action_capabilities:
             continue
@@ -1669,7 +1612,9 @@ def _omitted_request_failure(
             validate_capability_state(state, expected_context=context)
         except PlanningError as error:
             return f"omitted capability evidence is stale: {error}"
-        if _acceptable_current_provider(state, None) is None:
+        if _acceptable_current_provider(
+            state, None, preferences.get(capability_id)
+        ) is None:
             return f"requested capability no longer verifies: {capability_id}"
     return None
 
@@ -1905,7 +1850,9 @@ def _execute_provider_plan(
 
         existing_provider = precommand(
             lambda: _acceptable_current_provider(
-                before, action.target_architecture
+                before,
+                action.target_architecture,
+                dict(plan.provider_preferences).get(action.capability_id),
             )
         )
         if existing_provider:

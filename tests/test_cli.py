@@ -6,7 +6,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from unittest.mock import patch
 
-from agent_tools import capabilities, cli, managed_state
+from agent_tools import capabilities, cli, desired_state, managed_state
 
 
 class CliTests(unittest.TestCase):
@@ -19,6 +19,16 @@ class CliTests(unittest.TestCase):
         path.start()
         self.addCleanup(loader.stop)
         self.addCleanup(path.stop)
+        desired_loader = patch.object(
+            cli, "load_desired_document", return_value=desired_state.empty_document()
+        )
+        desired_path = patch.object(
+            cli, "desired_state_path", return_value=Path("config.json")
+        )
+        desired_loader.start()
+        desired_path.start()
+        self.addCleanup(desired_loader.stop)
+        self.addCleanup(desired_path.stop)
 
     def test_parser_requires_command(self) -> None:
         with self.assertRaises(SystemExit):
@@ -36,6 +46,41 @@ class CliTests(unittest.TestCase):
         with patch.object(cli, "tools_status", return_value=1) as tools_status:
             self.assertEqual(cli.main(["tools", "status", "bash"]), 1)
         tools_status.assert_called_once_with("bash")
+
+        result = desired_state.DesiredMutationResult(
+            desired_state.DesiredMutationOutcome.NO_CHANGES,
+            Path("config.json"),
+            desired_state.empty_document(),
+        )
+        with patch.object(cli, "set_capability", return_value=result) as change:
+            self.assertEqual(
+                cli.main(
+                    [
+                        "tools",
+                        "enable",
+                        "bash",
+                        "--provider",
+                        "system-bash",
+                        "--allow-config-mutation",
+                    ]
+                ),
+                0,
+            )
+        change.assert_called_once_with(
+            "bash",
+            enabled=True,
+            provider_id="system-bash",
+            allow_config_mutation=True,
+        )
+
+        with patch.object(cli, "set_capability", return_value=result) as change:
+            self.assertEqual(
+                cli.main(["tools", "disable", "bash", "--allow-config-mutation"]),
+                0,
+            )
+        change.assert_called_once_with(
+            "bash", enabled=False, provider_id=None, allow_config_mutation=True
+        )
 
     def test_tools_status_reports_requested_provenance_without_ownership(self) -> None:
         record = {
@@ -72,6 +117,112 @@ class CliTests(unittest.TestCase):
             self.assertEqual(cli.tools_status("bash"), 0)
         self.assertIn("bash: available", output.getvalue())
         self.assertIn("managed provenance unavailable: corrupt state", errors.getvalue())
+
+    def test_tools_status_reports_desired_state_separately(self) -> None:
+        with (
+            patch.object(
+                cli,
+                "desired_capabilities",
+                return_value=(
+                    desired_state.DesiredCapability("bash", "selected-provider"),
+                ),
+            ),
+            patch.object(capabilities.shutil, "which", return_value="/tools/bash"),
+            patch.object(capabilities, "read_executable_version", return_value="5.2"),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(cli.tools_status("bash"), 0)
+        rendered = output.getvalue()
+        self.assertIn("desired: enabled", rendered)
+        self.assertIn("preferred provider: selected-provider", rendered)
+        self.assertIn("agent-tools requests: none recorded", rendered)
+
+    def test_tools_status_does_not_misreport_corrupt_desired_state_as_disabled(self) -> None:
+        with (
+            patch.object(
+                cli,
+                "load_desired_document",
+                side_effect=desired_state.DesiredStateError("corrupt config"),
+            ),
+            patch.object(capabilities.shutil, "which", return_value="/tools/bash"),
+            patch.object(capabilities, "read_executable_version", return_value="5.2"),
+            redirect_stdout(StringIO()) as output,
+            redirect_stderr(StringIO()) as errors,
+        ):
+            self.assertEqual(cli.tools_status("bash"), 0)
+        self.assertNotIn("desired: not enabled", output.getvalue())
+        self.assertIn("desired state unavailable: corrupt config", errors.getvalue())
+
+    def test_changed_desired_state_requires_authority_and_reports_backup(self) -> None:
+        refused = desired_state.DesiredMutationResult(
+            desired_state.DesiredMutationOutcome.REFUSED,
+            Path("config.json"),
+            desired_state.empty_document(),
+            detail="authorization required",
+        )
+        with (
+            patch.object(cli, "set_capability", return_value=refused),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(cli.main(["tools", "enable", "bash"]), 1)
+        self.assertIn("desired state: refused", output.getvalue())
+        self.assertIn("authorization required", output.getvalue())
+
+        updated = desired_state.DesiredMutationResult(
+            desired_state.DesiredMutationOutcome.UPDATED,
+            Path("config.json"),
+            desired_state.empty_document(),
+            backup_path=Path("config.json.backup-1"),
+        )
+        with (
+            patch.object(cli, "set_capability", return_value=updated),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(
+                cli.main(["tools", "disable", "bash", "--allow-config-mutation"]),
+                0,
+            )
+        self.assertIn("backup: config.json.backup-1", output.getvalue())
+
+    def test_restoration_uncertainty_reports_recovery_backup(self) -> None:
+        error = desired_state.DesiredStateRestorationError(
+            "restoration is uncertain",
+            Path("config.json.backup-1"),
+        )
+        with (
+            patch.object(cli, "set_capability", side_effect=error),
+            redirect_stderr(StringIO()) as errors,
+        ):
+            self.assertEqual(
+                cli.main(
+                    ["tools", "enable", "bash", "--allow-config-mutation"]
+                ),
+                1,
+            )
+        rendered = errors.getvalue()
+        self.assertIn("restoration is uncertain", rendered)
+        self.assertIn("recovery backup: config.json.backup-1", rendered)
+
+    def test_disable_has_no_provider_removal_path(self) -> None:
+        result = desired_state.DesiredMutationResult(
+            desired_state.DesiredMutationOutcome.UPDATED,
+            Path("config.json"),
+            desired_state.empty_document(),
+        )
+        with (
+            patch.object(cli, "set_capability", return_value=result) as change,
+            patch.object(
+                capabilities.subprocess,
+                "run",
+                side_effect=AssertionError("disable must not invoke external tools"),
+            ),
+            redirect_stdout(StringIO()),
+        ):
+            self.assertEqual(
+                cli.main(["tools", "disable", "bash", "--allow-config-mutation"]),
+                0,
+            )
+        change.assert_called_once()
 
     def test_tools_status_reports_explicit_json_depth_corruption_without_traceback(self) -> None:
         nested: object = None

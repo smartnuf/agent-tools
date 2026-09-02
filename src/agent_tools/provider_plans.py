@@ -7,7 +7,7 @@ import posixpath
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from .capabilities import (
     Availability,
@@ -110,6 +110,7 @@ class ProviderPlan:
     requested_capabilities: tuple[str, ...]
     context: MachineState | None
     actions: tuple[ProviderAction, ...]
+    provider_preferences: tuple[tuple[str, str], ...] = ()
 
     @property
     def changes_host(self) -> bool:
@@ -452,11 +453,26 @@ def generate_provider_plan(
     package_managers: Iterable[PackageManagerState],
     native_provisioning: Iterable[str] = (),
     translated_manager_fallbacks: Iterable[PackageManagerState] = (),
+    provider_preferences: Mapping[str, str] | None = None,
 ) -> ProviderPlan:
     """Plan missing requested providers from verified state without mutation."""
 
     requested = tuple(dict.fromkeys(requested_capabilities))
     requested_ids = frozenset(requested)
+    preferences = dict(provider_preferences or {})
+    if any(
+        not isinstance(key, str) or not key
+        for key in preferences
+    ):
+        raise PlanningError("provider preference capability identity is invalid")
+    unknown_preferences = set(preferences).difference(requested_ids)
+    if unknown_preferences:
+        raise PlanningError(
+            "provider preference was not requested: "
+            + ", ".join(sorted(unknown_preferences))
+        )
+    if any(not isinstance(value, str) or not value for value in preferences.values()):
+        raise PlanningError("provider preference identity is invalid")
     by_id: dict[str, CapabilityState] = {}
     for state in states:
         capability_id = state.capability.capability_id
@@ -536,6 +552,12 @@ def generate_provider_plan(
             "native-provisioning override was not requested: "
             + ", ".join(sorted(unknown_overrides))
         )
+    conflicting_overrides = native_overrides.intersection(preferences)
+    if conflicting_overrides:
+        raise PlanningError(
+            "native-provisioning override conflicts with provider preference: "
+            + ", ".join(sorted(conflicting_overrides))
+        )
     actions: list[ProviderAction] = []
     for capability_id in requested:
         try:
@@ -543,6 +565,25 @@ def generate_provider_plan(
         except KeyError as error:
             raise PlanningError(f"capability has no detected state: {capability_id}") from error
         validate_capability_state(state, expected_context=context)
+        preferred_provider_id = preferences.get(capability_id)
+        if preferred_provider_id is not None:
+            preferred_spec = next(
+                (
+                    provider_state.provider
+                    for provider_state in state.providers
+                    if provider_state.provider.provider_id == preferred_provider_id
+                ),
+                None,
+            )
+            if (
+                preferred_spec is None
+                or not preferred_spec.satisfies_capability
+                or not preferred_spec.supports(state.machine)
+            ):
+                raise PlanningError(
+                    "provider preference is incompatible with the current context: "
+                    f"{capability_id}: {preferred_provider_id}"
+                )
         displaced: tuple[str, ...] = ()
         acceptable_current_provider = any(
             acceptable_provider_executables(
@@ -553,6 +594,8 @@ def generate_provider_plan(
                 ),
             )
             for provider_state in state.providers
+            if preferred_provider_id is None
+            or provider_state.provider.provider_id == preferred_provider_id
         )
         if acceptable_current_provider and capability_id not in native_overrides:
             continue
@@ -629,6 +672,11 @@ def generate_provider_plan(
         ] | None = None
         for provider_state in state.providers:
             provider = provider_state.provider
+            if (
+                preferred_provider_id is not None
+                and provider.provider_id != preferred_provider_id
+            ):
+                continue
             if not provider.satisfies_capability or not provider.supports(state.machine):
                 continue
             option = _option(
@@ -651,7 +699,11 @@ def generate_provider_plan(
         reason = (
             "explicit native-provisioning override replaces translated provider"
             if displaced
-            else "no compatible provider verified"
+            else (
+                "explicit provider preference is not currently verified"
+                if preferred_provider_id is not None
+                else "no compatible provider verified"
+            )
         )
         if (
             manager_native_status is NativeStatus.TRANSLATED
@@ -697,4 +749,9 @@ def generate_provider_plan(
                 ),
             )
         )
-    return ProviderPlan(requested, context, tuple(actions))
+    ordered_preferences = tuple(
+        (capability_id, preferences[capability_id])
+        for capability_id in requested
+        if capability_id in preferences
+    )
+    return ProviderPlan(requested, context, tuple(actions), ordered_preferences)
