@@ -44,10 +44,15 @@ versions, execution environments, and architectures where observable. A
 missing required Python library or native executable makes `doctor` report the
 gap and return a nonzero status.
 
-Upgrade an unpinned installation or remove the application:
+Upgrade an unpinned installation:
 
 ```sh
 uv tool upgrade smartnuf-agent-tools
+```
+
+Remove the application:
+
+```sh
 uv tool uninstall smartnuf-agent-tools
 ```
 
@@ -59,9 +64,13 @@ or uninstall external native providers such as Bash, Poppler, or Ghostscript.
 
 - [Verify the installed version and optionally update `PATH`](#installed-release-details).
 - [Pin or roll back an exact release](#pin-or-roll-back).
-- [Configure desired capabilities and the Claude Code integration](#capability-configuration-and-integrations).
-- [Use the source checkout and shared development environment](#source-checkout-and-bootstrap).
-- Read the [platform guide](https://github.com/smartnuf/agent-tools/blob/main/docs/platforms.md), [packaging contract](https://github.com/smartnuf/agent-tools/blob/main/docs/packaging.md), or [release history](https://github.com/smartnuf/agent-tools/releases).
+- [Configure desired capabilities and the Claude Code
+  integration](#capability-configuration-and-integrations).
+- [Use the source checkout and shared development
+  environment](#source-checkout-and-bootstrap).
+- Read the [platform guide](https://github.com/smartnuf/agent-tools/blob/main/docs/platforms.md),
+  [packaging contract](https://github.com/smartnuf/agent-tools/blob/main/docs/packaging.md),
+  or [release history](https://github.com/smartnuf/agent-tools/releases).
 
 ## Installed release details
 
@@ -92,7 +101,8 @@ recorded direct-wheel requirement while upgrading to the current release:
 uv tool install --python 3.13 --upgrade smartnuf-agent-tools
 ```
 
-Pin the current release when reproducibility matters, or reinstall that exact version if its isolated environment is damaged:
+Pin the current release when reproducibility matters, or reinstall that exact
+version if its isolated environment is damaged:
 
 ```sh
 uv tool install --python 3.13 --reinstall "smartnuf-agent-tools==0.1.2"
@@ -122,7 +132,8 @@ have the integration-removal command.
 
 Poppler and Ghostscript are not bundled. Install them through the operating
 system package manager before expecting `agent-tools doctor` to pass
-completely. See the [v0.1.2 release notes](https://github.com/smartnuf/agent-tools/blob/main/docs/releases/v0.1.2.md)
+completely. See the
+[v0.1.2 release notes](https://github.com/smartnuf/agent-tools/blob/main/docs/releases/v0.1.2.md)
 for current limitations.
 
 ## Capability configuration and integrations
@@ -161,8 +172,7 @@ preserve unrelated Claude settings, and restore the exact prior setting; they
 never install or uninstall Git for Windows. A matching setting not created by
 Agent Tools remains unowned and is not removed. See
 [Decision 0006](https://github.com/smartnuf/agent-tools/blob/main/docs/decisions/0006-claude-code-git-bash-integration.md)
-for
-the recovery and compatibility contract. Version 0.1.2 is the first packaged
+for the recovery and compatibility contract. Version 0.1.2 is the first packaged
 release containing the read-only commands; desired-state and integration
 commands are currently available from `main` pending the next release.
 
