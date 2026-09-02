@@ -184,6 +184,25 @@ class CliTests(unittest.TestCase):
             )
         self.assertIn("backup: config.json.backup-1", output.getvalue())
 
+    def test_restoration_uncertainty_reports_recovery_backup(self) -> None:
+        error = desired_state.DesiredStateRestorationError(
+            "restoration is uncertain",
+            Path("config.json.backup-1"),
+        )
+        with (
+            patch.object(cli, "set_capability", side_effect=error),
+            redirect_stderr(StringIO()) as errors,
+        ):
+            self.assertEqual(
+                cli.main(
+                    ["tools", "enable", "bash", "--allow-config-mutation"]
+                ),
+                1,
+            )
+        rendered = errors.getvalue()
+        self.assertIn("restoration is uncertain", rendered)
+        self.assertIn("recovery backup: config.json.backup-1", rendered)
+
     def test_disable_has_no_provider_removal_path(self) -> None:
         result = desired_state.DesiredMutationResult(
             desired_state.DesiredMutationOutcome.UPDATED,

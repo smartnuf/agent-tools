@@ -25,6 +25,7 @@ from .managed_state import (
 from .desired_state import (
     DesiredMutationOutcome,
     DesiredStateError,
+    DesiredStateRestorationError,
     desired_capabilities,
     desired_state_path,
     load_document as load_desired_document,
@@ -280,6 +281,11 @@ def _change_desired_capability(
             provider_id=provider_id,
             allow_config_mutation=allow_config_mutation,
         )
+    except DesiredStateRestorationError as error:
+        print(f"desired-state change failed: {error}", file=sys.stderr)
+        if error.backup_path is not None:
+            print(f"  recovery backup: {error.backup_path}", file=sys.stderr)
+        return 1
     except DesiredStateError as error:
         print(f"desired-state change failed: {error}", file=sys.stderr)
         return 1

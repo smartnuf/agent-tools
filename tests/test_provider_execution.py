@@ -1435,6 +1435,20 @@ class ProviderExecutionTests(unittest.TestCase):
                 detector=Mock(),
             )
 
+    def test_context_free_plan_still_validates_preference_shape(self):
+        plan = provider_plans.ProviderPlan(
+            ("bash",), None, (), (("bash", "system-bash", "extra"),)
+        )
+        with self.assertRaisesRegex(
+            provider_execution.ExecutionContractError,
+            "malformed provider preferences",
+        ):
+            provider_execution._execute_provider_plan_unmanaged(
+                plan,
+                current_context=lambda: self.machine,
+                detector=Mock(),
+            )
+
     def test_action_that_contradicts_exact_preference_is_rejected(self):
         machine = capabilities.MachineState("Darwin", "arm64")
         manager = provider_plans.PackageManagerState(

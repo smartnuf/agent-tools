@@ -86,6 +86,14 @@ entry. Restoration itself uses validated atomic replacement. If restoration
 cannot be confirmed, the error reports the uncertainty and the backup path
 when one exists; it never claims the previous state was restored.
 
+Consistent with ADR 0004, a supported first SIGINT is translated at the
+mutation edge into cooperative cancellation and observed at transaction
+checkpoints. Cancellation observed after replacement restores the prior state
+before propagating the interruption. A second SIGINT is a deliberate
+force-abort and may trade restoration guarantees for immediate termination.
+This avoids asynchronously injecting first-interrupt control flow between the
+replacement effect and the transaction's knowledge that it occurred.
+
 The configuration pathname is an integrity boundary. It may be absent or name
 an ordinary regular file only. Symlinks, directories, and other non-regular
 entries fail closed without being followed, replaced, repaired, or deleted.

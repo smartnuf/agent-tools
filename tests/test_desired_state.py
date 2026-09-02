@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -69,6 +70,7 @@ class DesiredStateTests(unittest.TestCase):
             "extra root": b'{"schema_version":1,"capabilities":{},"extra":true}',
             "extra entry": b'{"schema_version":1,"capabilities":{"bash":{"extra":true}}}',
             "wrong provider": b'{"schema_version":1,"capabilities":{"bash":{"provider":7}}}',
+            "null provider": b'{"schema_version":1,"capabilities":{"bash":{"provider":null}}}',
         }
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -376,6 +378,44 @@ class DesiredStateTests(unittest.TestCase):
                     machine=LINUX,
                 )
             self.assertFalse(path.exists())
+
+    def test_first_sigint_after_replace_cooperatively_restores_prior_bytes(self) -> None:
+        raw = b'{ "schema_version": 1, "capabilities": {} }\n'
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_bytes(raw)
+            actual_replace = desired_state.os.replace
+            replacement_count = 0
+
+            def replace_then_interrupt(source: Path, destination: Path) -> None:
+                nonlocal replacement_count
+                actual_replace(source, destination)
+                replacement_count += 1
+                if replacement_count == 1:
+                    signal.raise_signal(signal.SIGINT)
+
+            previous = signal.getsignal(signal.SIGINT)
+            try:
+                signal.signal(signal.SIGINT, signal.default_int_handler)
+                with (
+                    patch.object(
+                        desired_state.os,
+                        "replace",
+                        side_effect=replace_then_interrupt,
+                    ),
+                    self.assertRaises(KeyboardInterrupt),
+                ):
+                    desired_state.set_capability(
+                        "bash",
+                        enabled=True,
+                        allow_config_mutation=True,
+                        path=path,
+                        machine=LINUX,
+                    )
+            finally:
+                signal.signal(signal.SIGINT, previous)
+            self.assertEqual(path.read_bytes(), raw)
+            self.assertEqual(replacement_count, 2)
 
     def test_restoration_failure_reports_uncertainty_and_backup(self) -> None:
         raw = b'{"schema_version":1,"capabilities":{}}\n'
