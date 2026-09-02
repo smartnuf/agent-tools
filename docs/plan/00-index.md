@@ -1,6 +1,6 @@
 # Plan status
 
-- Last reconciled: 2026-08-31
+- Last reconciled: 2026-09-02
 - Current milestone: M3 — tested update and capability lifecycle
 - Current state: M2 complete; M3 has completed explicitly authorized provider execution, complete change reporting, and mutation-provenance persistence; clone-bootstrap delegation is next
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`

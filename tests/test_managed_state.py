@@ -267,6 +267,7 @@ class ManagedStateTests(unittest.TestCase):
             path = root / "managed-state.json"
             missing_target = root / "missing-state.json"
             self.create_symlink_or_skip(path, missing_target)
+            original_link_target = os.readlink(path)
 
             with self.assertRaisesRegex(
                 managed_state.ManagedStateError, "absent or an ordinary regular file"
@@ -274,7 +275,7 @@ class ManagedStateTests(unittest.TestCase):
                 managed_state.load_document(path)
 
             self.assertTrue(path.is_symlink())
-            self.assertEqual(os.readlink(path), str(missing_target))
+            self.assertEqual(os.readlink(path), original_link_target)
             self.assertFalse(missing_target.exists())
 
     def test_symlink_to_regular_document_is_rejected_without_modification(self) -> None:
@@ -285,6 +286,7 @@ class ManagedStateTests(unittest.TestCase):
             target.write_bytes(original)
             path = root / "managed-state.json"
             self.create_symlink_or_skip(path, target)
+            original_link_target = os.readlink(path)
 
             with self.assertRaisesRegex(
                 managed_state.ManagedStateError, "absent or an ordinary regular file"
@@ -292,7 +294,7 @@ class ManagedStateTests(unittest.TestCase):
                 managed_state.load_document(path)
 
             self.assertTrue(path.is_symlink())
-            self.assertEqual(os.readlink(path), str(target))
+            self.assertEqual(os.readlink(path), original_link_target)
             self.assertEqual(target.read_bytes(), original)
 
     def test_directory_at_state_path_is_rejected_and_preserved(self) -> None:
