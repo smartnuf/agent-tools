@@ -15,7 +15,7 @@ from enum import Enum
 from pathlib import Path, PureWindowsPath
 from typing import Any, Callable
 
-from .capabilities import MachineState, ProbePolicy, get_capability
+from .capabilities import CapabilitySpec, MachineState, ProbePolicy, get_capability
 from .provider_execution import (
     ActionOutcome,
     ELEVATED_TERM_TO_KILL_GRACE_SECONDS,
@@ -341,6 +341,10 @@ def load_document(path: Path) -> dict[str, Any]:
                 raise ManagedStateError(
                     f"managed-state record {index} has a timezone-free {timestamp_name}"
                 )
+            if parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+                raise ManagedStateError(
+                    f"managed-state record {index} has a non-UTC {timestamp_name}"
+                )
             timestamps[timestamp_name] = parsed
         if not (
             timestamps["requested_at"]
@@ -479,6 +483,9 @@ def load_document(path: Path) -> dict[str, Any]:
             )
         native_target = normalize_architecture(target_architecture)
         context_architecture = normalize_architecture(context["architecture"])
+        reachable_displaced_path_counts = _reachable_displaced_path_counts(
+            capability, machine
+        )
         if (
             requested["kind"] == "install"
             and (target_architecture is not None or displaced_paths)
@@ -489,6 +496,7 @@ def load_document(path: Path) -> dict[str, Any]:
                 or not displaced_paths
                 or native_target == "unknown"
                 or native_target != context_architecture
+                or len(displaced_paths) not in reachable_displaced_path_counts
             )
         ):
             raise ManagedStateError(
@@ -716,6 +724,23 @@ def load_document(path: Path) -> dict[str, Any]:
                 f"managed-state record {index} has impossible pre-verification paths"
             )
     return value
+
+
+def _reachable_displaced_path_counts(
+    capability: CapabilitySpec, machine: MachineState
+) -> frozenset[int]:
+    """Return the union of source-provider cardinalities the planner can emit."""
+
+    counts: set[int] = set()
+    for provider in capability.providers:
+        if not provider.satisfies_capability or not provider.supports(machine):
+            continue
+        probe_count = len(provider.probes)
+        if provider.probe_policy is ProbePolicy.ALL:
+            counts.add(probe_count)
+        else:
+            counts.update(range(1, probe_count + 1))
+    return frozenset(counts)
 
 
 def _is_absolute_for_platform(value: str, platform_name: object) -> bool:

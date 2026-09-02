@@ -2063,11 +2063,7 @@ def _execute_provider_plan(
                     outcome=(
                         ActionOutcome.TIMED_OUT
                         if retained_timeout and not elevated_linux
-                        else (
-                            ActionOutcome.SUPERVISOR_FAILED
-                            if error.lifetime_uncertain or elevated_linux
-                            else ActionOutcome.COMMAND_FAILED
-                        )
+                        else ActionOutcome.SUPERVISOR_FAILED
                     ),
                     detail=error.detail,
                     uncertain_external_state=error.lifetime_uncertain,
