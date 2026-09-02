@@ -80,6 +80,42 @@ jobs:
           name: release-dist
           path: ${{ runner.temp }}/release-dist
 
+      - name: Download and verify lifecycle artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous-release" "$RUNNER_TEMP/current-release"
+          gh release download v0.1.1 \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$RUNNER_TEMP/previous-release" \
+            --pattern '*.whl' \
+            --pattern '*.tar.gz' \
+            --pattern SHA256SUMS
+          gh release download v0.1.2 \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$RUNNER_TEMP/current-release" \
+            --pattern '*.whl' \
+            --pattern '*.tar.gz' \
+            --pattern SHA256SUMS
+          python scripts/release.py verify-checksums "$RUNNER_TEMP/previous-release/SHA256SUMS"
+          python scripts/release.py verify-checksums "$RUNNER_TEMP/current-release/SHA256SUMS"
+          python scripts/release.py verify-checksums "$RUNNER_TEMP/release-dist/SHA256SUMS"
+
+      - name: Exercise upgrade, pin, rollback, and removal lifecycle
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          python tests/check_release_lifecycle.py \
+            --previous-wheel "$RUNNER_TEMP"/previous-release/*.whl \
+            --previous-version 0.1.1 \
+            --current-wheel "$RUNNER_TEMP"/current-release/*.whl \
+            --current-version 0.1.2 \
+            --candidate-wheel "$RUNNER_TEMP"/release-dist/*.whl \
+            --work-directory "$RUNNER_TEMP/release-lifecycle" \
+            --python 3.13 \
+            --allow-home-config-mutation
+
       - name: Install and test shared release wheel (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -87,7 +123,6 @@ jobs:
           UV_TOOL_DIR: ${{ runner.temp }}\release-tools
           UV_TOOL_BIN_DIR: ${{ runner.temp }}\release-bin
         run: |
-          python scripts/release.py verify-checksums "$env:RUNNER_TEMP\release-dist\SHA256SUMS"
           $wheel = Get-ChildItem "$env:RUNNER_TEMP\release-dist" -Filter '*.whl' | Select-Object -ExpandProperty FullName -First 1
           uv tool install --python 3.13 $wheel
           python tests/check_installed_cli.py "$(uv tool dir --bin)\agent-tools.exe" "$env:RUNNER_TEMP\release-dist"
@@ -99,7 +134,6 @@ jobs:
           UV_TOOL_DIR: ${{ runner.temp }}/release-tools
           UV_TOOL_BIN_DIR: ${{ runner.temp }}/release-bin
         run: |
-          python scripts/release.py verify-checksums "$RUNNER_TEMP/release-dist/SHA256SUMS"
           uv tool install --python 3.13 "$RUNNER_TEMP"/release-dist/*.whl
           python tests/check_installed_cli.py "$(uv tool dir --bin)/agent-tools" "$RUNNER_TEMP/release-dist"
 

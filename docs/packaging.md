@@ -66,11 +66,30 @@ There are currently no optional dependency groups: omitting the document librari
 - Python: 3.11 through 3.13. Python 3.14 is deferred until all supported Windows architectures have binary dependency coverage or a documented compiler toolchain.
 - Platforms: Windows, Linux, and macOS.
 - License: MIT.
-- Maturity: alpha until the release lifecycle milestones are complete.
+- Maturity: alpha. Lifecycle-milestone completion proves the corresponding
+  behaviours but does not itself promote the distribution classifier; maturity
+  promotion requires a separate reviewed release decision.
 
 `tests/check_distribution.py` validates wheel and source-distribution metadata, required contents (including desired-state and Claude Code integration support), archive safety, and exclusion of machine-local state without importing from the checkout. CI installs the wheel and all declared dependencies in a clean environment, then `tests/check_installed_cli.py` requires `--version`, `doctor`, `tools list`, the platform-appropriate Bash provider status, and the non-mutating desired-state and integration command help surfaces to pass from an unrelated directory. Build and smoke-test state is kept outside the checkout, which must remain unchanged.
 
 CI builds one release bundle on Ubuntu, verifies its checksum manifest, and passes the same wheel to Windows, Ubuntu, and macOS jobs for isolated `uv tool` installation. This proves operating-system portability of the pure-Python artifact, but it is not native ARM64 coverage. Windows ARM64 may use x64-emulated uv-managed Python; native interpreter selection and architecture reporting are tracked in issue #14.
+
+The same platform jobs download the complete published v0.1.1 and v0.1.2
+release bundles and verify both release checksum manifests. The
+[release lifecycle driver](../tests/check_release_lifecycle.py) then installs
+that exact earlier wheel directly, matching its documented GitHub-release
+installation, and exposes the exact published v0.1.2 wheel through a disposable
+PEP 503 index. It proves replacement of the earlier direct-wheel receipt during
+upgrade, then uses the independently checksum-verified HEAD wheel only to
+create current desired-capability state. Reinstalling the exact published
+current version, rolling back through the exact earlier wheel, and uninstalling
+must all preserve the state bytes. The test also records and rechecks the
+externally owned Bash executable and version after uninstall. This is an
+application lifecycle contract, not a native-provider removal promise. On
+macOS, where the documented configuration path is under the current user home,
+the test requires separate home-configuration mutation authority and removes
+only the file it created after proving application removal preserved it; it
+never redirects `HOME`.
 
 ## PyPI presentation review
 
