@@ -60,26 +60,6 @@ class ProviderExecutionTests(unittest.TestCase):
         defaults.update(kwargs)
         return provider_execution._execute_provider_plan_unmanaged(plan, **defaults)
 
-    def test_cancellation_contexts_are_operation_scoped(self):
-        first = KeyboardInterrupt()
-        later = KeyboardInterrupt()
-        cancelling = provider_execution._CancellationContext()
-        independent = provider_execution._CancellationContext()
-
-        cancelling.observe(first)
-        with self.assertRaises(provider_execution._ForceAbort) as raised:
-            cancelling.observe(later)
-
-        self.assertEqual(
-            cancelling.phase, provider_execution._CancellationPhase.FORCE_ABORTED
-        )
-        self.assertIs(cancelling.first_interruption, first)
-        self.assertIs(raised.exception.interruption, later)
-        self.assertEqual(
-            independent.phase, provider_execution._CancellationPhase.RUNNING
-        )
-        self.assertIsNone(independent.first_interruption)
-        self.assertIsNone(independent.force_abort)
 
     def test_zero_action_plan_needs_no_mutation_authorization(self):
         state = self.state(capabilities.GHOSTSCRIPT, available=True)
@@ -105,13 +85,11 @@ class ProviderExecutionTests(unittest.TestCase):
         def interrupt(argv, timeout):
             raise provider_execution.CommandInterruptedError(result)
 
-        with self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised:
-            self.execute(
-                self.plan(),
-                detector=lambda capability, machine: self.state(capability),
-                runner=interrupt,
-            )
-        report = raised.exception.report
+        report = self.execute(
+            self.plan(),
+            detector=lambda capability, machine: self.state(capability),
+            runner=interrupt,
+        )
         self.assertEqual(report.outcome, provider_execution.PlanOutcome.PARTIAL_FAILURE)
         self.assertEqual(
             report.actions[0].outcome,
@@ -119,46 +97,7 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         self.assertEqual(report.actions[0].commands[0].stdout, "partial output")
 
-    def test_second_interrupt_during_provider_report_synthesis_force_aborts(self):
-        completed = subprocess.CompletedProcess(
-            ("/usr/bin/sudo",), -2, "partial output", "interrupted"
-        )
-        for boundary in ("_command_report", "_action_report", "_failed_report"):
-            with self.subTest(boundary=boundary):
-                first = provider_execution.CommandInterruptedError(completed)
-                later = KeyboardInterrupt()
-                cancellation = provider_execution._CancellationContext()
-                runner = Mock(side_effect=first)
-                with (
-                    patch.object(provider_execution, boundary, side_effect=later),
-                    self.assertRaises(provider_execution._ForceAbort) as raised,
-                ):
-                    self.execute(
-                        self.plan(),
-                        detector=lambda capability, machine: self.state(capability),
-                        runner=runner,
-                        _cancellation=cancellation,
-                    )
-                self.assertIs(raised.exception.interruption, later)
-                self.assertEqual(
-                    cancellation.phase,
-                    provider_execution._CancellationPhase.FORCE_ABORTED,
-                )
-                runner.assert_called_once()
 
-    def test_force_abort_from_runner_is_not_translated_by_provider_plan(self):
-        later = KeyboardInterrupt()
-        force_abort = provider_execution._ForceAbort(later)
-        runner = Mock(side_effect=force_abort)
-        detector = Mock(return_value=self.state(capabilities.GHOSTSCRIPT))
-
-        with self.assertRaises(provider_execution._ForceAbort) as raised:
-            self.execute(self.plan(), detector=detector, runner=runner)
-
-        self.assertIs(raised.exception, force_abort)
-        self.assertIs(raised.exception.interruption, later)
-        runner.assert_called_once()
-        detector.assert_called_once()
 
     def test_post_command_verification_exception_returns_partial_evidence(self):
         absent = self.state(capabilities.GHOSTSCRIPT)
@@ -179,199 +118,11 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(report.actions[0].commands[0].stdout, "installed")
         self.assertIn("RuntimeError: verification broke", report.actions[0].detail)
 
-    def test_final_path_extraction_interrupt_preserves_command_evidence(self):
-        absent = self.state(capabilities.GHOSTSCRIPT)
-        available = self.state(capabilities.GHOSTSCRIPT, available=True)
-        with (
-            patch.object(
-                provider_execution,
-                "_observed_verified_provider_paths",
-                side_effect=KeyboardInterrupt(),
-            ),
-            self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised,
-        ):
-            self.execute(
-                self.plan(),
-                detector=self.detector_sequence(absent, available),
-                runner=lambda argv, timeout: subprocess.CompletedProcess(
-                    argv, 0, "installed", ""
-                ),
-            )
-        action = raised.exception.report.actions[0]
-        self.assertEqual(
-            action.outcome, provider_execution.ActionOutcome.INTERRUPTED
-        )
-        self.assertEqual(action.commands[0].returncode, 0)
-        self.assertEqual(action.commands[0].stdout, "installed")
 
-    def test_post_runner_normalization_interrupt_preserves_command_evidence(self):
-        absent = self.state(capabilities.GHOSTSCRIPT)
-        completed = subprocess.CompletedProcess(
-            ("ignored",), 0, "completed output", "completed error"
-        )
-        original = provider_execution._command_report
-        calls = 0
 
-        def interrupt_once(argv, result):
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                raise KeyboardInterrupt()
-            return original(argv, result)
 
-        with (
-            patch.object(
-                provider_execution, "_command_report", side_effect=interrupt_once
-            ),
-            self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised,
-        ):
-            self.execute(
-                self.plan(),
-                detector=lambda capability, machine: absent,
-                runner=lambda argv, timeout: completed,
-            )
-        action = raised.exception.report.actions[0]
-        self.assertEqual(action.outcome, provider_execution.ActionOutcome.INTERRUPTED)
-        self.assertEqual(len(action.commands), 1)
-        self.assertEqual(action.commands[0].returncode, 0)
-        self.assertEqual(action.commands[0].stdout, "completed output")
-        self.assertEqual(action.commands[0].stderr, "completed error")
 
-    def test_post_runner_classification_interrupt_does_not_duplicate_evidence(self):
-        absent = self.state(capabilities.GHOSTSCRIPT)
-        completed = subprocess.CompletedProcess(
-            ("ignored",), 7, "completed output", "completed error"
-        )
-        with (
-            patch.object(
-                provider_execution,
-                "_completed_command_failure",
-                side_effect=KeyboardInterrupt(),
-            ),
-            self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised,
-        ):
-            self.execute(
-                self.plan(),
-                detector=lambda capability, machine: absent,
-                runner=lambda argv, timeout: completed,
-            )
-        action = raised.exception.report.actions[0]
-        self.assertEqual(action.outcome, provider_execution.ActionOutcome.INTERRUPTED)
-        self.assertEqual(len(action.commands), 1)
-        self.assertEqual(action.commands[0].returncode, 7)
-        self.assertEqual(action.commands[0].stdout, "completed output")
-        self.assertEqual(action.commands[0].stderr, "completed error")
 
-    def test_later_precheck_interrupt_preserves_completed_action_only(self):
-        ghostscript_absent = self.state(capabilities.GHOSTSCRIPT)
-        ghostscript_available = self.state(
-            capabilities.GHOSTSCRIPT, available=True
-        )
-        poppler_absent = self.state(capabilities.POPPLER)
-        plan = provider_plans.generate_provider_plan(
-            (ghostscript_absent, poppler_absent),
-            ("ghostscript", "poppler"),
-            package_managers=(self.manager,),
-        )
-        detector = Mock(
-            side_effect=(
-                ghostscript_absent,
-                ghostscript_available,
-                KeyboardInterrupt(),
-            )
-        )
-        with self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised:
-            self.execute(
-                plan,
-                detector=detector,
-                runner=lambda argv, timeout: subprocess.CompletedProcess(
-                    argv, 0, "installed", ""
-                ),
-            )
-        report = raised.exception.report
-        self.assertEqual(report.actions[0].outcome, provider_execution.ActionOutcome.SUCCEEDED)
-        self.assertEqual(report.actions[0].commands[0].stdout, "installed")
-        self.assertEqual(
-            report.actions[1].outcome,
-            provider_execution.ActionOutcome.NOT_ATTEMPTED,
-        )
-        self.assertEqual(report.actions[1].commands, ())
-
-    def test_later_capability_lookup_interrupt_preserves_completed_action(self):
-        ghostscript_absent = self.state(capabilities.GHOSTSCRIPT)
-        ghostscript_available = self.state(
-            capabilities.GHOSTSCRIPT, available=True
-        )
-        poppler_absent = self.state(capabilities.POPPLER)
-        plan = provider_plans.generate_provider_plan(
-            (ghostscript_absent, poppler_absent),
-            ("ghostscript", "poppler"),
-            package_managers=(self.manager,),
-        )
-        original = provider_execution.get_capability
-        poppler_lookups = 0
-
-        def interrupt_later_poppler_lookup(capability_id):
-            nonlocal poppler_lookups
-            if capability_id == "poppler":
-                poppler_lookups += 1
-                if poppler_lookups == 2:
-                    raise KeyboardInterrupt()
-            return original(capability_id)
-
-        with (
-            patch.object(
-                provider_execution,
-                "get_capability",
-                side_effect=interrupt_later_poppler_lookup,
-            ),
-            self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised,
-        ):
-            self.execute(
-                plan,
-                detector=self.detector_sequence(
-                    ghostscript_absent, ghostscript_available
-                ),
-                runner=lambda argv, timeout: subprocess.CompletedProcess(
-                    argv, 0, "installed", ""
-                ),
-            )
-        report = raised.exception.report
-        self.assertEqual(
-            report.actions[0].outcome,
-            provider_execution.ActionOutcome.SUCCEEDED,
-        )
-        self.assertEqual(report.actions[0].commands[0].stdout, "installed")
-        self.assertEqual(
-            report.actions[1].outcome,
-            provider_execution.ActionOutcome.NOT_ATTEMPTED,
-        )
-        self.assertEqual(report.actions[1].commands, ())
-
-    def test_execution_preflight_interrupt_never_marks_current_action_attempted(self):
-        absent = self.state(capabilities.GHOSTSCRIPT)
-        phases = (
-            ("manager", {"manager_verifier": Mock(side_effect=KeyboardInterrupt())}),
-            ("privilege", {"privilege_resolver": Mock(side_effect=KeyboardInterrupt())}),
-            ("supervisor", {"supervisor_resolver": Mock(side_effect=KeyboardInterrupt())}),
-            ("sudo", {"privilege_preflight": Mock(side_effect=KeyboardInterrupt())}),
-        )
-        for name, overrides in phases:
-            with self.subTest(phase=name):
-                with self.assertRaises(
-                    provider_execution.ProviderPlanInterrupted
-                ) as raised:
-                    self.execute(
-                        self.plan(),
-                        detector=lambda capability, machine: absent,
-                        **overrides,
-                    )
-                report = raised.exception.report
-                self.assertEqual(
-                    report.actions[0].outcome,
-                    provider_execution.ActionOutcome.NOT_ATTEMPTED,
-                )
-                self.assertEqual(report.actions[0].commands, ())
 
     def test_later_execution_preflight_exception_preserves_completed_action(self):
         ghostscript_absent = self.state(capabilities.GHOSTSCRIPT)
@@ -1302,167 +1053,7 @@ class ProviderExecutionTests(unittest.TestCase):
             provider_execution.ActionOutcome.SUPERVISOR_FAILED.value,
         )
 
-    def test_lifecycle_materialization_interrupt_preserves_prior_action_evidence(self):
-        ghostscript_absent = self.state(capabilities.GHOSTSCRIPT)
-        ghostscript_available = self.state(
-            capabilities.GHOSTSCRIPT, available=True
-        )
-        poppler_absent = self.state(capabilities.POPPLER)
-        plan = provider_plans.generate_provider_plan(
-            (ghostscript_absent, poppler_absent),
-            ("ghostscript", "poppler"),
-            package_managers=(self.manager,),
-        )
-        process = Mock(stdout=None, stderr=None, returncode=-9)
-        ordinary = provider_execution.CommandLifecycleError(
-            subprocess.CompletedProcess(
-                plan.actions[1].commands[0], -9, "partial", "failed"
-            ),
-            "provider command launched, but supervision failed",
-            lifetime_uncertain=False,
-        )
-        first = KeyboardInterrupt()
-        materializations = 0
-        runner_calls = 0
-        cancellation = provider_execution._CancellationContext()
 
-        def materialize(argv, started, stdout_tail, stderr_tail):
-            nonlocal materializations
-            materializations += 1
-            if materializations == 1:
-                raise first
-            return subprocess.CompletedProcess(argv, -9, "partial", "failed")
-
-        def run(argv, timeout):
-            nonlocal runner_calls
-            runner_calls += 1
-            if runner_calls <= 2:
-                return subprocess.CompletedProcess(
-                    argv, 0, f"completed-{runner_calls}", ""
-                )
-            return provider_execution._run(
-                argv, timeout, _cancellation=cancellation
-            )
-
-        detector = Mock(
-            side_effect=self.detector_sequence(
-                ghostscript_absent,
-                ghostscript_available,
-                poppler_absent,
-            )
-        )
-        with (
-            patch.object(provider_execution.subprocess, "Popen", return_value=process),
-            patch.object(
-                provider_execution,
-                "_supervise_started_process",
-                side_effect=ordinary,
-            ),
-            patch.object(
-                provider_execution,
-                "_best_effort_started_process_cleanup",
-                return_value=True,
-            ) as cleanup,
-            patch.object(
-                provider_execution,
-                "_started_process_result",
-                side_effect=materialize,
-            ),
-            self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised,
-        ):
-            self.execute(
-                plan,
-                detector=detector,
-                runner=run,
-                _cancellation=cancellation,
-            )
-
-        report = raised.exception.report
-        self.assertEqual(report.actions[0].outcome, provider_execution.ActionOutcome.SUCCEEDED)
-        self.assertEqual(report.actions[0].commands[-1].stdout, "completed-2")
-        self.assertEqual(
-            report.actions[1].outcome,
-            provider_execution.ActionOutcome.INTERRUPTED,
-        )
-        self.assertEqual(report.actions[1].commands[0].returncode, -9)
-        self.assertEqual(report.actions[1].commands[0].stdout, "partial")
-        self.assertFalse(
-            any("no provider command started" in item for item in report.recovery_guidance)
-        )
-        self.assertEqual(runner_calls, 3)
-        self.assertEqual(materializations, 2)
-        cleanup.assert_called_once()
-
-    def test_lifecycle_report_interrupt_preserves_prior_action_evidence(self):
-        ghostscript_absent = self.state(capabilities.GHOSTSCRIPT)
-        ghostscript_available = self.state(
-            capabilities.GHOSTSCRIPT, available=True
-        )
-        poppler_absent = self.state(capabilities.POPPLER)
-        plan = provider_plans.generate_provider_plan(
-            (ghostscript_absent, poppler_absent),
-            ("ghostscript", "poppler"),
-            package_managers=(self.manager,),
-        )
-        lifecycle_result = subprocess.CompletedProcess(
-            plan.actions[1].commands[0], -9, "partial", "failed"
-        )
-        lifecycle = provider_execution.CommandLifecycleError(
-            lifecycle_result,
-            "provider command launched, but supervision failed",
-            lifetime_uncertain=False,
-        )
-        first = KeyboardInterrupt()
-        runner_calls = 0
-        interrupted = False
-        command_report = provider_execution._command_report
-
-        def run(argv, timeout):
-            nonlocal runner_calls
-            runner_calls += 1
-            if runner_calls <= 2:
-                return subprocess.CompletedProcess(
-                    argv, 0, f"completed-{runner_calls}", ""
-                )
-            raise lifecycle
-
-        def interrupt_lifecycle_report(argv, result, **keywords):
-            nonlocal interrupted
-            if result is lifecycle_result and not interrupted:
-                interrupted = True
-                raise first
-            return command_report(argv, result, **keywords)
-
-        detector = Mock(
-            side_effect=self.detector_sequence(
-                ghostscript_absent,
-                ghostscript_available,
-                poppler_absent,
-            )
-        )
-        with (
-            patch.object(
-                provider_execution,
-                "_command_report",
-                side_effect=interrupt_lifecycle_report,
-            ),
-            self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised,
-        ):
-            self.execute(plan, detector=detector, runner=run)
-
-        report = raised.exception.report
-        self.assertEqual(report.actions[0].outcome, provider_execution.ActionOutcome.SUCCEEDED)
-        self.assertEqual(report.actions[0].commands[-1].stdout, "completed-2")
-        self.assertEqual(
-            report.actions[1].outcome,
-            provider_execution.ActionOutcome.INTERRUPTED,
-        )
-        self.assertEqual(report.actions[1].commands[0].returncode, -9)
-        self.assertEqual(report.actions[1].commands[0].stdout, "partial")
-        self.assertFalse(
-            any("no provider command started" in item for item in report.recovery_guidance)
-        )
-        self.assertEqual(runner_calls, 3)
 
     def test_uncertain_post_start_interrupt_is_persisted_before_propagation(self):
         absent = self.state(capabilities.GHOSTSCRIPT)
@@ -1477,24 +1068,21 @@ class ProviderExecutionTests(unittest.TestCase):
 
         with TemporaryDirectory() as directory:
             state_path = Path(directory) / "managed-state.json"
-            with self.assertRaises(
-                provider_execution.ProviderPlanInterrupted
-            ) as raised:
-                managed_state.execute_provider_plan(
-                    plan,
-                    state_path=state_path,
-                    allow_provider_mutation=True,
-                    current_context=lambda: self.machine,
-                    manager_verifier=lambda state, machine: True,
-                    privilege_resolver=lambda action: "/usr/bin/sudo",
-                    supervisor_resolver=lambda action: "/usr/bin/timeout",
-                    privilege_preflight=lambda argv: True,
-                    detector=self.detector_sequence(absent),
-                    runner=interrupt,
-                )
+            managed_result = managed_state.execute_provider_plan(
+                plan,
+                state_path=state_path,
+                allow_provider_mutation=True,
+                current_context=lambda: self.machine,
+                manager_verifier=lambda state, machine: True,
+                privilege_resolver=lambda action: "/usr/bin/sudo",
+                supervisor_resolver=lambda action: "/usr/bin/timeout",
+                privilege_preflight=lambda argv: True,
+                detector=self.detector_sequence(absent),
+                runner=interrupt,
+            )
             document = managed_state.load_document(state_path)
 
-        report = raised.exception.report
+        report = managed_result.execution
         self.assertEqual(
             report.actions[0].outcome,
             provider_execution.ActionOutcome.SUPERVISOR_FAILED,
@@ -1689,17 +1277,6 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         self.assertIn("different capability", report.actions[0].detail)
 
-    def test_reader_join_interruption_is_preserved(self):
-        first = Mock()
-        second = Mock()
-        first.join.side_effect = (KeyboardInterrupt(), None)
-        second.join.return_value = None
-        first.is_alive.return_value = True
-        second.is_alive.return_value = True
-        stop = threading.Event()
-        with self.assertRaises(KeyboardInterrupt):
-            provider_execution._join_output_readers((first, second), stop, [])
-        self.assertTrue(stop.is_set())
 
     def test_native_replacement_uses_any_fresh_native_provider_but_not_translated(self):
         machine = capabilities.MachineState("Darwin", "arm64")
@@ -1810,56 +1387,6 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(report.outcome, provider_execution.PlanOutcome.SUCCEEDED)
         self.assertEqual(os.environ.get("PATH"), original)
 
-    def test_partial_environment_application_cancellation_restores_before_body(self):
-        first = KeyboardInterrupt()
-        cancellation = provider_execution._CancellationContext()
-        detector = Mock(
-            side_effect=AssertionError("detector must not run after entry cancellation")
-        )
-        runner = Mock(
-            side_effect=AssertionError("provider command must not run")
-        )
-        names = ("AGENT_TOOLS_TEST_ENV_ONE", "AGENT_TOOLS_TEST_ENV_TWO")
-        previous = {name: os.environ.get(name) for name in names}
-
-        def interrupt_partial_application(updates):
-            os.environ[names[0]] = updates[names[0]]
-            raise first
-
-        try:
-            os.environ[names[0]] = "original-one"
-            os.environ.pop(names[1], None)
-            with (
-                patch.object(
-                    provider_execution,
-                    "_apply_environment",
-                    side_effect=interrupt_partial_application,
-                ),
-                self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised,
-            ):
-                self.execute(
-                    self.plan(),
-                    detector=detector,
-                    runner=runner,
-                    environment_refresher=lambda action: {
-                        names[0]: "temporary-one",
-                        names[1]: "temporary-two",
-                    },
-                    _cancellation=cancellation,
-                )
-
-            self.assertEqual(os.environ.get(names[0]), "original-one")
-            self.assertNotIn(names[1], os.environ)
-        finally:
-            provider_execution._restore_environment(previous)
-
-        self.assertEqual(
-            cancellation.phase, provider_execution._CancellationPhase.CANCELLING
-        )
-        self.assertIs(cancellation.first_interruption, first)
-        self.assertIs(raised.exception.__cause__, first)
-        detector.assert_not_called()
-        runner.assert_not_called()
 
     def test_partial_environment_application_ordinary_failure_restores(self):
         cancellation = provider_execution._CancellationContext()
@@ -1901,262 +1428,11 @@ class ProviderExecutionTests(unittest.TestCase):
             cancellation.phase, provider_execution._CancellationPhase.RUNNING
         )
 
-    def test_first_normal_restore_interrupt_finishes_controlled_restoration(self):
-        first = KeyboardInterrupt()
-        cancellation = provider_execution._CancellationContext()
-        names = ("AGENT_TOOLS_TEST_ENV_ONE", "AGENT_TOOLS_TEST_ENV_TWO")
-        original = {name: os.environ.get(name) for name in names}
-        restore = provider_execution._restore_environment
-        restore_calls = 0
 
-        def interrupt_first_restore(previous):
-            nonlocal restore_calls
-            restore_calls += 1
-            if restore_calls == 1:
-                os.environ[names[0]] = "partially-restored"
-                raise first
-            self.assertEqual(
-                cancellation.phase,
-                provider_execution._CancellationPhase.CANCELLING,
-            )
-            restore(previous)
 
-        try:
-            os.environ[names[0]] = "original-one"
-            os.environ.pop(names[1], None)
-            with (
-                patch.object(
-                    provider_execution,
-                    "_restore_environment",
-                    side_effect=interrupt_first_restore,
-                ),
-                self.assertRaises(KeyboardInterrupt) as raised,
-            ):
-                with provider_execution._temporary_environment(
-                    {
-                        names[0]: "temporary-one",
-                        names[1]: "temporary-two",
-                    },
-                    cancellation,
-                ):
-                    self.assertEqual(os.environ[names[0]], "temporary-one")
-                    self.assertEqual(os.environ[names[1]], "temporary-two")
 
-            self.assertIs(raised.exception, first)
-            self.assertEqual(os.environ[names[0]], "original-one")
-            self.assertNotIn(names[1], os.environ)
-        finally:
-            restore(original)
 
-        self.assertEqual(restore_calls, 2)
-        self.assertIs(cancellation.first_interruption, first)
 
-    def test_second_controlled_restore_interrupt_force_aborts_without_retry(self):
-        first = KeyboardInterrupt()
-        later = KeyboardInterrupt()
-        cancellation = provider_execution._CancellationContext()
-        names = ("AGENT_TOOLS_TEST_ENV_ONE", "AGENT_TOOLS_TEST_ENV_TWO")
-        original = {name: os.environ.get(name) for name in names}
-        restore = provider_execution._restore_environment
-        restore_calls = 0
-
-        def interrupt_both_restores(previous):
-            nonlocal restore_calls
-            restore_calls += 1
-            raise first if restore_calls == 1 else later
-
-        try:
-            with (
-                patch.object(
-                    provider_execution,
-                    "_restore_environment",
-                    side_effect=interrupt_both_restores,
-                ),
-                self.assertRaises(provider_execution._ForceAbort) as raised,
-            ):
-                with provider_execution._temporary_environment(
-                    {
-                        names[0]: "temporary-one",
-                        names[1]: "temporary-two",
-                    },
-                    cancellation,
-                ):
-                    pass
-        finally:
-            restore(original)
-
-        self.assertEqual(restore_calls, 2)
-        self.assertIs(raised.exception.interruption, later)
-        self.assertEqual(
-            cancellation.phase,
-            provider_execution._CancellationPhase.FORCE_ABORTED,
-        )
-
-    def test_ordinary_body_failure_restore_interrupt_finishes_before_cancellation(self):
-        first = KeyboardInterrupt()
-        cancellation = provider_execution._CancellationContext()
-        original_path = os.environ.get("PATH")
-        restore = provider_execution._restore_environment
-        restore_calls = 0
-
-        def interrupt_first_restore(previous):
-            nonlocal restore_calls
-            restore_calls += 1
-            if restore_calls == 1:
-                raise first
-            restore(previous)
-
-        with (
-            patch.object(
-                provider_execution,
-                "_restore_environment",
-                side_effect=interrupt_first_restore,
-            ),
-            self.assertRaises(KeyboardInterrupt) as raised,
-        ):
-            with provider_execution._temporary_environment(
-                {"PATH": "/temporary"}, cancellation
-            ):
-                raise RuntimeError("ordinary body failure")
-
-        self.assertIs(raised.exception, first)
-        self.assertIsInstance(raised.exception.__context__, RuntimeError)
-        self.assertEqual(restore_calls, 2)
-        self.assertEqual(os.environ.get("PATH"), original_path)
-
-    def test_detector_cancellation_is_classified_before_environment_restore(self):
-        original_path = os.environ.get("PATH")
-        first = KeyboardInterrupt()
-        cancellation = provider_execution._CancellationContext()
-        restore = provider_execution._restore_environment
-        observed_phases = []
-
-        def observe_restore(previous):
-            observed_phases.append(cancellation.phase)
-            restore(previous)
-
-        with (
-            patch.object(
-                provider_execution,
-                "_restore_environment",
-                side_effect=observe_restore,
-            ),
-            self.assertRaises(provider_execution.ProviderPlanInterrupted) as raised,
-        ):
-            self.execute(
-                self.plan(),
-                detector=Mock(side_effect=first),
-                environment_refresher=lambda action: {"PATH": "/temporary"},
-                _cancellation=cancellation,
-            )
-
-        self.assertEqual(
-            observed_phases, [provider_execution._CancellationPhase.CANCELLING]
-        )
-        self.assertEqual(
-            cancellation.phase, provider_execution._CancellationPhase.CANCELLING
-        )
-        self.assertIs(cancellation.first_interruption, first)
-        self.assertIs(raised.exception.__cause__, first)
-        self.assertEqual(os.environ.get("PATH"), original_path)
-        self.assertEqual(
-            raised.exception.report.actions[0].outcome,
-            provider_execution.ActionOutcome.NOT_ATTEMPTED,
-        )
-
-    def test_structured_cancellation_is_adopted_before_environment_restore(self):
-        cancellation = provider_execution._CancellationContext()
-        structured = provider_execution.ProviderPlanInterrupted(
-            provider_execution._preflight_interrupted_report(
-                self.plan(), self.machine
-            )
-        )
-        later = KeyboardInterrupt()
-        original_path = os.environ.get("PATH")
-
-        try:
-            with (
-                patch.object(
-                    provider_execution,
-                    "_restore_environment",
-                    side_effect=later,
-                ),
-                self.assertRaises(provider_execution._ForceAbort) as raised,
-            ):
-                with provider_execution._temporary_environment(
-                    {"PATH": "/temporary"}, cancellation
-                ):
-                    raise structured
-        finally:
-            if original_path is None:
-                os.environ.pop("PATH", None)
-            else:
-                os.environ["PATH"] = original_path
-
-        self.assertIs(cancellation.first_interruption, structured)
-        self.assertEqual(
-            cancellation.phase,
-            provider_execution._CancellationPhase.FORCE_ABORTED,
-        )
-        self.assertIs(raised.exception.interruption, later)
-        self.assertIs(raised.exception.__cause__, later)
-
-    def test_post_verification_restore_interrupt_force_aborts(self):
-        plan = self.plan()
-        absent = self.state(capabilities.GHOSTSCRIPT)
-        first = KeyboardInterrupt()
-        later = KeyboardInterrupt()
-        cancellation = provider_execution._CancellationContext()
-        runner = Mock(
-            return_value=subprocess.CompletedProcess(("manager",), 0, "", "")
-        )
-        restore = provider_execution._restore_environment
-        restore_calls = 0
-        original_path = os.environ.get("PATH")
-
-        def interrupt_second_restore(previous):
-            nonlocal restore_calls
-            restore_calls += 1
-            if restore_calls == 2:
-                self.assertEqual(
-                    cancellation.phase,
-                    provider_execution._CancellationPhase.CANCELLING,
-                )
-                raise later
-            restore(previous)
-
-        try:
-            with (
-                patch.object(
-                    provider_execution,
-                    "_restore_environment",
-                    side_effect=interrupt_second_restore,
-                ),
-                patch.object(
-                    provider_execution,
-                    "_action_report",
-                    side_effect=AssertionError(
-                        "force-abort must not synthesize an action report"
-                    ),
-                ),
-                self.assertRaises(provider_execution._ForceAbort) as raised,
-            ):
-                self.execute(
-                    plan,
-                    detector=Mock(side_effect=(absent, first)),
-                    runner=runner,
-                    environment_refresher=lambda action: {"PATH": "/temporary"},
-                    _cancellation=cancellation,
-                )
-        finally:
-            if original_path is None:
-                os.environ.pop("PATH", None)
-            else:
-                os.environ["PATH"] = original_path
-
-        self.assertIs(raised.exception.interruption, later)
-        self.assertEqual(restore_calls, 2)
-        self.assertEqual(runner.call_count, len(plan.actions[0].commands))
 
     def test_temporary_environment_restores_after_ordinary_exception(self):
         original_path = os.environ.get("PATH")
