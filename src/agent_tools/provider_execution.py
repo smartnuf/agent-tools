@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import codecs
+from decimal import Decimal, InvalidOperation
+import math
 import ntpath
 import os
 import posixpath
+import re
 import select
 import signal
 import shutil
@@ -14,8 +17,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Mapping
-from contextlib import contextmanager
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -49,13 +51,22 @@ from .python_selection import NativeStatus, normalize_architecture
 
 
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 300
+MAX_COMMAND_TIMEOUT_SECONDS = 999_999_999
+MAX_COMMAND_TIMEOUT_FRACTION_DIGITS = 6
+MIN_PROCESS_RETURNCODE = -(2**31)
+MAX_PROCESS_RETURNCODE = (2**32) - 1
 MAX_CAPTURED_OUTPUT_CHARS = 1024 * 1024
+OUTPUT_TRUNCATION_MARKER = "[earlier output truncated]\n"
 ELEVATED_TERM_TO_KILL_GRACE_SECONDS = 5
 ELEVATED_SUPERVISOR_GUARD_SECONDS = 10
 OUTPUT_PIPE_CLOSURE_GUARD_SECONDS = 1
 POSIX_SIGKILL_RETURNCODE = -9
 _ENVIRONMENT_LOCK = threading.RLock()
 _EXECUTION_LOCK = threading.RLock()
+_TIMEOUT_TOKEN = re.compile(
+    rf"(?:0\.\d{{1,{MAX_COMMAND_TIMEOUT_FRACTION_DIGITS}}}|"
+    rf"[1-9]\d{{0,8}}(?:\.\d{{1,{MAX_COMMAND_TIMEOUT_FRACTION_DIGITS}}})?)s"
+)
 
 
 class ExecutionContractError(RuntimeError):
@@ -73,23 +84,162 @@ class UncertainSupervisionError(ExecutionContractError):
             "descendant or package-related activity may still be running, Agent Tools "
             "could not establish quiescence, and provider/package state is uncertain"
         ),
+        *,
+        timed_out: bool = False,
     ) -> None:
         super().__init__(detail)
         self.result = result
         self.detail = detail
+        self.timed_out = timed_out
 
 
-class CommandInitializationError(ExecutionContractError):
-    """Raised after a command starts but local output setup fails cleanly."""
+class CommandLifecycleError(ExecutionContractError):
+    """Carry evidence for a failure after process creation succeeded."""
 
     def __init__(
         self,
         result: subprocess.CompletedProcess[str],
         detail: str,
+        *,
+        lifetime_uncertain: bool,
+        timed_out: bool = False,
     ) -> None:
         super().__init__(detail)
         self.result = result
         self.detail = detail
+        self.lifetime_uncertain = lifetime_uncertain
+        self.timed_out = timed_out
+
+
+class _ControlledCancellation(KeyboardInterrupt):
+    """Base class for structured evidence carrying the first cancellation."""
+
+
+class CommandInterruptedError(ExecutionContractError):
+    """Carry post-start evidence from one cooperative cancellation checkpoint."""
+
+    def __init__(
+        self,
+        result: subprocess.CompletedProcess[str],
+        detail: str = "provider command interrupted after bounded cleanup",
+        *,
+        lifetime_uncertain: bool = False,
+    ) -> None:
+        super().__init__(detail)
+        self.result = result
+        self.detail = detail
+        self.lifetime_uncertain = lifetime_uncertain
+
+
+class _ForceAbort(KeyboardInterrupt):
+    """Carry a later interrupt through an active cancellation unchanged."""
+
+    def __init__(self, interruption: KeyboardInterrupt) -> None:
+        super().__init__("force-abort during provider cancellation")
+        self.interruption = interruption
+
+
+class _CancellationPhase(str, Enum):
+    RUNNING = "running"
+    CANCEL_REQUESTED = "cancel-requested"
+    CANCELLING = "cancelling"
+    FORCE_ABORTED = "force-aborted"
+
+
+@dataclass
+class _CancellationContext:
+    """Own cancellation phase for one provider operation."""
+
+    phase: _CancellationPhase = _CancellationPhase.RUNNING
+    first_interruption: KeyboardInterrupt | None = None
+    force_abort: _ForceAbort | None = None
+
+    @property
+    def requested(self) -> bool:
+        return self.phase in {
+            _CancellationPhase.CANCEL_REQUESTED,
+            _CancellationPhase.CANCELLING,
+        }
+
+    def request(self, interruption: KeyboardInterrupt | None = None) -> None:
+        """Record a signal request without raising into transaction code."""
+
+        interruption = interruption or KeyboardInterrupt()
+        if self.phase is _CancellationPhase.RUNNING:
+            self.phase = _CancellationPhase.CANCEL_REQUESTED
+            self.first_interruption = interruption
+            return
+        self._raise_force_abort(interruption)
+
+    def checkpoint(self) -> bool:
+        """Accept a pending request at a semantically safe boundary."""
+
+        if self.phase is _CancellationPhase.CANCEL_REQUESTED:
+            self.phase = _CancellationPhase.CANCELLING
+        if self.phase is _CancellationPhase.FORCE_ABORTED:
+            if self.force_abort is None:
+                raise RuntimeError("force-aborted context has no carrier")
+            raise self.force_abort
+        return self.phase is _CancellationPhase.CANCELLING
+
+    def _raise_force_abort(self, interruption: KeyboardInterrupt) -> None:
+        if self.force_abort is None:
+            self.force_abort = _ForceAbort(interruption)
+        self.phase = _CancellationPhase.FORCE_ABORTED
+        raise self.force_abort from interruption
+
+
+class _SigintBroker:
+    """Translate supported first SIGINT into one cooperative request."""
+
+    def __init__(self, cancellation: _CancellationContext) -> None:
+        self._cancellation = cancellation
+        self._previous: object | None = None
+        self.installed = False
+
+    @staticmethod
+    def _supported_previous_handler(handler: object) -> bool:
+        return handler is signal.SIG_DFL or handler is signal.default_int_handler
+
+    def __enter__(self) -> _SigintBroker:
+        if threading.current_thread() is not threading.main_thread():
+            return self
+        previous = signal.getsignal(signal.SIGINT)
+        if isinstance(getattr(previous, "__self__", None), _SigintBroker):
+            raise RuntimeError("managed SIGINT brokerage cannot be nested")
+        if not self._supported_previous_handler(previous):
+            return self
+        self._previous = previous
+        signal.signal(signal.SIGINT, self._handle)
+        self.installed = True
+        return self
+
+    def _handle(self, signum: int, frame: object) -> None:
+        del signum, frame
+        self._cancellation.request(KeyboardInterrupt())
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        del exc_type, exc, traceback
+        if self.installed:
+            signal.signal(signal.SIGINT, self._previous)
+            self.installed = False
+
+
+class ProviderPlanInterrupted(_ControlledCancellation):
+    """Carry structured attempted-mutation evidence through interruption."""
+
+    def __init__(self, report: PlanExecutionReport) -> None:
+        super().__init__("provider plan interrupted after bounded cleanup")
+        self.report = report
+        self.managed_result: object | None = None
+
+
+class _ProviderPartialReport(RuntimeError):
+    """Internal control flow for returning evidence after a later preflight fails."""
+
+    def __init__(self, report: PlanExecutionReport) -> None:
+        super().__init__("provider execution produced a partial report")
+        self.report = report
 
 
 class PlanOutcome(str, Enum):
@@ -113,6 +263,7 @@ class ActionOutcome(str, Enum):
     TIMED_OUT = "timed-out"
     FORCED_KILL = "forced-kill"
     SUPERVISOR_FAILED = "supervisor-failed"
+    INTERRUPTED = "interrupted"
     VERIFICATION_FAILED = "verification-failed"
 
 
@@ -150,7 +301,8 @@ class PlanExecutionReport:
     recovery_guidance: tuple[str, ...] = ()
 
 
-Runner = Callable[[tuple[str, ...], int], subprocess.CompletedProcess[str]]
+TimeoutSeconds = int | float
+Runner = Callable[[tuple[str, ...], TimeoutSeconds], subprocess.CompletedProcess[str]]
 Detector = Callable[[CapabilitySpec, MachineState], CapabilityState]
 ContextReader = Callable[[], MachineState]
 ManagerVerifier = Callable[[PackageManagerState, MachineState], bool]
@@ -183,12 +335,42 @@ def _path_is_absolute(path: str, machine: MachineState) -> bool:
     )
 
 
+def _raise_post_start_error(
+    argv: tuple[str, ...],
+    process: subprocess.Popen[str],
+    stdout_tail: _BoundedOutputTail,
+    stderr_tail: _BoundedOutputTail,
+    error: Callable[[subprocess.CompletedProcess[str]], BaseException],
+) -> None:
+    """Materialize post-start evidence after cooperative signal capture."""
+
+    raise error(_started_process_result(argv, process, stdout_tail, stderr_tail))
+
+
+def _started_process_result(
+    argv: tuple[str, ...],
+    process: subprocess.Popen[str],
+    stdout_tail: _BoundedOutputTail,
+    stderr_tail: _BoundedOutputTail,
+) -> subprocess.CompletedProcess[str]:
+    """Snapshot bounded evidence for a process whose launch is established."""
+
+    return subprocess.CompletedProcess(
+        argv,
+        process.returncode,
+        stdout_tail.value(),
+        stderr_tail.value(),
+    )
+
+
 def _run(
     argv: tuple[str, ...],
-    timeout: int,
+    timeout: TimeoutSeconds,
     *,
     privileged_supervision: bool = False,
+    _cancellation: _CancellationContext | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    cancellation = _cancellation or _CancellationContext()
     process_options: dict[str, object]
     if os.name == "nt":
         process_options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
@@ -198,18 +380,144 @@ def _run(
     stderr_tail = _BoundedOutputTail(MAX_CAPTURED_OUTPUT_CHARS)
     stop_readers = threading.Event()
     reader_errors: list[OSError] = []
+    started_readers: list[threading.Thread] = []
+    # Keep creation outside the post-start boundary: only this operation can prove
+    # that no provider process was launched.
     process = subprocess.Popen(
         argv,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         **process_options,
     )
+    try:
+        return _supervise_started_process(
+            process,
+            argv,
+            timeout,
+            privileged_supervision,
+            stdout_tail,
+            stderr_tail,
+            stop_readers,
+            reader_errors,
+            started_readers,
+            cancellation,
+        )
+    except _ForceAbort:
+        raise
+    except CommandLifecycleError as error:
+        cleanup_established = _best_effort_started_process_cleanup(
+            process,
+            privileged_supervision,
+            tuple(started_readers),
+            stop_readers,
+            reader_errors,
+            cancellation,
+        )
+        lifetime_uncertain = not cleanup_established
+        _raise_post_start_error(
+            argv,
+            process,
+            stdout_tail,
+            stderr_tail,
+            lambda result: CommandLifecycleError(
+                result,
+                error.detail,
+                lifetime_uncertain=lifetime_uncertain,
+                timed_out=error.timed_out,
+            ),
+        )
+    except CommandInterruptedError as error:
+        raise
+    except OSError as error:
+        cleanup_established = _best_effort_started_process_cleanup(
+            process,
+            privileged_supervision,
+            tuple(started_readers),
+            stop_readers,
+            reader_errors,
+            cancellation,
+        )
+        lifetime_uncertain = not cleanup_established
+        _raise_post_start_error(
+            argv,
+            process,
+            stdout_tail,
+            stderr_tail,
+            lambda result: CommandLifecycleError(
+                result,
+                (
+                    "provider command launched, but post-start lifecycle handling "
+                    f"failed: {error}"
+                ),
+                lifetime_uncertain=lifetime_uncertain,
+            ),
+        )
+
+
+def _best_effort_started_process_cleanup(
+    process: subprocess.Popen[str],
+    privileged_supervision: bool,
+    readers: tuple[threading.Thread, ...],
+    stop_readers: threading.Event,
+    reader_errors: list[OSError],
+    cancellation: _CancellationContext,
+) -> bool:
+    """Return whether process and pipe quiescence were established after failure."""
+
+    process_quiesced = process.returncode is not None
+    if not process_quiesced:
+        try:
+            if privileged_supervision:
+                _terminate_privileged_supervisor(process)
+            else:
+                _terminate_process_tree(process)
+        except Exception:
+            process_quiesced = False
+        else:
+            process_quiesced = process.returncode is not None
+    stop_readers.set()
+    try:
+        readers_clean = _join_output_readers(
+            readers, stop_readers, reader_errors, cancellation
+        )
+    except Exception:
+        readers_clean = False
+    handles_clean = True
+    for stream in (process.stdout, process.stderr):
+        if stream is None:
+            continue
+        try:
+            stream.close()
+        except ValueError:
+            pass
+        except OSError:
+            handles_clean = False
+    return process_quiesced and readers_clean and handles_clean
+
+
+def _supervise_started_process(
+    process: subprocess.Popen[str],
+    argv: tuple[str, ...],
+    timeout: TimeoutSeconds,
+    privileged_supervision: bool,
+    stdout_tail: _BoundedOutputTail,
+    stderr_tail: _BoundedOutputTail,
+    stop_readers: threading.Event,
+    reader_errors: list[OSError],
+    started_readers: list[threading.Thread],
+    cancellation: _CancellationContext,
+) -> subprocess.CompletedProcess[str]:
+    """Supervise a process whose launch is already established as fact."""
+
     readers: tuple[threading.Thread, ...]
     try:
         readers = _start_output_readers(
             process, stdout_tail, stderr_tail, stop_readers, reader_errors
         )
-    except BaseException as error:
+        started_readers.extend(readers)
+    except Exception as error:
+        if isinstance(error, _OutputReaderInitializationError):
+            started_readers.extend(error.started_readers)
         _cleanup_reader_initialization_failure(
             process,
             argv,
@@ -219,75 +527,129 @@ def _run(
             stop_readers,
             reader_errors,
             error,
+            cancellation,
         )
         raise AssertionError("reader initialization cleanup must raise")
     try:
-        process.wait(timeout=timeout)
+        deadline = time.monotonic() + timeout
+        while True:
+            if cancellation.checkpoint():
+                try:
+                    if privileged_supervision:
+                        _terminate_privileged_supervisor(process)
+                    else:
+                        _terminate_process_tree(process)
+                except (ExecutionContractError, OSError) as error:
+                    stop_readers.set()
+                    _join_output_readers(
+                        readers, stop_readers, reader_errors, cancellation
+                    )
+                    raise CommandInterruptedError(
+                        _started_process_result(
+                            argv, process, stdout_tail, stderr_tail
+                        ),
+                        (
+                            "provider command cancellation was accepted after launch, "
+                            f"but termination or reaping failed: {error}"
+                        ),
+                        lifetime_uncertain=True,
+                    ) from error
+                readers_clean = _join_output_readers(
+                    readers, stop_readers, reader_errors, cancellation
+                )
+                raise CommandInterruptedError(
+                    _started_process_result(
+                        argv, process, stdout_tail, stderr_tail
+                    ),
+                    lifetime_uncertain=not readers_clean,
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(argv, timeout)
+            try:
+                process.wait(timeout=min(0.1, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    except CommandInterruptedError:
+        raise
     except subprocess.TimeoutExpired:
         try:
             if privileged_supervision:
                 _terminate_privileged_supervisor(process)
             else:
                 _terminate_process_tree(process)
-        except ExecutionContractError:
-            _join_output_readers(readers, stop_readers, reader_errors)
-            raise _uncertain_output_error(
+        except OSError as error:
+            lifetime_uncertain = process.returncode is None
+            _raise_post_start_error(
                 argv,
-                process.returncode,
+                process,
                 stdout_tail,
                 stderr_tail,
-                detail=(
-                    "privileged supervisor termination could not be established; "
-                    "privileged package-related activity may still be running, Agent "
-                    "Tools could not establish quiescence, and provider/package state "
-                    "is uncertain"
+                lambda result: CommandLifecycleError(
+                    result,
+                    (
+                        "provider command launched and exceeded its timeout, but "
+                        f"termination or reaping failed: {error}"
+                    ),
+                    lifetime_uncertain=lifetime_uncertain,
+                    timed_out=True,
                 ),
-            ) from None
-        if not _join_output_readers(readers, stop_readers, reader_errors):
-            raise _uncertain_output_error(
-                argv, process.returncode, stdout_tail, stderr_tail
             )
-        raise subprocess.TimeoutExpired(
+        except ExecutionContractError:
+            _join_output_readers(
+                readers, stop_readers, reader_errors, cancellation
+            )
+            detail = (
+                "privileged supervisor termination could not be established; "
+                "privileged package-related activity may still be running, Agent "
+                "Tools could not establish quiescence, and provider/package state "
+                "is uncertain"
+            )
+            _raise_post_start_error(
+                argv,
+                process,
+                stdout_tail,
+                stderr_tail,
+                lambda result: UncertainSupervisionError(
+                    result, detail, timed_out=True
+                ),
+            )
+        if not _join_output_readers(
+            readers, stop_readers, reader_errors, cancellation
+        ):
+            _raise_post_start_error(
+                argv,
+                process,
+                stdout_tail,
+                stderr_tail,
+                lambda result: UncertainSupervisionError(
+                    result, timed_out=True
+                ),
+            )
+        _raise_post_start_error(
             argv,
-            timeout,
-            output=stdout_tail.value(),
-            stderr=stderr_tail.value(),
-        ) from None
-    except BaseException:
-        try:
-            if privileged_supervision:
-                _terminate_privileged_supervisor(process)
-            else:
-                _terminate_process_tree(process)
-        except ExecutionContractError:
-            _join_output_readers(readers, stop_readers, reader_errors)
-            raise _uncertain_output_error(
+            process,
+            stdout_tail,
+            stderr_tail,
+            lambda result: subprocess.TimeoutExpired(
                 argv,
-                process.returncode,
-                stdout_tail,
-                stderr_tail,
-                detail=(
-                    "privileged supervisor termination could not be established after "
-                    "interruption; privileged package-related activity may still be "
-                    "running, Agent Tools could not establish quiescence, and provider/"
-                    "package state is uncertain"
-                ),
-            ) from None
-        if not _join_output_readers(readers, stop_readers, reader_errors):
-            raise _uncertain_output_error(
-                argv, process.returncode, stdout_tail, stderr_tail
-            )
-        raise
-    if not _join_output_readers(readers, stop_readers, reader_errors):
-        raise _uncertain_output_error(
-            argv, process.returncode, stdout_tail, stderr_tail
+                timeout,
+                output=result.stdout,
+                stderr=result.stderr,
+            ),
         )
-    return subprocess.CompletedProcess(
-        argv,
-        process.returncode,
-        stdout_tail.value(),
-        stderr_tail.value(),
-    )
+    if not _join_output_readers(
+        readers, stop_readers, reader_errors, cancellation
+    ):
+        _raise_post_start_error(
+            argv,
+            process,
+            stdout_tail,
+            stderr_tail,
+            lambda result: UncertainSupervisionError(result),
+        )
+    return _started_process_result(argv, process, stdout_tail, stderr_tail)
 
 
 def _start_output_readers(
@@ -311,7 +673,7 @@ def _start_output_readers(
                 name=name,
             )
             reader.start()
-        except BaseException as error:
+        except Exception as error:
             started_readers = tuple(readers)
             if reader is not None and reader.ident is not None:
                 started_readers += (reader,)
@@ -330,6 +692,7 @@ class _OutputReaderInitializationError(RuntimeError):
     ) -> None:
         super().__init__(str(error))
         self.started_readers = started_readers
+        self.error = error
 
 
 def _cleanup_reader_initialization_failure(
@@ -341,6 +704,36 @@ def _cleanup_reader_initialization_failure(
     stop: threading.Event,
     errors: list[OSError],
     error: BaseException,
+    cancellation: _CancellationContext,
+) -> None:
+    initialization_error = (
+        error.error if isinstance(error, _OutputReaderInitializationError) else error
+    )
+    _finish_reader_initialization_cleanup(
+        process,
+        argv,
+        privileged_supervision,
+        stdout_tail,
+        stderr_tail,
+        stop,
+        errors,
+        error,
+        initialization_error,
+        cancellation,
+    )
+
+
+def _finish_reader_initialization_cleanup(
+    process: subprocess.Popen[str],
+    argv: tuple[str, ...],
+    privileged_supervision: bool,
+    stdout_tail: _BoundedOutputTail,
+    stderr_tail: _BoundedOutputTail,
+    stop: threading.Event,
+    errors: list[OSError],
+    error: BaseException,
+    initialization_error: BaseException,
+    cancellation: _CancellationContext,
 ) -> None:
     started_readers = (
         error.started_readers
@@ -353,10 +746,12 @@ def _cleanup_reader_initialization_failure(
             _terminate_privileged_supervisor(process)
         else:
             _terminate_process_tree(process)
-    except ExecutionContractError:
+    except (ExecutionContractError, OSError):
         termination_failed = True
     stop.set()
-    readers_clean = _join_output_readers(started_readers, stop, errors)
+    readers_clean = _join_output_readers(
+        started_readers, stop, errors, cancellation
+    )
     for stream in (process.stdout, process.stderr):
         with suppress(OSError, ValueError):
             if stream is not None:
@@ -365,25 +760,33 @@ def _cleanup_reader_initialization_failure(
         "output reader initialization failed after the command may have started"
     )
     if termination_failed or not readers_clean:
-        raise _uncertain_output_error(
+        _raise_post_start_error(
             argv,
-            process.returncode,
+            process,
             stdout_tail,
             stderr_tail,
-            detail=(
-                f"{detail}; termination or local reader cleanup could not establish "
-                "quiescence, and provider/package state is uncertain"
+            lambda result: UncertainSupervisionError(
+                result,
+                (
+                    f"{detail}; termination or local reader cleanup could not "
+                    "establish quiescence, and provider/package state is uncertain"
+                ),
             ),
-        ) from error
-    raise CommandInitializationError(
-        subprocess.CompletedProcess(
-            argv,
-            process.returncode,
-            stdout_tail.value(),
-            stderr_tail.value(),
+        )
+    _raise_post_start_error(
+        argv,
+        process,
+        stdout_tail,
+        stderr_tail,
+        lambda result: CommandLifecycleError(
+            result,
+            (
+                f"{detail}; the process was terminated and reaped, but it may have "
+                "mutated state before cleanup"
+            ),
+            lifetime_uncertain=False,
         ),
-        f"{detail}; the process was terminated and reaped, but it may have mutated state before cleanup",
-    ) from error
+    )
 
 
 def _uncertain_output_error(
@@ -392,17 +795,19 @@ def _uncertain_output_error(
     stdout_tail: _BoundedOutputTail,
     stderr_tail: _BoundedOutputTail,
     detail: str | None = None,
+    *,
+    timed_out: bool = False,
 ) -> UncertainSupervisionError:
     result = subprocess.CompletedProcess(
-            argv,
-            returncode,
-            stdout_tail.value(),
-            stderr_tail.value(),
-        )
+        argv,
+        returncode,
+        stdout_tail.value(),
+        stderr_tail.value(),
+    )
     return (
-        UncertainSupervisionError(result, detail)
+        UncertainSupervisionError(result, detail, timed_out=timed_out)
         if detail is not None
-        else UncertainSupervisionError(result)
+        else UncertainSupervisionError(result, timed_out=timed_out)
     )
 
 
@@ -430,7 +835,7 @@ class _BoundedOutputTail:
     def value(self) -> str:
         value = "".join(self._chunks)
         if self._truncated:
-            return "[earlier output truncated]\n" + value
+            return OUTPUT_TRUNCATION_MARKER + value
         return value
 
 
@@ -490,17 +895,33 @@ def _join_output_readers(
     readers: tuple[threading.Thread, ...],
     stop: threading.Event,
     errors: list[OSError],
+    cancellation: _CancellationContext | None = None,
 ) -> bool:
     """Return whether output closed cleanly within the synchronous guard."""
 
+    cancellation = cancellation or _CancellationContext()
     deadline = time.monotonic() + OUTPUT_PIPE_CLOSURE_GUARD_SECONDS
     try:
         for reader in readers:
-            reader.join(timeout=max(0, deadline - time.monotonic()))
-    except BaseException:
+            while True:
+                if cancellation.phase is _CancellationPhase.CANCEL_REQUESTED:
+                    cancellation.checkpoint()
+                    stop.set()
+                    return False
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                reader.join(timeout=min(0.1, remaining))
+                if not reader.is_alive():
+                    break
+    except Exception:
         stop.set()
         for reader in readers:
             reader.join(timeout=1)
+        return False
+    if cancellation.phase is _CancellationPhase.CANCEL_REQUESTED:
+        cancellation.checkpoint()
+        stop.set()
         return False
     if not any(reader.is_alive() for reader in readers):
         return not errors
@@ -668,16 +1089,65 @@ def _elevated_argv(
     *,
     elevation: str,
     supervisor: str,
-    timeout_seconds: int,
+    timeout_seconds: TimeoutSeconds,
 ) -> tuple[str, ...]:
     supervised = (
         supervisor,
         "--signal=TERM",
         f"--kill-after={ELEVATED_TERM_TO_KILL_GRACE_SECONDS}s",
-        f"{timeout_seconds}s",
+        _format_timeout_seconds(timeout_seconds),
         *reviewed_argv,
     )
     return (elevation, "-n", "--", *supervised) if elevation else supervised
+
+
+def _validate_timeout_seconds(value: object) -> TimeoutSeconds:
+    """Return a supported timeout without accepting bool or non-finite values."""
+
+    if type(value) not in {int, float}:
+        raise ValueError("timeout_seconds must be an exact integer or float")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("timeout_seconds must be finite")
+    decimal = Decimal(str(value))
+    if decimal <= 0 or decimal > MAX_COMMAND_TIMEOUT_SECONDS:
+        raise ValueError(
+            f"timeout_seconds must be positive and at most {MAX_COMMAND_TIMEOUT_SECONDS}"
+        )
+    if decimal.as_tuple().exponent < -MAX_COMMAND_TIMEOUT_FRACTION_DIGITS:
+        raise ValueError(
+            "timeout_seconds supports at most "
+            f"{MAX_COMMAND_TIMEOUT_FRACTION_DIGITS} fractional digits"
+        )
+    return value
+
+
+def _format_timeout_seconds(value: TimeoutSeconds) -> str:
+    """Serialize one validated timeout in the canonical GNU duration grammar."""
+
+    value = _validate_timeout_seconds(value)
+    decimal = Decimal(str(value))
+    rendered = format(decimal, "f")
+    if "." in rendered:
+        rendered = rendered.rstrip("0").rstrip(".")
+    return f"{rendered}s"
+
+
+def _is_canonical_timeout_token(value: object) -> bool:
+    """Recognize exactly the bounded duration language emitted by the writer."""
+
+    if not isinstance(value, str) or _TIMEOUT_TOKEN.fullmatch(value) is None:
+        return False
+    numeric = value[:-1]
+    try:
+        decimal = Decimal(numeric)
+    except InvalidOperation:
+        return False
+    if decimal <= 0 or decimal > MAX_COMMAND_TIMEOUT_SECONDS:
+        return False
+    rendered = format(decimal, "f")
+    if "." in rendered:
+        rendered = rendered.rstrip("0").rstrip(".")
+    return value == f"{rendered}s"
 
 
 def _windows_persisted_path() -> str:
@@ -722,29 +1192,50 @@ def _refresh_environment(action: ProviderAction) -> Mapping[str, str]:
     )
 
 
+def _restore_environment(previous: Mapping[str, str | None]) -> None:
+    for name, value in previous.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+
+def _apply_environment(updates: Mapping[str, str]) -> None:
+    """Apply a known set of environment updates one entry at a time."""
+
+    for name, value in updates.items():
+        os.environ[name] = value
+
+
 @contextmanager
-def _temporary_environment(updates: Mapping[str, str]):
+def _temporary_environment(
+    updates: Mapping[str, str], cancellation: _CancellationContext
+):
+    del cancellation
     with _ENVIRONMENT_LOCK:
         previous = {name: os.environ.get(name) for name in updates}
-        os.environ.update(updates)
         try:
+            _apply_environment(updates)
             yield
-        finally:
-            for name, value in previous.items():
-                if value is None:
-                    os.environ.pop(name, None)
-                else:
-                    os.environ[name] = value
+        except _ForceAbort:
+            raise
+        except BaseException:
+            _restore_environment(previous)
+            raise
+        else:
+            _restore_environment(previous)
 
 
 @contextmanager
 def _refreshed_environment(
-    action: ProviderAction, refresher: EnvironmentRefresher
+    action: ProviderAction,
+    refresher: EnvironmentRefresher,
+    cancellation: _CancellationContext,
 ):
     """Compute and apply a temporary refresh under one process-wide lock."""
 
     with _ENVIRONMENT_LOCK:
-        with _temporary_environment(refresher(action)):
+        with _temporary_environment(refresher(action), cancellation):
             yield
 
 
@@ -954,19 +1445,128 @@ def _observed_verified_provider_paths(
     return tuple(
         item.path
         for item in provider.executables
-        if item.verified and item.path is not None
+        if (
+            item.verified
+            and item.path is not None
+            and _path_is_absolute(item.path, state.machine)
+        )
     )
 
 
 def _command_report(
-    argv: tuple[str, ...], result: subprocess.CompletedProcess[str]
+    argv: tuple[str, ...],
+    result: subprocess.CompletedProcess[str],
+    *,
+    timed_out: bool = False,
 ) -> CommandReport:
     return CommandReport(
         argv,
         result.returncode,
-        result.stdout or "",
-        result.stderr or "",
+        _bounded_command_output(result.stdout or ""),
+        _bounded_command_output(result.stderr or ""),
+        timed_out,
     )
+
+
+def _runner_contract_failure(
+    argv: tuple[str, ...], result: object
+) -> tuple[CommandReport, str] | None:
+    """Convert malformed injected runner output into uncertain structured evidence."""
+
+    if not isinstance(result, subprocess.CompletedProcess):
+        return (
+            CommandReport(argv, None, "", ""),
+            "runner returned an object that is not subprocess.CompletedProcess",
+        )
+    invalid_fields: list[str] = []
+    if not _is_valid_returncode(result.returncode):
+        invalid_fields.append("returncode")
+    if result.stdout is not None and not isinstance(result.stdout, str):
+        invalid_fields.append("stdout")
+    if result.stderr is not None and not isinstance(result.stderr, str):
+        invalid_fields.append("stderr")
+    if not invalid_fields:
+        return None
+    stdout = result.stdout if isinstance(result.stdout, str) else ""
+    stderr = result.stderr if isinstance(result.stderr, str) else ""
+    return (
+        CommandReport(
+            argv,
+            None,
+            _bounded_command_output(stdout),
+            _bounded_command_output(stderr),
+        ),
+        "runner returned malformed completed-process evidence: "
+        + ", ".join(invalid_fields),
+    )
+
+
+def _is_valid_returncode(value: object) -> bool:
+    """Recognize the bounded cross-platform subprocess return-code domain."""
+
+    return (
+        type(value) is int
+        and MIN_PROCESS_RETURNCODE <= value <= MAX_PROCESS_RETURNCODE
+    )
+
+
+def _bounded_command_output(value: str) -> str:
+    if len(value) <= MAX_CAPTURED_OUTPUT_CHARS:
+        return value
+    return OUTPUT_TRUNCATION_MARKER + value[-MAX_CAPTURED_OUTPUT_CHARS:]
+
+
+def _completed_command_failure(
+    result: subprocess.CompletedProcess[str], *, elevated_linux: bool
+) -> tuple[ActionOutcome, str] | None:
+    """Classify completed command evidence before the next provider command."""
+
+    if elevated_linux and result.returncode in {
+        124,
+        137,
+        POSIX_SIGKILL_RETURNCODE,
+        125,
+        126,
+        127,
+    }:
+        supervised_outcomes = {
+            124: ActionOutcome.COMMAND_FAILED,
+            137: ActionOutcome.FORCED_KILL,
+            POSIX_SIGKILL_RETURNCODE: ActionOutcome.FORCED_KILL,
+            125: ActionOutcome.SUPERVISOR_FAILED,
+            126: ActionOutcome.COMMAND_START_FAILED,
+            127: ActionOutcome.COMMAND_START_FAILED,
+        }
+        details = {
+            124: (
+                "GNU timeout returned status 124, which cannot distinguish "
+                "deadline expiry from the reviewed command's own status 124"
+            ),
+            137: "command or supervisor exited after SIGKILL; timeout expiry is not independently established",
+            POSIX_SIGKILL_RETURNCODE: (
+                "command or supervisor exited after SIGKILL; timeout "
+                "expiry is not independently established"
+            ),
+            125: (
+                "GNU timeout returned status 125, which cannot distinguish "
+                "supervisor failure from the reviewed command's own status 125"
+            ),
+            126: (
+                "GNU timeout returned status 126, which cannot distinguish "
+                "command-start failure from the reviewed command's own status 126"
+            ),
+            127: (
+                "GNU timeout returned status 127, which cannot distinguish "
+                "command resolution failure from the reviewed command's own status 127"
+            ),
+        }
+        return supervised_outcomes[result.returncode], details[result.returncode]
+    if result.returncode != 0:
+        return (
+            ActionOutcome.COMMAND_FAILED,
+            f"command exited with status {result.returncode}",
+        )
+    return None
 
 
 def _action_report(
@@ -990,6 +1590,35 @@ def _action_report(
         action.displaces_verified_paths,
         action.translated_manager_fallback_authorized,
         satisfied_by_provider_id,
+    )
+
+
+def _materialize_post_start_failure_report(
+    *,
+    plan: ProviderPlan,
+    context: MachineState,
+    reports: list[ActionReport],
+    action: ProviderAction,
+    commands: list[CommandReport],
+    command: Callable[[], CommandReport],
+    outcome: ActionOutcome,
+    detail: str,
+    uncertain_external_state: bool,
+) -> PlanExecutionReport:
+    """Build a post-start failure report without losing prior action evidence."""
+
+    action_report = _action_report(
+        action,
+        outcome,
+        (*commands, command()),
+        detail=detail,
+    )
+    return _failed_report(
+        plan,
+        context,
+        [*reports, action_report],
+        mutation_may_have_started=True,
+        uncertain_external_state=uncertain_external_state,
     )
 
 
@@ -1021,11 +1650,19 @@ def _omitted_request_failure(
     return None
 
 
-def execute_provider_plan(
+@contextmanager
+def _provider_execution_transaction():
+    """Serialize the complete supported managed mutation transaction."""
+
+    with _EXECUTION_LOCK:
+        yield
+
+
+def _execute_provider_plan_unmanaged(
     plan: ProviderPlan,
     *,
     allow_provider_mutation: bool = False,
-    timeout_seconds: int = DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    timeout_seconds: TimeoutSeconds = DEFAULT_COMMAND_TIMEOUT_SECONDS,
     runner: Runner = _run,
     detector: Detector = _detect,
     current_context: ContextReader = current_machine,
@@ -1035,33 +1672,38 @@ def execute_provider_plan(
     supervisor_resolver: SupervisorResolver = _resolve_supervisor,
     privilege_preflight: PrivilegePreflight = _preflight_privilege,
     environment_refresher: EnvironmentRefresher = _refresh_environment,
+    _cancellation: _CancellationContext | None = None,
 ) -> PlanExecutionReport:
-    """Consume one reviewed plan, mutate only when authorized, and report outcomes."""
+    """Internal executor primitive; callers must use the managed-state boundary."""
 
-    if timeout_seconds <= 0:
-        raise ValueError("timeout_seconds must be positive")
-    with _EXECUTION_LOCK:
-        return _execute_provider_plan(
-            plan,
-            allow_provider_mutation=allow_provider_mutation,
-            timeout_seconds=timeout_seconds,
-            runner=runner,
-            detector=detector,
-            current_context=current_context,
-            manager_verifier=manager_verifier,
-            manager_architecture_reader=manager_architecture_reader,
-            privilege_resolver=privilege_resolver,
-            supervisor_resolver=supervisor_resolver,
-            privilege_preflight=privilege_preflight,
-            environment_refresher=environment_refresher,
-        )
+    cancellation = _cancellation or _CancellationContext()
+    timeout_seconds = _validate_timeout_seconds(timeout_seconds)
+    with _provider_execution_transaction():
+        try:
+            return _execute_provider_plan(
+                plan,
+                allow_provider_mutation=allow_provider_mutation,
+                timeout_seconds=timeout_seconds,
+                runner=runner,
+                detector=detector,
+                current_context=current_context,
+                manager_verifier=manager_verifier,
+                manager_architecture_reader=manager_architecture_reader,
+                privilege_resolver=privilege_resolver,
+                supervisor_resolver=supervisor_resolver,
+                privilege_preflight=privilege_preflight,
+                environment_refresher=environment_refresher,
+                cancellation=cancellation,
+            )
+        except _ProviderPartialReport as error:
+            return error.report
 
 
 def _execute_provider_plan(
     plan: ProviderPlan,
     *,
     allow_provider_mutation: bool,
-    timeout_seconds: int,
+    timeout_seconds: TimeoutSeconds,
     runner: Runner,
     detector: Detector,
     current_context: ContextReader,
@@ -1071,10 +1713,12 @@ def _execute_provider_plan(
     supervisor_resolver: SupervisorResolver,
     privilege_preflight: PrivilegePreflight,
     environment_refresher: EnvironmentRefresher,
+    cancellation: _CancellationContext,
 ) -> PlanExecutionReport:
     context = _validate_plan(plan, current_context())
     if not plan.actions:
-        if failure := _omitted_request_failure(plan, context, detector):
+        failure = _omitted_request_failure(plan, context, detector)
+        if failure:
             return PlanExecutionReport(
                 context,
                 plan.requested_capabilities,
@@ -1104,7 +1748,8 @@ def _execute_provider_plan(
             ("rerun with explicit provider-mutation authorization",),
         )
 
-    if failure := _omitted_request_failure(plan, context, detector):
+    failure = _omitted_request_failure(plan, context, detector)
+    if failure:
         return PlanExecutionReport(
             context,
             plan.requested_capabilities,
@@ -1125,10 +1770,26 @@ def _execute_provider_plan(
 
     reports: list[ActionReport] = []
     for action in plan.actions:
-        capability = get_capability(action.capability_id)
-        with _refreshed_environment(action, environment_refresher):
-            before = detector(capability, context)
+        if cancellation.checkpoint():
+            reports.append(
+                _action_report(
+                    action,
+                    ActionOutcome.NOT_ATTEMPTED,
+                    detail="cancellation accepted before this provider action started",
+                )
+            )
+            return _failed_report(
+                plan,
+                context,
+                reports,
+                mutation_may_have_started=any(report.commands for report in reports),
+            )
         try:
+            capability = get_capability(action.capability_id)
+            with _refreshed_environment(
+                action, environment_refresher, cancellation
+            ):
+                before = detector(capability, context)
             if before.capability != capability:
                 raise PlanningError(
                     "detector returned evidence for a different capability"
@@ -1147,10 +1808,81 @@ def _execute_provider_plan(
                 )
             )
             return _failed_report(
-                plan, context, reports, mutation_may_have_started=False
+                plan,
+                context,
+                reports,
+                mutation_may_have_started=any(report.commands for report in reports),
             )
-        existing_provider = _acceptable_current_provider(
-            before, action.target_architecture
+        except Exception as error:
+            if not any(report.commands for report in reports):
+                raise ExecutionContractError(
+                    "pre-action detection failed before any provider command: "
+                    f"{type(error).__name__}: {error}"
+                ) from error
+            reports.append(
+                _action_report(
+                    action,
+                    ActionOutcome.PREFLIGHT_FAILED,
+                    detail=(
+                        "pre-action detection failed after an earlier action may have "
+                        f"mutated state: {type(error).__name__}: {error}"
+                    ),
+                )
+            )
+            return _failed_report(
+                plan, context, reports, mutation_may_have_started=True
+            )
+
+        if cancellation.checkpoint():
+            reports.append(
+                _action_report(
+                    action,
+                    ActionOutcome.NOT_ATTEMPTED,
+                    detail=(
+                        "cancellation accepted after pre-action detection; no "
+                        "command started for this action"
+                    ),
+                )
+            )
+            return _failed_report(
+                plan,
+                context,
+                reports,
+                mutation_may_have_started=any(report.commands for report in reports),
+            )
+
+        def precommand(operation):
+            try:
+                return operation()
+            except Exception as error:
+                if not any(report.commands for report in reports):
+                    raise ExecutionContractError(
+                        "execution preflight failed before any provider command: "
+                        f"{type(error).__name__}: {error}"
+                    ) from error
+                reports.append(
+                    _action_report(
+                        action,
+                        ActionOutcome.PREFLIGHT_FAILED,
+                        detail=(
+                            "execution preflight failed after an earlier action may "
+                            f"have mutated state: {type(error).__name__}: {error}"
+                        ),
+                    )
+                )
+                raise _ProviderPartialReport(
+                    _failed_report(
+                        plan,
+                        context,
+                        reports,
+                        mutation_may_have_started=True,
+                    )
+                ) from error
+
+        existing_provider = precommand(
+            lambda: _acceptable_current_provider(
+                before, action.target_architecture
+            )
         )
         if existing_provider:
             existing_provider_id, existing_paths = existing_provider
@@ -1164,7 +1896,7 @@ def _execute_provider_plan(
                 )
             )
             continue
-        if not manager_verifier(action.manager_state, context):
+        if not precommand(lambda: manager_verifier(action.manager_state, context)):
             reports.append(
                 _action_report(
                     action,
@@ -1176,7 +1908,7 @@ def _execute_provider_plan(
                 plan, context, reports, mutation_may_have_started=False
             )
         if action.manager == "brew" and normalize_architecture(
-            manager_architecture_reader(action.manager_state)
+            precommand(lambda: manager_architecture_reader(action.manager_state))
         ) != normalize_architecture(action.manager_state.architecture):
             reports.append(
                 _action_report(
@@ -1188,7 +1920,7 @@ def _execute_provider_plan(
             return _failed_report(
                 plan, context, reports, mutation_may_have_started=False
             )
-        elevation = privilege_resolver(action)
+        elevation = precommand(lambda: privilege_resolver(action))
         if elevation is None:
             reports.append(
                 _action_report(
@@ -1200,7 +1932,7 @@ def _execute_provider_plan(
             return _failed_report(
                 plan, context, reports, mutation_may_have_started=False
             )
-        supervisor = supervisor_resolver(action)
+        supervisor = precommand(lambda: supervisor_resolver(action))
         if supervisor is None:
             reports.append(
                 _action_report(
@@ -1229,8 +1961,10 @@ def _execute_provider_plan(
             if elevated_linux
             else ()
         )
-        if elevated_linux and any(
-            not privilege_preflight(argv) for argv in elevated_commands
+        if elevated_linux and precommand(
+            lambda: any(
+                not privilege_preflight(argv) for argv in elevated_commands
+            )
         ):
             reports.append(
                 _action_report(
@@ -1245,6 +1979,29 @@ def _execute_provider_plan(
 
         commands: list[CommandReport] = []
         for command_index, reviewed_argv in enumerate(action.commands):
+            if cancellation.checkpoint():
+                reports.append(
+                    _action_report(
+                        action,
+                        (
+                            ActionOutcome.INTERRUPTED
+                            if commands
+                            else ActionOutcome.NOT_ATTEMPTED
+                        ),
+                        tuple(commands),
+                        detail=(
+                            "cancellation accepted before the next provider command "
+                            "started"
+                        ),
+                    )
+                )
+                return _failed_report(
+                    plan,
+                    context,
+                    reports,
+                    mutation_may_have_started=bool(commands)
+                    or any(report.commands for report in reports),
+                )
             argv = (
                 elevated_commands[command_index]
                 if elevated_linux
@@ -1263,32 +2020,64 @@ def _execute_provider_plan(
                         argv,
                         runner_timeout,
                         privileged_supervision=elevated_linux,
+                        _cancellation=cancellation,
                     )
                 else:
                     result = runner(argv, runner_timeout)
+            except _ForceAbort:
+                raise
             except UncertainSupervisionError as error:
-                commands.append(_command_report(argv, error.result))
-                reports.append(
-                    _action_report(
-                        action,
-                        ActionOutcome.SUPERVISOR_FAILED,
-                        tuple(commands),
-                        detail=error.detail,
-                    )
+                retained_timeout = (
+                    error.timed_out and error.result.returncode is None
                 )
-                return _failed_report(
-                    plan,
-                    context,
-                    reports,
-                    mutation_may_have_started=True,
+                return _materialize_post_start_failure_report(
+                    plan=plan,
+                    context=context,
+                    reports=reports,
+                    action=action,
+                    commands=commands,
+                    command=lambda: _command_report(
+                        argv, error.result, timed_out=retained_timeout
+                    ),
+                    outcome=(
+                        ActionOutcome.TIMED_OUT
+                        if retained_timeout and not elevated_linux
+                        else ActionOutcome.SUPERVISOR_FAILED
+                    ),
+                    detail=error.detail,
                     uncertain_external_state=True,
                 )
-            except CommandInitializationError as error:
+            except CommandLifecycleError as error:
+                retained_timeout = (
+                    error.timed_out and error.result.returncode is None
+                )
+                return _materialize_post_start_failure_report(
+                    plan=plan,
+                    context=context,
+                    reports=reports,
+                    action=action,
+                    commands=commands,
+                    command=lambda: _command_report(
+                        argv, error.result, timed_out=retained_timeout
+                    ),
+                    outcome=(
+                        ActionOutcome.TIMED_OUT
+                        if retained_timeout and not elevated_linux
+                        else ActionOutcome.SUPERVISOR_FAILED
+                    ),
+                    detail=error.detail,
+                    uncertain_external_state=error.lifetime_uncertain,
+                )
+            except CommandInterruptedError as error:
                 commands.append(_command_report(argv, error.result))
                 reports.append(
                     _action_report(
                         action,
-                        ActionOutcome.COMMAND_START_FAILED,
+                        (
+                            ActionOutcome.SUPERVISOR_FAILED
+                            if error.lifetime_uncertain
+                            else ActionOutcome.INTERRUPTED
+                        ),
                         tuple(commands),
                         detail=error.detail,
                     )
@@ -1298,14 +2087,15 @@ def _execute_provider_plan(
                     context,
                     reports,
                     mutation_may_have_started=True,
+                    uncertain_external_state=error.lifetime_uncertain,
                 )
             except subprocess.TimeoutExpired as error:
                 commands.append(
                     CommandReport(
                         argv,
                         None,
-                        _timeout_text(error.stdout),
-                        _timeout_text(error.stderr),
+                        _bounded_command_output(_timeout_text(error.stdout)),
+                        _bounded_command_output(_timeout_text(error.stderr)),
                         timed_out=True,
                     )
                 )
@@ -1334,7 +2124,11 @@ def _execute_provider_plan(
                 )
             except OSError as error:
                 earlier_command_completed = bool(commands)
-                commands.append(CommandReport(argv, None, "", str(error)))
+                commands.append(
+                    CommandReport(
+                        argv, None, "", _bounded_command_output(str(error))
+                    )
+                )
                 reports.append(
                     _action_report(
                         action,
@@ -1349,54 +2143,16 @@ def _execute_provider_plan(
                     reports,
                     mutation_may_have_started=earlier_command_completed,
                 )
-            command_report = _command_report(argv, result)
-            commands.append(command_report)
-            if elevated_linux and result.returncode in {
-                124,
-                137,
-                POSIX_SIGKILL_RETURNCODE,
-                125,
-                126,
-                127,
-            }:
-                supervised_outcomes = {
-                    124: ActionOutcome.COMMAND_FAILED,
-                    137: ActionOutcome.FORCED_KILL,
-                    POSIX_SIGKILL_RETURNCODE: ActionOutcome.FORCED_KILL,
-                    125: ActionOutcome.SUPERVISOR_FAILED,
-                    126: ActionOutcome.COMMAND_START_FAILED,
-                    127: ActionOutcome.COMMAND_START_FAILED,
-                }
-                outcome = supervised_outcomes[result.returncode]
-                details = {
-                    124: (
-                        "GNU timeout returned status 124, which cannot distinguish "
-                        "deadline expiry from the reviewed command's own status 124"
-                    ),
-                    137: "command or supervisor exited after SIGKILL; timeout expiry is not independently established",
-                    POSIX_SIGKILL_RETURNCODE: (
-                        "command or supervisor exited after SIGKILL; timeout "
-                        "expiry is not independently established"
-                    ),
-                    125: (
-                        "GNU timeout returned status 125, which cannot distinguish "
-                        "supervisor failure from the reviewed command's own status 125"
-                    ),
-                    126: (
-                        "GNU timeout returned status 126, which cannot distinguish "
-                        "command-start failure from the reviewed command's own status 126"
-                    ),
-                    127: (
-                        "GNU timeout returned status 127, which cannot distinguish "
-                        "command resolution failure from the reviewed command's own status 127"
-                    ),
-                }
+            runner_failure = _runner_contract_failure(argv, result)
+            if runner_failure is not None:
+                command_report, detail = runner_failure
+                commands.append(command_report)
                 reports.append(
                     _action_report(
                         action,
-                        outcome,
+                        ActionOutcome.SUPERVISOR_FAILED,
                         tuple(commands),
-                        detail=details[result.returncode],
+                        detail=detail,
                     )
                 )
                 return _failed_report(
@@ -1404,37 +2160,79 @@ def _execute_provider_plan(
                     context,
                     reports,
                     mutation_may_have_started=True,
+                    uncertain_external_state=True,
                 )
-            if result.returncode != 0:
+            command_report = _command_report(argv, result)
+            commands.append(command_report)
+            failure = _completed_command_failure(
+                result, elevated_linux=elevated_linux
+            )
+            if failure is not None:
+                outcome, detail = failure
+                return _failed_report(
+                    plan,
+                    context,
+                    [
+                        *reports,
+                        _action_report(
+                            action,
+                            outcome,
+                            tuple(commands),
+                            detail=detail,
+                        ),
+                    ],
+                    mutation_may_have_started=True,
+                )
+
+            if cancellation.checkpoint():
                 reports.append(
                     _action_report(
                         action,
-                        ActionOutcome.COMMAND_FAILED,
+                        ActionOutcome.INTERRUPTED,
                         tuple(commands),
-                        detail=f"command exited with status {result.returncode}",
+                        detail=(
+                            "cancellation accepted after completed provider command "
+                            "evidence was published"
+                        ),
                     )
                 )
                 return _failed_report(
                     plan, context, reports, mutation_may_have_started=True
                 )
 
-        with _refreshed_environment(action, environment_refresher):
-            after = detector(capability, context)
         observed_paths: tuple[str, ...] = ()
         try:
+            with _refreshed_environment(
+                action, environment_refresher, cancellation
+            ):
+                after = detector(capability, context)
             if after.capability != capability:
                 raise PlanningError(
                     "detector returned evidence for a different capability"
                 )
             validate_capability_state(after, expected_context=context)
-        except PlanningError as error:
-            final_paths = ()
-            verification_detail = f"post-action detection is not authoritative: {error}"
-        else:
             observed_paths = _observed_verified_provider_paths(action, after)
             final_paths = _verified_provider_paths(action, after)
             verification_detail = (
                 "package-manager success did not produce the planned verified provider"
+            )
+        except PlanningError as error:
+            final_paths = ()
+            verification_detail = f"post-action detection is not authoritative: {error}"
+        except Exception as error:
+            reports.append(
+                _action_report(
+                    action,
+                    ActionOutcome.VERIFICATION_FAILED,
+                    tuple(commands),
+                    detail=(
+                        "post-action verification failed after the package-manager "
+                        f"command completed: {type(error).__name__}: {error}"
+                    ),
+                )
+            )
+            return _failed_report(
+                plan, context, reports, mutation_may_have_started=True
             )
         if not final_paths:
             reports.append(
@@ -1459,11 +2257,38 @@ def _execute_provider_plan(
             )
         )
 
+        if cancellation.checkpoint():
+            return _failed_report(
+                plan, context, reports, mutation_may_have_started=True
+            )
+
     return PlanExecutionReport(
         context,
         plan.requested_capabilities,
         PlanOutcome.SUCCEEDED,
         tuple(reports),
+    )
+
+
+def _preflight_interrupted_report(
+    plan: ProviderPlan, context: MachineState | None
+) -> PlanExecutionReport:
+    return PlanExecutionReport(
+        context,
+        plan.requested_capabilities,
+        PlanOutcome.PREFLIGHT_FAILED,
+        tuple(
+            _action_report(
+                action,
+                ActionOutcome.NOT_ATTEMPTED,
+                detail="interrupted before any provider command started",
+            )
+            for action in plan.actions
+        ),
+        (
+            "no provider command started; this interruption did not mutate provider state",
+            "generate fresh current state before a later mutation attempt",
+        ),
     )
 
 

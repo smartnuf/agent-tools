@@ -81,6 +81,7 @@ def check_wheel(wheel: Path) -> str:
         if not (name.startswith("agent_tools/") or name.startswith(dist_info))
     ]
     assert not unexpected, f"unexpected wheel content: {unexpected}"
+    assert "agent_tools/managed_state.py" in names
     return version
 
 
@@ -109,6 +110,7 @@ def check_sdist(sdist: Path) -> str:
             f"{expected_root}/src/agent_tools/__main__.py",
             f"{expected_root}/src/agent_tools/capabilities.py",
             f"{expected_root}/src/agent_tools/cli.py",
+            f"{expected_root}/src/agent_tools/managed_state.py",
             f"{expected_root}/PKG-INFO",
         }
         assert required.issubset(names), f"sdist is missing: {sorted(required.difference(names))}"

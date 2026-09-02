@@ -139,14 +139,17 @@ command timeout plus grace is an uncertain supervision failure, not a clean
 timeout. Agent Tools does not modify sudoers, PATH, profiles, system packages,
 or user configuration to establish this contract.
 
-Caller interruption is also a process-lifetime boundary. Before propagating a
-non-timeout interruption such as Ctrl+C, the runner terminates and reaps an
-isolated same-privilege tree. For an elevated Linux action it signals the
-sudo/timeout supervisor and waits through the bounded grace/guard interval for
-privileged-side termination; it does not substitute an unprivileged process-
-group kill. If confirmed privileged termination cannot be established, that
-uncertain supervision failure replaces a normal interruption return so callers
-cannot safely infer that retry is ready.
+Managed cancellation is also a process-lifetime boundary. Under ADR 0004 the
+first SIGINT is recorded by the outer broker without injecting an exception
+into transaction code. Active supervision observes the shared controller at a
+bounded polling checkpoint, then terminates and reaps an isolated same-
+privilege tree. For an elevated Linux action it signals the sudo/timeout
+supervisor and waits through the bounded grace/guard interval for privileged-
+side termination; it does not substitute an unprivileged process-group kill.
+If confirmed privileged termination cannot be established, the structured
+report retains uncertain supervision so callers cannot infer that retry is
+ready. A later SIGINT is immediate force-abort and does not guarantee cleanup
+completion.
 
 Agent Tools owns the synchronous package-manager invocation and work that
 remains under these supported supervision mechanisms. It does not provide a
@@ -164,10 +167,12 @@ generates a fresh plan from current state. Invisible detached work is not
 speculatively detected; normal completion with normally closed output remains
 governed by manager exit evidence and complete rediscovery.
 
-An interruption during the post-exit pipe-closure guard follows that same
-uncertain path: polling readers are stopped and local handles closed in bounded
-time, but Agent Tools does not retroactively claim ownership of or broadly kill
-work after the supervised leader has exited.
+A cooperative cancellation request observed during the post-exit pipe-closure
+guard follows that same uncertain path at the next safe checkpoint: polling
+readers are stopped and local handles closed in bounded time, but Agent Tools
+does not retroactively claim ownership of or broadly kill work after the
+supervised leader has exited. Direct programmatic `KeyboardInterrupt` is not
+the supported first-Ctrl+C model.
 
 The runner drains stdout and stderr concurrently while retaining at most one
 MiB of tail evidence per stream. Continuous installer output therefore cannot
@@ -493,9 +498,9 @@ stable shell-selection interface.
   agent workstation capabilities and diagnostics when the first capability
   commands ship; document libraries remain supported capabilities, not the
   entire product identity.
-- Persistent user configuration and managed-state schemas are deferred until a
-  mutating command needs them. This avoids inventing migration and ownership
-  rules for state that has no current consumer.
+- Persistent user configuration remains deferred until it has a consumer.
+  Managed mutation provenance now has the provider executor as its consumer and
+  is governed by [ADR 0003](0003-managed-state-provenance.md).
 
 ## Rejected or deferred alternatives
 

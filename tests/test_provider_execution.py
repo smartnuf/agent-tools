@@ -3,9 +3,12 @@ import subprocess
 import threading
 import unittest
 from dataclasses import replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from agent_tools import capabilities
+from agent_tools import managed_state
 from agent_tools import provider_execution
 from agent_tools import provider_plans
 
@@ -55,7 +58,8 @@ class ProviderExecutionTests(unittest.TestCase):
             "privilege_preflight": lambda argv: True,
         }
         defaults.update(kwargs)
-        return provider_execution.execute_provider_plan(plan, **defaults)
+        return provider_execution._execute_provider_plan_unmanaged(plan, **defaults)
+
 
     def test_zero_action_plan_needs_no_mutation_authorization(self):
         state = self.state(capabilities.GHOSTSCRIPT, available=True)
@@ -63,7 +67,7 @@ class ProviderExecutionTests(unittest.TestCase):
             (state,), ("ghostscript",), package_managers=(self.manager,)
         )
         runner = Mock(side_effect=AssertionError("must not run"))
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             current_context=lambda: self.machine,
             detector=lambda capability, machine: state,
@@ -73,13 +77,105 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(report.actions, ())
         runner.assert_not_called()
 
+    def test_command_interruption_carries_partial_report(self):
+        result = subprocess.CompletedProcess(
+            ("/usr/bin/sudo",), -2, "partial output", "interrupted"
+        )
+
+        def interrupt(argv, timeout):
+            raise provider_execution.CommandInterruptedError(result)
+
+        report = self.execute(
+            self.plan(),
+            detector=lambda capability, machine: self.state(capability),
+            runner=interrupt,
+        )
+        self.assertEqual(report.outcome, provider_execution.PlanOutcome.PARTIAL_FAILURE)
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.INTERRUPTED,
+        )
+        self.assertEqual(report.actions[0].commands[0].stdout, "partial output")
+
+
+
+    def test_post_command_verification_exception_returns_partial_evidence(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        detector = Mock(side_effect=(absent, RuntimeError("verification broke")))
+        report = self.execute(
+            self.plan(),
+            detector=detector,
+            runner=lambda argv, timeout: subprocess.CompletedProcess(
+                argv, 0, "installed", ""
+            ),
+        )
+        self.assertEqual(report.outcome, provider_execution.PlanOutcome.PARTIAL_FAILURE)
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.VERIFICATION_FAILED,
+        )
+        self.assertEqual(report.actions[0].commands[0].returncode, 0)
+        self.assertEqual(report.actions[0].commands[0].stdout, "installed")
+        self.assertIn("RuntimeError: verification broke", report.actions[0].detail)
+
+
+
+
+
+
+
+    def test_later_execution_preflight_exception_preserves_completed_action(self):
+        ghostscript_absent = self.state(capabilities.GHOSTSCRIPT)
+        ghostscript_available = self.state(
+            capabilities.GHOSTSCRIPT, available=True
+        )
+        poppler_absent = self.state(capabilities.POPPLER)
+        plan = provider_plans.generate_provider_plan(
+            (ghostscript_absent, poppler_absent),
+            ("ghostscript", "poppler"),
+            package_managers=(self.manager,),
+        )
+        detector = Mock(
+            side_effect=(
+                ghostscript_absent,
+                ghostscript_available,
+                poppler_absent,
+            )
+        )
+        manager_calls = 0
+
+        def verify_manager(state, machine):
+            nonlocal manager_calls
+            manager_calls += 1
+            if manager_calls == 2:
+                raise RuntimeError("manager verification broke")
+            return True
+
+        report = self.execute(
+            plan,
+            detector=detector,
+            manager_verifier=verify_manager,
+            runner=lambda argv, timeout: subprocess.CompletedProcess(
+                argv, 0, "installed", ""
+            ),
+        )
+        self.assertEqual(report.outcome, provider_execution.PlanOutcome.PARTIAL_FAILURE)
+        self.assertEqual(report.actions[0].outcome, provider_execution.ActionOutcome.SUCCEEDED)
+        self.assertEqual(report.actions[0].commands[0].stdout, "installed")
+        self.assertEqual(
+            report.actions[1].outcome,
+            provider_execution.ActionOutcome.PREFLIGHT_FAILED,
+        )
+        self.assertEqual(report.actions[1].commands, ())
+        self.assertIn("RuntimeError", report.actions[1].detail)
+
     def test_zero_action_plan_revalidates_unknown_and_stale_requests(self):
         available = self.state(capabilities.GHOSTSCRIPT, available=True)
         plan = provider_plans.generate_provider_plan(
             (available,), ("ghostscript",), package_managers=(self.manager,)
         )
         stale = self.state(capabilities.GHOSTSCRIPT)
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             current_context=lambda: self.machine,
             detector=lambda capability, machine: stale,
@@ -90,7 +186,7 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertIn("no longer verifies", report.recovery_guidance[0])
 
         unknown = replace(plan, requested_capabilities=("unknown",))
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             unknown,
             current_context=lambda: self.machine,
         )
@@ -100,7 +196,7 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertIn("unknown requested capability", report.recovery_guidance[0])
 
         wrong = self.state(capabilities.POPPLER, available=True)
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             current_context=lambda: self.machine,
             detector=lambda capability, machine: wrong,
@@ -150,7 +246,7 @@ class ProviderExecutionTests(unittest.TestCase):
             version_reader=lambda probe, path: "1.0",
             architecture_reader=lambda probe, path: "x86_64",
         )
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             current_context=lambda: self.machine,
             detector=lambda capability, machine: relative,
@@ -160,7 +256,7 @@ class ProviderExecutionTests(unittest.TestCase):
 
     def test_mutating_plan_refuses_without_dedicated_authorization(self):
         runner = Mock(side_effect=AssertionError("must not run"))
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             self.plan(),
             current_context=lambda: self.machine,
             runner=runner,
@@ -281,6 +377,70 @@ class ProviderExecutionTests(unittest.TestCase):
             ("/tools/gs", "/tools/gswin64c", "/tools/gswin32c"),
         )
 
+    def test_fractional_timeout_uses_one_canonical_supervisor_grammar(self):
+        plan = self.plan()
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        available = self.state(capabilities.GHOSTSCRIPT, available=True)
+        runner = Mock(
+            side_effect=lambda argv, timeout: subprocess.CompletedProcess(
+                argv, 0, "installed", ""
+            )
+        )
+
+        report = self.execute(
+            plan,
+            detector=self.detector_sequence(absent, available),
+            runner=runner,
+            timeout_seconds=0.5,
+        )
+
+        argv, timeout = runner.call_args.args
+        self.assertEqual(argv[6], "0.5s")
+        self.assertEqual(timeout, 15.5)
+        self.assertEqual(report.outcome, provider_execution.PlanOutcome.SUCCEEDED)
+
+    def test_timeout_contract_rejects_noncanonical_or_unbounded_values(self):
+        for value in (
+            False,
+            None,
+            "1",
+            0,
+            -1,
+            float("nan"),
+            float("inf"),
+            0.0000001,
+            provider_execution.MAX_COMMAND_TIMEOUT_SECONDS + 1,
+        ):
+            with self.subTest(value=value):
+                runner = Mock()
+                with self.assertRaises(ValueError):
+                    self.execute(self.plan(), runner=runner, timeout_seconds=value)
+                runner.assert_not_called()
+
+    def test_malformed_runner_return_code_is_supervisor_uncertainty(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        for returncode in (False, None, 1.0, "0", 2**32):
+            with self.subTest(returncode=returncode):
+                runner = Mock(
+                    return_value=subprocess.CompletedProcess(
+                        (), returncode, "bounded-out", "bounded-err"
+                    )
+                )
+                report = self.execute(
+                    self.plan(), detector=Mock(return_value=absent), runner=runner
+                )
+                action = report.actions[0]
+                self.assertEqual(
+                    action.outcome,
+                    provider_execution.ActionOutcome.SUPERVISOR_FAILED,
+                )
+                self.assertEqual(action.commands[0].returncode, None)
+                self.assertIn("malformed", action.detail)
+                self.assertEqual(runner.call_count, 1)
+                self.assertTrue(
+                    any("do not retry" in item for item in report.recovery_guidance)
+                )
+
     def test_false_success_is_reported_as_partial_failure(self):
         plan = self.plan()
         absent = self.state(capabilities.GHOSTSCRIPT)
@@ -352,10 +512,11 @@ class ProviderExecutionTests(unittest.TestCase):
         absent = self.state(capabilities.GHOSTSCRIPT)
 
         def fail_after_start(argv, timeout):
-            raise provider_execution.CommandInitializationError(
+            raise provider_execution.CommandLifecycleError(
                 subprocess.CompletedProcess(argv, -9, "partial-out", "partial-err"),
                 "output reader initialization failed after the command may have started; "
                 "the process was terminated and reaped",
+                lifetime_uncertain=False,
             )
 
         report = self.execute(
@@ -366,7 +527,7 @@ class ProviderExecutionTests(unittest.TestCase):
         action = report.actions[0]
         self.assertEqual(
             action.outcome,
-            provider_execution.ActionOutcome.COMMAND_START_FAILED,
+            provider_execution.ActionOutcome.SUPERVISOR_FAILED,
         )
         self.assertEqual(action.commands[0].returncode, -9)
         self.assertEqual(action.commands[0].stdout, "partial-out")
@@ -379,6 +540,152 @@ class ProviderExecutionTests(unittest.TestCase):
                 "do not retry automatically or immediately" in item
                 for item in report.recovery_guidance
             )
+        )
+
+    def test_unsupervised_lifecycle_failures_are_supervisor_failures(self):
+        machine = capabilities.MachineState("Darwin", "arm64", "host")
+        manager = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            machine,
+            locator=lambda probe, context: None,
+        )
+        plan = provider_plans.generate_provider_plan(
+            (absent,), ("ghostscript",), package_managers=(manager,)
+        )
+
+        for returncode, lifetime_uncertain in ((0, False), (23, False), (None, True)):
+            with self.subTest(
+                returncode=returncode, lifetime_uncertain=lifetime_uncertain
+            ):
+                runner = Mock(
+                    side_effect=provider_execution.CommandLifecycleError(
+                        subprocess.CompletedProcess(
+                            plan.actions[0].commands[0],
+                            returncode,
+                            "bounded-out",
+                            "bounded-err",
+                        ),
+                        "provider command launched; lifecycle handling failed",
+                        lifetime_uncertain=lifetime_uncertain,
+                    )
+                )
+                report = provider_execution._execute_provider_plan_unmanaged(
+                    plan,
+                    allow_provider_mutation=True,
+                    current_context=lambda: machine,
+                    manager_verifier=lambda state, context: True,
+                    manager_architecture_reader=lambda state: "arm64",
+                    privilege_resolver=lambda action: "",
+                    supervisor_resolver=lambda action: "",
+                    detector=lambda capability, context: absent,
+                    runner=runner,
+                )
+                action = report.actions[0]
+                self.assertEqual(
+                    action.outcome,
+                    provider_execution.ActionOutcome.SUPERVISOR_FAILED,
+                )
+                self.assertEqual(action.commands[0].returncode, returncode)
+                self.assertEqual(action.commands[0].argv, plan.actions[0].commands[0])
+                self.assertEqual(
+                    any(
+                        "could not establish quiescence" in item
+                        for item in report.recovery_guidance
+                    ),
+                    lifetime_uncertain,
+                )
+                self.assertFalse(
+                    any(
+                        "no provider command started" in item
+                        for item in report.recovery_guidance
+                    )
+                )
+                self.assertTrue(
+                    any("do not retry" in item for item in report.recovery_guidance)
+                )
+                runner.assert_called_once()
+
+                with TemporaryDirectory() as directory:
+                    state_path = Path(directory) / "managed-state.json"
+                    managed_result = managed_state.execute_provider_plan(
+                        plan,
+                        state_path=state_path,
+                        executor=Mock(return_value=report),
+                        allow_provider_mutation=True,
+                    )
+                    self.assertEqual(
+                        managed_result.persistence,
+                        managed_state.PersistenceOutcome.SUCCEEDED,
+                        managed_result.persistence_detail,
+                    )
+                    document = managed_state.load_document(state_path)
+                self.assertEqual(
+                    document["records"][0]["verification"]["outcome"],
+                    provider_execution.ActionOutcome.SUPERVISOR_FAILED.value,
+                )
+
+    def test_genuine_unsupervised_timeout_remains_timed_out_and_reloadable(self):
+        machine = capabilities.MachineState("Darwin", "arm64", "host")
+        manager = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            machine,
+            locator=lambda probe, context: None,
+        )
+        plan = provider_plans.generate_provider_plan(
+            (absent,), ("ghostscript",), package_managers=(manager,)
+        )
+        runner = Mock(
+            side_effect=subprocess.TimeoutExpired(
+                plan.actions[0].commands[0], 3, output="partial"
+            )
+        )
+        report = provider_execution._execute_provider_plan_unmanaged(
+            plan,
+            allow_provider_mutation=True,
+            current_context=lambda: machine,
+            manager_verifier=lambda state, context: True,
+            manager_architecture_reader=lambda state: "arm64",
+            privilege_resolver=lambda action: "",
+            supervisor_resolver=lambda action: "",
+            detector=lambda capability, context: absent,
+            runner=runner,
+            timeout_seconds=3,
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.TIMED_OUT,
+        )
+        self.assertTrue(report.actions[0].commands[0].timed_out)
+        self.assertFalse(
+            any(
+                "no provider command started" in item
+                for item in report.recovery_guidance
+            )
+        )
+        runner.assert_called_once()
+
+        with TemporaryDirectory() as directory:
+            state_path = Path(directory) / "managed-state.json"
+            managed_result = managed_state.execute_provider_plan(
+                plan,
+                state_path=state_path,
+                executor=Mock(return_value=report),
+                allow_provider_mutation=True,
+            )
+            self.assertEqual(
+                managed_result.persistence,
+                managed_state.PersistenceOutcome.SUCCEEDED,
+            )
+            document = managed_state.load_document(state_path)
+        self.assertEqual(
+            document["records"][0]["verification"]["outcome"],
+            provider_execution.ActionOutcome.TIMED_OUT.value,
         )
 
     def test_elevated_supervisor_argv_is_noninteractive_and_reports_statuses(self):
@@ -468,7 +775,7 @@ class ProviderExecutionTests(unittest.TestCase):
             provider_execution.ExecutionContractError,
             "target architecture is unknown",
         ):
-            provider_execution.execute_provider_plan(
+            provider_execution._execute_provider_plan_unmanaged(
                 invalid,
                 allow_provider_mutation=True,
                 current_context=lambda: replace(self.machine, architecture="unknown"),
@@ -499,7 +806,7 @@ class ProviderExecutionTests(unittest.TestCase):
             package_managers=(manager,),
             native_provisioning=("bash",),
         )
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -624,6 +931,69 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(action.commands[0].stderr, "provider unavailable")
         runner.assert_called_once()
 
+    def test_injected_runner_output_is_bounded_for_completion_and_timeout(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        exact = "e" * provider_execution.MAX_CAPTURED_OUTPUT_CHARS
+        self.assertEqual(provider_execution._bounded_command_output(exact), exact)
+        self.assertEqual(
+            provider_execution._bounded_command_output(exact + "x"),
+            provider_execution.OUTPUT_TRUNCATION_MARKER + exact[1:] + "x",
+        )
+        oversized_stdout = "stdout-" + (
+            "x" * (provider_execution.MAX_CAPTURED_OUTPUT_CHARS + 17)
+        )
+        oversized_stderr = "stderr-" + (
+            "y" * (provider_execution.MAX_CAPTURED_OUTPUT_CHARS + 23)
+        )
+
+        def assert_bounded(command):
+            self.assertTrue(
+                command.stdout.startswith(
+                    provider_execution.OUTPUT_TRUNCATION_MARKER
+                )
+            )
+            self.assertTrue(
+                command.stderr.startswith(
+                    provider_execution.OUTPUT_TRUNCATION_MARKER
+                )
+            )
+            self.assertEqual(
+                len(command.stdout),
+                provider_execution.MAX_CAPTURED_OUTPUT_CHARS
+                + len(provider_execution.OUTPUT_TRUNCATION_MARKER),
+            )
+            self.assertEqual(
+                len(command.stderr),
+                provider_execution.MAX_CAPTURED_OUTPUT_CHARS
+                + len(provider_execution.OUTPUT_TRUNCATION_MARKER),
+            )
+            self.assertTrue(command.stdout.endswith("x" * 17))
+            self.assertTrue(command.stderr.endswith("y" * 23))
+
+        completed = self.execute(
+            self.plan(),
+            detector=lambda capability, machine: absent,
+            runner=lambda argv, timeout: subprocess.CompletedProcess(
+                argv, 1, oversized_stdout, oversized_stderr
+            ),
+        )
+        assert_bounded(completed.actions[0].commands[0])
+
+        def timeout(argv, seconds):
+            raise subprocess.TimeoutExpired(
+                argv,
+                seconds,
+                output=oversized_stdout,
+                stderr=oversized_stderr,
+            )
+
+        timed_out = self.execute(
+            self.plan(),
+            detector=lambda capability, machine: absent,
+            runner=timeout,
+        )
+        assert_bounded(timed_out.actions[0].commands[0])
+
     def test_command_start_failure_does_not_claim_partial_host_state(self):
         absent = self.state(capabilities.GHOSTSCRIPT)
 
@@ -655,7 +1025,7 @@ class ProviderExecutionTests(unittest.TestCase):
         plan = provider_plans.generate_provider_plan(
             (absent,), ("ghostscript",), package_managers=(manager,)
         )
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -817,6 +1187,129 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertTrue(any("fresh plan" in item for item in report.recovery_guidance))
         self.assertFalse(any("idempotent" in item for item in report.recovery_guidance))
 
+    def test_post_start_lifecycle_uncertainty_preserves_prior_action_and_provenance(self):
+        ghostscript_absent = self.state(capabilities.GHOSTSCRIPT)
+        ghostscript_available = self.state(
+            capabilities.GHOSTSCRIPT, available=True
+        )
+        poppler_absent = self.state(capabilities.POPPLER)
+        plan = provider_plans.generate_provider_plan(
+            (ghostscript_absent, poppler_absent),
+            ("ghostscript", "poppler"),
+            package_managers=(self.manager,),
+        )
+        calls = 0
+
+        def run(argv, timeout):
+            nonlocal calls
+            calls += 1
+            if calls <= 2:
+                return subprocess.CompletedProcess(argv, 0, f"completed-{calls}", "")
+            raise provider_execution.CommandLifecycleError(
+                subprocess.CompletedProcess(argv, None, "partial", "reap failed"),
+                "provider command launched, but reaping failed",
+                lifetime_uncertain=True,
+            )
+
+        detector = Mock(
+            side_effect=self.detector_sequence(
+                ghostscript_absent,
+                ghostscript_available,
+                poppler_absent,
+            )
+        )
+        with TemporaryDirectory() as directory:
+            state_path = Path(directory) / "managed-state.json"
+            result = managed_state.execute_provider_plan(
+                plan,
+                state_path=state_path,
+                allow_provider_mutation=True,
+                current_context=lambda: self.machine,
+                manager_verifier=lambda state, machine: True,
+                privilege_resolver=lambda action: "/usr/bin/sudo",
+                supervisor_resolver=lambda action: "/usr/bin/timeout",
+                privilege_preflight=lambda argv: True,
+                detector=detector,
+                runner=run,
+            )
+            document = managed_state.load_document(state_path)
+
+        execution = result.execution
+        self.assertEqual(
+            tuple(action.outcome for action in execution.actions),
+            (
+                provider_execution.ActionOutcome.SUCCEEDED,
+                provider_execution.ActionOutcome.SUPERVISOR_FAILED,
+            ),
+        )
+        self.assertEqual(execution.actions[0].commands[-1].stdout, "completed-2")
+        self.assertIsNone(execution.actions[1].commands[0].returncode)
+        self.assertIn("launched", execution.actions[1].detail)
+        self.assertFalse(
+            any("no provider command started" in item for item in execution.recovery_guidance)
+        )
+        self.assertTrue(
+            any("do not retry" in item for item in execution.recovery_guidance)
+        )
+        self.assertTrue(
+            any("do not attempt rollback" in item for item in execution.recovery_guidance)
+        )
+        self.assertFalse(any("idempotent" in item for item in execution.recovery_guidance))
+        self.assertEqual(detector.call_count, 3)
+        self.assertEqual(len(document["records"]), 2)
+        self.assertTrue(all(record["ownership"] is False for record in document["records"]))
+        self.assertEqual(
+            document["records"][1]["verification"]["outcome"],
+            provider_execution.ActionOutcome.SUPERVISOR_FAILED.value,
+        )
+
+
+
+    def test_uncertain_post_start_interrupt_is_persisted_before_propagation(self):
+        absent = self.state(capabilities.GHOSTSCRIPT)
+        plan = self.plan()
+
+        def interrupt(argv, timeout):
+            raise provider_execution.CommandInterruptedError(
+                subprocess.CompletedProcess(argv, None, "partial", "reap failed"),
+                "provider command was interrupted after launch; reaping failed",
+                lifetime_uncertain=True,
+            )
+
+        with TemporaryDirectory() as directory:
+            state_path = Path(directory) / "managed-state.json"
+            managed_result = managed_state.execute_provider_plan(
+                plan,
+                state_path=state_path,
+                allow_provider_mutation=True,
+                current_context=lambda: self.machine,
+                manager_verifier=lambda state, machine: True,
+                privilege_resolver=lambda action: "/usr/bin/sudo",
+                supervisor_resolver=lambda action: "/usr/bin/timeout",
+                privilege_preflight=lambda argv: True,
+                detector=self.detector_sequence(absent),
+                runner=interrupt,
+            )
+            document = managed_state.load_document(state_path)
+
+        report = managed_result.execution
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.SUPERVISOR_FAILED,
+        )
+        self.assertIsNone(report.actions[0].commands[0].returncode)
+        self.assertTrue(any("do not retry" in item for item in report.recovery_guidance))
+        self.assertTrue(
+            any("do not attempt rollback" in item for item in report.recovery_guidance)
+        )
+        self.assertFalse(
+            any("no provider command started" in item for item in report.recovery_guidance)
+        )
+        self.assertEqual(
+            document["records"][0]["verification"]["outcome"],
+            provider_execution.ActionOutcome.SUPERVISOR_FAILED.value,
+        )
+
     def test_stale_homebrew_bash_action_skips_for_fresh_system_bash(self):
         machine = capabilities.MachineState("Darwin", "arm64")
         manager = provider_plans.PackageManagerState(
@@ -838,7 +1331,7 @@ class ProviderExecutionTests(unittest.TestCase):
             architecture_reader=lambda probe, path: "arm64",
         )
         runner = Mock(side_effect=AssertionError("must not run"))
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -912,7 +1405,7 @@ class ProviderExecutionTests(unittest.TestCase):
             native_provisioning=("ghostscript",),
         )
         runner = Mock(side_effect=AssertionError("must not run"))
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -929,7 +1422,7 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         runner.assert_not_called()
 
-        mutated = provider_execution.execute_provider_plan(
+        mutated = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -994,19 +1487,6 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         self.assertIn("different capability", report.actions[0].detail)
 
-    def test_reader_join_interruption_detaches_as_uncertain(self):
-        first = Mock()
-        second = Mock()
-        first.join.side_effect = (KeyboardInterrupt(), None)
-        second.join.return_value = None
-        first.is_alive.return_value = True
-        second.is_alive.return_value = True
-        stop = threading.Event()
-        clean = provider_execution._join_output_readers(
-            (first, second), stop, []
-        )
-        self.assertFalse(clean)
-        self.assertTrue(stop.is_set())
 
     def test_native_replacement_uses_any_fresh_native_provider_but_not_translated(self):
         machine = capabilities.MachineState("Darwin", "arm64")
@@ -1040,7 +1520,7 @@ class ProviderExecutionTests(unittest.TestCase):
         )
         fresh_native = bash_state(system_arch="arm64", homebrew_arch="x86_64")
         runner = Mock(side_effect=AssertionError("must not run"))
-        skipped = provider_execution.execute_provider_plan(
+        skipped = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -1055,7 +1535,7 @@ class ProviderExecutionTests(unittest.TestCase):
         runner.assert_not_called()
 
         installed_native = bash_state(homebrew_arch="arm64")
-        mutated = provider_execution.execute_provider_plan(
+        mutated = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -1117,22 +1597,91 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(report.outcome, provider_execution.PlanOutcome.SUCCEEDED)
         self.assertEqual(os.environ.get("PATH"), original)
 
+
+    def test_partial_environment_application_ordinary_failure_restores(self):
+        cancellation = provider_execution._CancellationContext()
+        names = ("AGENT_TOOLS_TEST_ENV_ONE", "AGENT_TOOLS_TEST_ENV_TWO")
+        previous = {name: os.environ.get(name) for name in names}
+        body_entered = False
+
+        def fail_partial_application(updates):
+            os.environ[names[0]] = updates[names[0]]
+            raise RuntimeError("environment application failed")
+
+        try:
+            os.environ[names[0]] = "original-one"
+            os.environ.pop(names[1], None)
+            with (
+                patch.object(
+                    provider_execution,
+                    "_apply_environment",
+                    side_effect=fail_partial_application,
+                ),
+                self.assertRaisesRegex(RuntimeError, "environment application failed"),
+            ):
+                with provider_execution._temporary_environment(
+                    {
+                        names[0]: "temporary-one",
+                        names[1]: "temporary-two",
+                    },
+                    cancellation,
+                ):
+                    body_entered = True
+
+            self.assertEqual(os.environ.get(names[0]), "original-one")
+            self.assertNotIn(names[1], os.environ)
+        finally:
+            provider_execution._restore_environment(previous)
+
+        self.assertFalse(body_entered)
+        self.assertEqual(
+            cancellation.phase, provider_execution._CancellationPhase.RUNNING
+        )
+
+
+
+
+
+
+
+    def test_temporary_environment_restores_after_ordinary_exception(self):
+        original_path = os.environ.get("PATH")
+        cancellation = provider_execution._CancellationContext()
+
+        with self.assertRaisesRegex(RuntimeError, "detector failed"):
+            with provider_execution._temporary_environment(
+                {"PATH": "/temporary"}, cancellation
+            ):
+                self.assertEqual(os.environ.get("PATH"), "/temporary")
+                raise RuntimeError("detector failed")
+
+        self.assertEqual(os.environ.get("PATH"), original_path)
+        self.assertEqual(
+            cancellation.phase, provider_execution._CancellationPhase.RUNNING
+        )
+
     def test_temporary_environment_refreshes_are_serialized(self):
         original = os.environ.get("PATH")
         first_entered = threading.Event()
         release_first = threading.Event()
         second_entered = threading.Event()
         observed = []
+        first_cancellation = provider_execution._CancellationContext()
+        second_cancellation = provider_execution._CancellationContext()
 
         def first():
-            with provider_execution._temporary_environment({"PATH": "/first"}):
+            with provider_execution._temporary_environment(
+                {"PATH": "/first"}, first_cancellation
+            ):
                 first_entered.set()
                 release_first.wait(2)
                 observed.append(("first", os.environ.get("PATH")))
 
         def second():
             first_entered.wait(2)
-            with provider_execution._temporary_environment({"PATH": "/second"}):
+            with provider_execution._temporary_environment(
+                {"PATH": "/second"}, second_cancellation
+            ):
                 second_entered.set()
                 observed.append(("second", os.environ.get("PATH")))
 
@@ -1157,6 +1706,8 @@ class ProviderExecutionTests(unittest.TestCase):
         release_first = threading.Event()
         second_refreshed = threading.Event()
         observed = []
+        first_cancellation = provider_execution._CancellationContext()
+        second_cancellation = provider_execution._CancellationContext()
 
         def first_refresher(action):
             return {"PATH": "/first"}
@@ -1168,7 +1719,7 @@ class ProviderExecutionTests(unittest.TestCase):
 
         def first():
             with provider_execution._refreshed_environment(
-                self.plan().actions[0], first_refresher
+                self.plan().actions[0], first_refresher, first_cancellation
             ):
                 first_entered.set()
                 release_first.wait(2)
@@ -1176,7 +1727,7 @@ class ProviderExecutionTests(unittest.TestCase):
         def second():
             first_entered.wait(2)
             with provider_execution._refreshed_environment(
-                self.plan().actions[0], second_refresher
+                self.plan().actions[0], second_refresher, second_cancellation
             ):
                 observed.append(("applied", os.environ.get("PATH")))
 
@@ -1271,7 +1822,7 @@ class ProviderExecutionTests(unittest.TestCase):
             provider_execution.ExecutionContractError,
             "lacks explicit fallback authorization",
         ):
-            provider_execution.execute_provider_plan(
+            provider_execution._execute_provider_plan_unmanaged(
                 forged,
                 allow_provider_mutation=True,
                 current_context=lambda: machine,
@@ -1291,7 +1842,7 @@ class ProviderExecutionTests(unittest.TestCase):
             (absent,), ("ghostscript",), package_managers=(manager,)
         )
         runner = Mock(side_effect=AssertionError("must not run"))
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,
@@ -1364,7 +1915,7 @@ class ProviderExecutionTests(unittest.TestCase):
             package_managers=(manager,),
             native_provisioning=("bash",),
         )
-        report = provider_execution.execute_provider_plan(
+        report = provider_execution._execute_provider_plan_unmanaged(
             plan,
             allow_provider_mutation=True,
             current_context=lambda: machine,

@@ -1,3 +1,4 @@
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -5,10 +6,20 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from unittest.mock import patch
 
-from agent_tools import capabilities, cli
+from agent_tools import capabilities, cli, managed_state
 
 
 class CliTests(unittest.TestCase):
+    def setUp(self) -> None:
+        loader = patch.object(
+            cli, "load_document", return_value=managed_state.empty_document()
+        )
+        path = patch.object(cli, "managed_state_path", return_value=Path("state.json"))
+        loader.start()
+        path.start()
+        self.addCleanup(loader.stop)
+        self.addCleanup(path.stop)
+
     def test_parser_requires_command(self) -> None:
         with self.assertRaises(SystemExit):
             cli.build_parser().parse_args([])
@@ -25,6 +36,75 @@ class CliTests(unittest.TestCase):
         with patch.object(cli, "tools_status", return_value=1) as tools_status:
             self.assertEqual(cli.main(["tools", "status", "bash"]), 1)
         tools_status.assert_called_once_with("bash")
+
+    def test_tools_status_reports_requested_provenance_without_ownership(self) -> None:
+        record = {
+            "capability_id": "bash",
+            "requested_at": "2026-08-31T11:59:00Z",
+            "recorded_at": "2026-08-31T12:00:00Z",
+            "installation_unit": "bash",
+        }
+        document = {"schema_version": 1, "records": [record]}
+        with (
+            patch.object(cli, "load_document", return_value=document),
+            patch.object(capabilities.shutil, "which", return_value="/tools/bash"),
+            patch.object(capabilities, "read_executable_version", return_value="5.2"),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(cli.tools_status("bash"), 0)
+        self.assertIn("agent-tools requests: 1", output.getvalue())
+        self.assertIn("latest request: 2026-08-31T11:59:00Z", output.getvalue())
+        self.assertIn("recorded at: 2026-08-31T12:00:00Z", output.getvalue())
+        self.assertIn("ownership: not claimed", output.getvalue())
+
+    def test_tools_status_keeps_detection_visible_when_provenance_is_corrupt(self) -> None:
+        with (
+            patch.object(
+                cli,
+                "load_document",
+                side_effect=managed_state.ManagedStateError("corrupt state"),
+            ),
+            patch.object(capabilities.shutil, "which", return_value="/tools/bash"),
+            patch.object(capabilities, "read_executable_version", return_value="5.2"),
+            redirect_stdout(StringIO()) as output,
+            redirect_stderr(StringIO()) as errors,
+        ):
+            self.assertEqual(cli.tools_status("bash"), 0)
+        self.assertIn("bash: available", output.getvalue())
+        self.assertIn("managed provenance unavailable: corrupt state", errors.getvalue())
+
+    def test_tools_status_reports_explicit_json_depth_corruption_without_traceback(self) -> None:
+        nested: object = None
+        for _ in range(managed_state.MAX_MANAGED_STATE_JSON_DEPTH):
+            nested = [nested]
+        document = {
+            "schema_version": managed_state.SCHEMA_VERSION,
+            "records": [],
+            "ignored_extra": nested,
+        }
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "managed-state.json"
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with (
+                patch.object(cli, "managed_state_path", return_value=path),
+                patch.object(
+                    cli,
+                    "load_document",
+                    side_effect=managed_state.load_document,
+                ),
+                patch.object(
+                    capabilities.shutil, "which", return_value="/tools/bash"
+                ),
+                patch.object(
+                    capabilities, "read_executable_version", return_value="5.2"
+                ),
+                redirect_stdout(StringIO()) as output,
+                redirect_stderr(StringIO()) as errors,
+            ):
+                self.assertEqual(cli.tools_status("bash"), 0)
+        self.assertIn("bash: available", output.getvalue())
+        self.assertIn("JSON container depth", errors.getvalue())
+        self.assertNotIn("Traceback", errors.getvalue())
 
     def test_version_prefers_installed_distribution_metadata(self) -> None:
         with patch.object(cli.importlib.metadata, "version", return_value="2.3.4") as version:
