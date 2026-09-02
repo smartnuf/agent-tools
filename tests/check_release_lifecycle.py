@@ -269,26 +269,29 @@ def exercise_lifecycle(
             "the platform configuration path is under the current user home"
         )
     config_parent_existed = config_path.parent.exists()
-    enabled = run_command(
-        [
-            str(executable),
-            "tools",
-            "enable",
-            "bash",
-            "--allow-config-mutation",
-        ],
-        environment=environment,
-        cwd=work_directory,
-    )
-    if "desired state: updated" not in enabled.stdout:
-        raise AssertionError("authorized desired-state creation was not reported")
-    if output_path(enabled.stdout) != config_path:
-        raise AssertionError("refused and authorized changes resolved different state paths")
-    desired_state = config_path.read_bytes()
-    if b'"bash"' not in desired_state:
-        raise AssertionError("created desired state does not enable Bash")
-
+    desired_state: bytes | None = None
     try:
+        enabled = run_command(
+            [
+                str(executable),
+                "tools",
+                "enable",
+                "bash",
+                "--allow-config-mutation",
+            ],
+            environment=environment,
+            cwd=work_directory,
+        )
+        if "desired state: updated" not in enabled.stdout:
+            raise AssertionError("authorized desired-state creation was not reported")
+        if output_path(enabled.stdout) != config_path:
+            raise AssertionError(
+                "refused and authorized changes resolved different state paths"
+            )
+        desired_state = config_path.read_bytes()
+        if b'"bash"' not in desired_state:
+            raise AssertionError("created desired state does not enable Bash")
+
         current_pin = f"{PACKAGE}=={current_version}"
         run_command(
             uv_command
@@ -350,11 +353,15 @@ def exercise_lifecycle(
                 "Bash provider version output changed after application removal"
             )
     finally:
-        if home_config and config_path.is_file() and config_path.read_bytes() == desired_state:
-            config_path.unlink()
-            print(f"cleaned lifecycle-created macOS desired state: {config_path}")
-            if not config_parent_existed:
-                config_path.parent.rmdir()
+        if home_config and config_path.is_file():
+            unchanged_test_state = (
+                desired_state is None or config_path.read_bytes() == desired_state
+            )
+            if unchanged_test_state:
+                config_path.unlink()
+                print(f"cleaned lifecycle-created macOS desired state: {config_path}")
+                if not config_parent_existed:
+                    config_path.parent.rmdir()
 
 
 def main() -> int:
