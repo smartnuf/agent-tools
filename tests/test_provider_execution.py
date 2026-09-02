@@ -542,6 +542,152 @@ class ProviderExecutionTests(unittest.TestCase):
             )
         )
 
+    def test_unsupervised_lifecycle_failures_are_supervisor_failures(self):
+        machine = capabilities.MachineState("Darwin", "arm64", "host")
+        manager = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            machine,
+            locator=lambda probe, context: None,
+        )
+        plan = provider_plans.generate_provider_plan(
+            (absent,), ("ghostscript",), package_managers=(manager,)
+        )
+
+        for returncode, lifetime_uncertain in ((0, False), (23, False), (None, True)):
+            with self.subTest(
+                returncode=returncode, lifetime_uncertain=lifetime_uncertain
+            ):
+                runner = Mock(
+                    side_effect=provider_execution.CommandLifecycleError(
+                        subprocess.CompletedProcess(
+                            plan.actions[0].commands[0],
+                            returncode,
+                            "bounded-out",
+                            "bounded-err",
+                        ),
+                        "provider command launched; lifecycle handling failed",
+                        lifetime_uncertain=lifetime_uncertain,
+                    )
+                )
+                report = provider_execution._execute_provider_plan_unmanaged(
+                    plan,
+                    allow_provider_mutation=True,
+                    current_context=lambda: machine,
+                    manager_verifier=lambda state, context: True,
+                    manager_architecture_reader=lambda state: "arm64",
+                    privilege_resolver=lambda action: "",
+                    supervisor_resolver=lambda action: "",
+                    detector=lambda capability, context: absent,
+                    runner=runner,
+                )
+                action = report.actions[0]
+                self.assertEqual(
+                    action.outcome,
+                    provider_execution.ActionOutcome.SUPERVISOR_FAILED,
+                )
+                self.assertEqual(action.commands[0].returncode, returncode)
+                self.assertEqual(action.commands[0].argv, plan.actions[0].commands[0])
+                self.assertEqual(
+                    any(
+                        "could not establish quiescence" in item
+                        for item in report.recovery_guidance
+                    ),
+                    lifetime_uncertain,
+                )
+                self.assertFalse(
+                    any(
+                        "no provider command started" in item
+                        for item in report.recovery_guidance
+                    )
+                )
+                self.assertTrue(
+                    any("do not retry" in item for item in report.recovery_guidance)
+                )
+                runner.assert_called_once()
+
+                with TemporaryDirectory() as directory:
+                    state_path = Path(directory) / "managed-state.json"
+                    managed_result = managed_state.execute_provider_plan(
+                        plan,
+                        state_path=state_path,
+                        executor=Mock(return_value=report),
+                        allow_provider_mutation=True,
+                    )
+                    self.assertEqual(
+                        managed_result.persistence,
+                        managed_state.PersistenceOutcome.SUCCEEDED,
+                        managed_result.persistence_detail,
+                    )
+                    document = managed_state.load_document(state_path)
+                self.assertEqual(
+                    document["records"][0]["verification"]["outcome"],
+                    provider_execution.ActionOutcome.SUPERVISOR_FAILED.value,
+                )
+
+    def test_genuine_unsupervised_timeout_remains_timed_out_and_reloadable(self):
+        machine = capabilities.MachineState("Darwin", "arm64", "host")
+        manager = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+        absent = capabilities.detect_capability(
+            capabilities.GHOSTSCRIPT,
+            machine,
+            locator=lambda probe, context: None,
+        )
+        plan = provider_plans.generate_provider_plan(
+            (absent,), ("ghostscript",), package_managers=(manager,)
+        )
+        runner = Mock(
+            side_effect=subprocess.TimeoutExpired(
+                plan.actions[0].commands[0], 3, output="partial"
+            )
+        )
+        report = provider_execution._execute_provider_plan_unmanaged(
+            plan,
+            allow_provider_mutation=True,
+            current_context=lambda: machine,
+            manager_verifier=lambda state, context: True,
+            manager_architecture_reader=lambda state: "arm64",
+            privilege_resolver=lambda action: "",
+            supervisor_resolver=lambda action: "",
+            detector=lambda capability, context: absent,
+            runner=runner,
+            timeout_seconds=3,
+        )
+        self.assertEqual(
+            report.actions[0].outcome,
+            provider_execution.ActionOutcome.TIMED_OUT,
+        )
+        self.assertTrue(report.actions[0].commands[0].timed_out)
+        self.assertFalse(
+            any(
+                "no provider command started" in item
+                for item in report.recovery_guidance
+            )
+        )
+        runner.assert_called_once()
+
+        with TemporaryDirectory() as directory:
+            state_path = Path(directory) / "managed-state.json"
+            managed_result = managed_state.execute_provider_plan(
+                plan,
+                state_path=state_path,
+                executor=Mock(return_value=report),
+                allow_provider_mutation=True,
+            )
+            self.assertEqual(
+                managed_result.persistence,
+                managed_state.PersistenceOutcome.SUCCEEDED,
+            )
+            document = managed_state.load_document(state_path)
+        self.assertEqual(
+            document["records"][0]["verification"]["outcome"],
+            provider_execution.ActionOutcome.TIMED_OUT.value,
+        )
+
     def test_elevated_supervisor_argv_is_noninteractive_and_reports_statuses(self):
         absent = self.state(capabilities.GHOSTSCRIPT)
         for returncode, expected in (
