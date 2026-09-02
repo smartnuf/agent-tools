@@ -27,6 +27,31 @@ signal delivery. It needs a portable boundary that prevents the first SIGINT
 from interrupting transaction code while still cancelling a running provider
 command promptly and preserving ADR 0003's safety invariants.
 
+## Design progression and rejected alternatives
+
+The implemented design evolved through four materially different stages:
+
+1. first Ctrl+C arrived as an asynchronously injected `KeyboardInterrupt`;
+2. progressively wider exception boundaries and materialization guards tried
+   to preserve cleanup, results, environment state, and persistence evidence;
+3. one operation-scoped cancellation context centralized phase authority, but
+   first cancellation was still injected asynchronously; and
+4. the accepted design moved first-SIGINT handling to the edge as a cooperative
+   request observed at semantic checkpoints.
+
+Stages 2 and 3 fixed real local defects but did not structurally converge.
+There is always another interruptible Python instruction between learning an
+external fact and publishing its structured evidence, so protecting additional
+expressions cannot close the family. The cooperative design removes that race
+class instead of attempting to enumerate every bytecode boundary.
+
+A worker thread or process was considered as an alternative way to isolate
+transaction work but was not implemented. It would add a new lifetime,
+coordination, and cancellation contract beyond the authorized synchronous
+executor, while the outer broker and bounded polling checkpoints satisfy the
+accepted requirement without that expansion. Any future worker-based design
+requires separate human authority and prospective lifecycle closure.
+
 ## Decision
 
 The first SIGINT during the supported managed mutation operation is an

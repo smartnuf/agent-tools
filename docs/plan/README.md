@@ -5,7 +5,12 @@ This directory is the durable answer to “where are we, what should happen next
 This protocol owns roadmap selection, status, estimates, and progress reporting.
 Implementation, pull-request review, concurrent merge ownership, integration,
 and cleanup follow the canonical [development and review
-workflow](../development-workflow.md).
+workflow](../development-workflow.md). Non-trivial roadmap work uses that
+workflow's proportional [top-level engineering
+cycle](../development-workflow.md#top-level-engineering-cycle); planning is one
+stage in that cycle, not a substitute for characterisation, discovery,
+architecture/workflow mapping, or behavioural specification when those stages
+are warranted.
 
 ## Starting roadmap work
 
@@ -16,9 +21,28 @@ Before changing code or automation:
 3. Verify that the current roadmap milestone has an open GitHub milestone, and
    that its planned issues (including the selected task) are assigned to it.
    Reconcile missing or stale assignments before implementation.
-4. Select one incomplete acceptance criterion. Prefer blockers and the documented “next recommended work.”
-5. Write a task plan containing scope, non-goals, affected platforms, validation, risks, dependencies, and an effort estimate.
-6. Split work estimated above two person-days into reviewable tasks. A task may use several focused commits, but each commit should leave the branch understandable.
+4. Preserve the intended outcome and select one incomplete acceptance criterion.
+   Prefer blockers and the documented “next recommended work.”
+5. Characterise the problem and its knowledge/risk profile proportionately.
+   Re-characterise when the work adds a new regime such as mutation,
+   persistence, a public format, another platform, privilege, asynchronous
+   execution, an external service, destructive effects, hostile input, or
+   multi-process coordination.
+6. Use discovery, architecture/workflow mapping, and behavioural specification
+   where the profile warrants them. Material knowledge gaps may require
+   targeted primary-source research, prior art, experiments, fault injection,
+   or real-environment evidence before production implementation; ordinary
+   low-risk work does not require heavyweight artifacts.
+7. Write a task plan containing the acceptance slice, scope, non-goals,
+   dependencies, sequencing, affected files/platforms, experiment versus
+   production work, validation, risks, external prerequisites, effort, and
+   merge ownership where relevant.
+8. Split work estimated above two person-days into reviewable tasks. A task may
+   use several focused commits, but each commit should leave the branch
+   understandable.
+
+The plan records what work is intended. The specification records what must
+remain true. Keep both proportional to the task.
 
 Use these effort classes for initial task planning:
 

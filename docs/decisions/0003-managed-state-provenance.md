@@ -131,6 +131,29 @@ boundary and focused tests; it is not an alternate public mutator. Both use one
 re-entrant execution lock so state preflight, mutation, and persistence cannot
 interleave with another supported mutation in the same process.
 
+## Why these boundaries changed
+
+Early issue-52 development validated persisted fields largely as independent
+shapes. Exact-head review showed that this did not define one coherent format:
+some writer-reachable values could be rejected while other writer-unreachable
+or hostile combinations could be accepted. The accepted design instead treats
+writer, serializer, and production reader reachability as one compatibility
+contract and validates the serialized temporary document through the production
+reader before replacement. The compatibility obligation begins with the first
+merged or released writer, not superseded pull-request heads.
+
+The initial reader also treated `FileNotFoundError` from target-following reads
+as absence. A dangling symlink demonstrated why JSON contents are not the whole
+integrity boundary: the pathname entry could exist, be unreadable through its
+target, and later be destroyed by replacement. The accepted non-following entry
+classification therefore distinguishes confirmed absence from every symlink or
+other non-regular entry and fails closed.
+
+These corrections did not change the core fact model. Detected state remains
+the authority for current reality, provenance records only an Agent Tools
+request, ownership is never inferred, and persistence certainty remains
+independent of the host-mutation result.
+
 ## Consequences
 
 - Diagnostics can distinguish currently detected external state from recorded
