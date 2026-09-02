@@ -119,12 +119,14 @@ class CliTests(unittest.TestCase):
         self.assertIn("managed provenance unavailable: corrupt state", errors.getvalue())
 
     def test_tools_status_reports_desired_state_separately(self) -> None:
-        document = {
-            "schema_version": 1,
-            "capabilities": {"bash": {"provider": "system-bash"}},
-        }
         with (
-            patch.object(cli, "load_desired_document", return_value=document),
+            patch.object(
+                cli,
+                "desired_capabilities",
+                return_value=(
+                    desired_state.DesiredCapability("bash", "selected-provider"),
+                ),
+            ),
             patch.object(capabilities.shutil, "which", return_value="/tools/bash"),
             patch.object(capabilities, "read_executable_version", return_value="5.2"),
             redirect_stdout(StringIO()) as output,
@@ -132,7 +134,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(cli.tools_status("bash"), 0)
         rendered = output.getvalue()
         self.assertIn("desired: enabled", rendered)
-        self.assertIn("preferred provider: system-bash", rendered)
+        self.assertIn("preferred provider: selected-provider", rendered)
         self.assertIn("agent-tools requests: none recorded", rendered)
 
     def test_tools_status_does_not_misreport_corrupt_desired_state_as_disabled(self) -> None:

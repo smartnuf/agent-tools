@@ -1407,6 +1407,13 @@ def _validate_plan(plan: ProviderPlan, current: MachineState) -> MachineState:
     for action in plan.actions:
         if action.capability_id not in plan.requested_capabilities:
             raise ExecutionContractError("action capability was not requested")
+        if (
+            action.capability_id in preferences
+            and action.provider_id != preferences[action.capability_id]
+        ):
+            raise ExecutionContractError(
+                "provider action contradicts its exact provider preference"
+            )
         if action.capability_id in seen:
             raise ExecutionContractError("provider plan has duplicate capability actions")
         seen.add(action.capability_id)

@@ -137,24 +137,36 @@ def _read_regular_bytes(path: Path) -> tuple[bool, bytes]:
     except OSError as error:
         raise DesiredStateError(f"desired state is unreadable: {error}") from error
     try:
-        opened = os.fstat(descriptor)
-        if not stat.S_ISREG(opened.st_mode) or (
-            entry.st_ino and opened.st_ino and entry.st_ino != opened.st_ino
-        ):
-            raise DesiredStateError("desired-state entry changed while being opened")
-        chunks: list[bytes] = []
-        retained = 0
-        while retained <= MAX_DOCUMENT_BYTES:
-            chunk = os.read(descriptor, min(65536, MAX_DOCUMENT_BYTES + 1 - retained))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            retained += len(chunk)
-        if retained > MAX_DOCUMENT_BYTES:
-            raise DesiredStateError("desired-state document exceeds the size limit")
-        return True, b"".join(chunks)
-    finally:
-        os.close(descriptor)
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode) or (
+                entry.st_ino and opened.st_ino and entry.st_ino != opened.st_ino
+            ):
+                raise DesiredStateError(
+                    "desired-state entry changed while being opened"
+                )
+            chunks: list[bytes] = []
+            retained = 0
+            while retained <= MAX_DOCUMENT_BYTES:
+                chunk = os.read(
+                    descriptor,
+                    min(65536, MAX_DOCUMENT_BYTES + 1 - retained),
+                )
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                retained += len(chunk)
+            if retained > MAX_DOCUMENT_BYTES:
+                raise DesiredStateError(
+                    "desired-state document exceeds the size limit"
+                )
+            return True, b"".join(chunks)
+        finally:
+            os.close(descriptor)
+    except DesiredStateError:
+        raise
+    except OSError as error:
+        raise DesiredStateError(f"desired state is unreadable: {error}") from error
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -266,42 +278,58 @@ def _write_backup(path: Path, raw: bytes) -> Path:
             _write_all(descriptor, raw)
             os.fsync(descriptor)
         except Exception:
+            os.close(descriptor)
+            descriptor = None
             try:
                 backup.unlink()
             except OSError:
                 pass
             raise
         finally:
-            os.close(descriptor)
+            if descriptor is not None:
+                os.close(descriptor)
         _sync_directory(path.parent)
         return backup
     raise DesiredStateError("could not allocate a collision-safe backup path")
 
 
 def _prepare_temporary(path: Path, raw: bytes) -> Path:
-    with tempfile.NamedTemporaryFile(
-        mode="wb",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        delete=False,
-    ) as stream:
-        temporary = Path(stream.name)
-        stream.write(raw)
-        stream.flush()
-        os.fsync(stream.fileno())
+    temporary: Path | None = None
     try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
         load_document(temporary)
     except Exception:
-        try:
-            temporary.unlink()
-        except OSError:
-            pass
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
         raise
     return temporary
 
 
 def _same_snapshot(left: _Snapshot, right: _Snapshot) -> bool:
     return left.exists == right.exists and left.raw == right.raw
+
+
+def _missing_directories(directory: Path) -> tuple[Path, ...]:
+    missing = []
+    current = directory
+    while not current.exists():
+        missing.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    return tuple(reversed(missing))
 
 
 def _restore(path: Path, original: _Snapshot, expected_current: bytes) -> None:
@@ -331,6 +359,7 @@ def _replace_document(
     original: _Snapshot,
     document: dict[str, Any],
 ) -> Path | None:
+    missing_directories = _missing_directories(path.parent)
     path.parent.mkdir(parents=True, exist_ok=True)
     current = _snapshot(path)
     if not _same_snapshot(current, original):
@@ -347,6 +376,8 @@ def _replace_document(
         replaced = True
         temporary = None
         _sync_directory(path.parent)
+        for directory in reversed(missing_directories):
+            _sync_directory(directory.parent)
         persisted = _snapshot(path)
         if persisted.raw != raw or persisted.document != document:
             raise DesiredStateError("updated desired state failed resulting-state validation")

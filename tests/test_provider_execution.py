@@ -1435,6 +1435,35 @@ class ProviderExecutionTests(unittest.TestCase):
                 detector=Mock(),
             )
 
+    def test_action_that_contradicts_exact_preference_is_rejected(self):
+        machine = capabilities.MachineState("Darwin", "arm64")
+        manager = provider_plans.PackageManagerState(
+            "brew", "/opt/homebrew/bin/brew", "host", "arm64"
+        )
+        absent = capabilities.detect_capability(
+            capabilities.BASH, machine, locator=lambda probe, context: None
+        )
+        generated = provider_plans.generate_provider_plan(
+            (absent,),
+            ("bash",),
+            package_managers=(manager,),
+            provider_preferences={"bash": "homebrew-bash"},
+        )
+        contradictory = replace(
+            generated,
+            provider_preferences=(("bash", "system-bash"),),
+        )
+        with self.assertRaisesRegex(
+            provider_execution.ExecutionContractError, "contradicts"
+        ):
+            provider_execution._execute_provider_plan_unmanaged(
+                contradictory,
+                allow_provider_mutation=True,
+                current_context=lambda: machine,
+                detector=Mock(),
+                runner=Mock(side_effect=AssertionError("must not run")),
+            )
+
     def test_fresh_provider_skip_rejects_relative_identity(self):
         machine = capabilities.MachineState("Darwin", "arm64")
         relative = capabilities.detect_capability(

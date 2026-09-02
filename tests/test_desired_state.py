@@ -42,7 +42,8 @@ class DesiredStateTests(unittest.TestCase):
             platform_name="Windows",
             environment={"LOCALAPPDATA": "C:\\Users\\user\\AppData\\Local"},
         )
-        self.assertTrue(str(windows).endswith("agent-tools/config.json"))
+        self.assertEqual(windows.name, "config.json")
+        self.assertEqual(windows.parent.name, "agent-tools")
 
     def test_platform_paths_fail_closed_without_absolute_authority(self) -> None:
         with self.assertRaisesRegex(desired_state.DesiredStateError, "LOCALAPPDATA"):
@@ -118,6 +119,37 @@ class DesiredStateTests(unittest.TestCase):
                         desired_state.load_document(path)
                     self.assertEqual(path.read_bytes(), raw)
 
+    def test_descriptor_io_failures_are_normalized(self) -> None:
+        raw = b'{"schema_version":1,"capabilities":{}}'
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_bytes(raw)
+            for operation in ("fstat", "read"):
+                with (
+                    self.subTest(operation=operation),
+                    patch.object(
+                        desired_state.os,
+                        operation,
+                        side_effect=OSError(f"injected {operation} failure"),
+                    ),
+                    self.assertRaisesRegex(
+                        desired_state.DesiredStateError, "unreadable"
+                    ),
+                ):
+                    desired_state.load_document(path)
+            actual_close = desired_state.os.close
+
+            def close_then_fail(descriptor: int) -> None:
+                actual_close(descriptor)
+                raise OSError("injected close failure")
+
+            with (
+                patch.object(desired_state.os, "close", side_effect=close_then_fail),
+                self.assertRaisesRegex(desired_state.DesiredStateError, "unreadable"),
+            ):
+                desired_state.load_document(path)
+            self.assertEqual(path.read_bytes(), raw)
+
     def test_pathname_integrity_rejects_regular_file_alternatives(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -160,6 +192,62 @@ class DesiredStateTests(unittest.TestCase):
             self.assertIs(unchanged.outcome, desired_state.DesiredMutationOutcome.NO_CHANGES)
             self.assertIsNone(updated.backup_path)
             self.assertEqual(list(path.parent.glob("config.json.backup-*")), [])
+
+    def test_new_configuration_ancestors_receive_durability_syncs(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "new-config-root" / "agent-tools" / "config.json"
+            synced: list[Path] = []
+            with patch.object(
+                desired_state, "_sync_directory", side_effect=synced.append
+            ):
+                desired_state.set_capability(
+                    "bash",
+                    enabled=True,
+                    allow_config_mutation=True,
+                    path=path,
+                    machine=LINUX,
+                )
+            self.assertEqual(synced, [path.parent, path.parent.parent, root])
+
+    def test_failed_partial_backup_is_removed_after_descriptor_closes(self) -> None:
+        raw = b'{"schema_version":1,"capabilities":{}}'
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_bytes(raw)
+            with (
+                patch.object(
+                    desired_state,
+                    "_write_all",
+                    side_effect=OSError("injected partial write"),
+                ),
+                self.assertRaises(desired_state.DesiredStateError),
+            ):
+                desired_state.set_capability(
+                    "bash",
+                    enabled=True,
+                    allow_config_mutation=True,
+                    path=path,
+                    machine=LINUX,
+                )
+            self.assertEqual(path.read_bytes(), raw)
+            self.assertEqual(list(path.parent.glob("config.json.backup-*")), [])
+
+    def test_failed_temporary_write_discards_its_partial_entry(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            with (
+                patch.object(
+                    desired_state.os,
+                    "fsync",
+                    side_effect=OSError("injected temporary sync failure"),
+                ),
+                self.assertRaises(OSError),
+            ):
+                desired_state._prepare_temporary(
+                    path, b'{"schema_version":1,"capabilities":{}}'
+                )
+            self.assertEqual(list(path.parent.glob(".config.json.*")), [])
 
     def test_existing_bytes_are_backed_up_and_unrelated_entries_survive_changes(self) -> None:
         raw = b'{ "schema_version": 1, "capabilities": {"future": {}} }\n'
