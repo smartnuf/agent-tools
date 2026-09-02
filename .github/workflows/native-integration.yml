@@ -75,6 +75,8 @@ jobs:
       - name: Install native tools through external providers
         timeout-minutes: 10
         uses: ./.github/actions/install-native
+      - name: Preseed clone bootstrap Python
+        run: uv python install 3.11
       - name: Exercise delegated clone native setup twice (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -91,11 +93,19 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
+          set +e
           first="$(sh scripts/bootstrap.sh --install-native-tools 2>&1)"
+          first_status=$?
+          set -e
           printf '%s\n' "$first"
+          test "$first_status" -eq 0
           grep -F 'no host changes required' <<<"$first"
+          set +e
           second="$(.venv/bin/python -I -m agent_tools.native_setup --allow-provider-mutation poppler ghostscript 2>&1)"
+          second_status=$?
+          set -e
           printf '%s\n' "$second"
+          test "$second_status" -eq 0
           grep -F 'no host changes required' <<<"$second"
       - name: Verify repeated pre-seeded native selection
         env:

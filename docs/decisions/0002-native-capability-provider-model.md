@@ -6,7 +6,7 @@
 
 ## Context
 
-Native-tool knowledge is currently split across the packaged Python diagnostics,
+At the time of this decision, native-tool knowledge was split across the packaged Python diagnostics,
 Windows bootstrap logic, Unix installation scripts, platform documentation, and
 CI. Poppler and Ghostscript probes, package identifiers, discovery locations,
 and post-install handling are repeated in different forms. The packaged wheel
@@ -21,7 +21,7 @@ existing preferred provider for an absent capability. WSL is also present, but
 it is a separate Linux execution environment with different path, process,
 permission, and package-management semantics.
 
-The present duplication is concrete:
+The then-present duplication was concrete:
 
 | Concern | Current locations |
 |---|---|
@@ -501,6 +501,12 @@ stable shell-selection interface.
 - Persistent user configuration remains deferred until it has a consumer.
   Managed mutation provenance now has the provider executor as its consumer and
   is governed by [ADR 0003](0003-managed-state-provenance.md).
+
+Issue #53 completed the clone-wrapper part of this decision. The explicit
+PowerShell and POSIX native-install flags now invoke the internal packaged
+bootstrap orchestration after editable installation; the obsolete independent
+native mapping scripts were removed. This does not add the deferred public
+`tools install` command.
 
 ## Rejected or deferred alternatives
 

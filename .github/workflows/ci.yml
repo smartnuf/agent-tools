@@ -176,7 +176,3 @@ jobs:
       - name: Test PATH profile handling (Unix)
         if: runner.os != 'Windows'
         run: sh tests/test_path.sh
-
-      - name: Test privileged native installation routing (Unix)
-        if: runner.os != 'Windows'
-        run: sh tests/test_install_native.sh
