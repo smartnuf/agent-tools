@@ -169,11 +169,6 @@ jobs:
         shell: pwsh
         run: ./tests/test_path.ps1
 
-      - name: Test Windows native-tool discovery
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./tests/test_windows_tools.ps1
-
       - name: Run unit tests (Unix)
         if: runner.os != 'Windows'
         run: .venv/bin/python -m unittest discover -s tests
@@ -181,7 +176,3 @@ jobs:
       - name: Test PATH profile handling (Unix)
         if: runner.os != 'Windows'
         run: sh tests/test_path.sh
-
-      - name: Test privileged native installation routing (Unix)
-        if: runner.os != 'Windows'
-        run: sh tests/test_install_native.sh

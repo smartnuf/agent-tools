@@ -31,6 +31,10 @@ class PlanningError(RuntimeError):
     """Raised when verified state cannot produce a safe provider plan."""
 
 
+class NoSupportedProviderPlanError(PlanningError):
+    """No catalogue provider can be planned from the supplied manager facts."""
+
+
 class ExecutionPrivilege(str, Enum):
     """Privilege level required to execute an already reviewed action."""
 
@@ -639,7 +643,7 @@ def generate_provider_plan(
                 selected = (provider, package, manager_state, manager_native_status)
                 break
         if selected is None:
-            raise PlanningError(
+            raise NoSupportedProviderPlanError(
                 f"no supported provider plan for {capability_id} using: "
                 + (", ".join(sorted(item.manager for item in manager_states)) or "no package manager")
             )

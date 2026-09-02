@@ -76,13 +76,12 @@ Outcome: installation is not a one-off; supported upgrading, pinning, rollback, 
 | Native dependency failures are actionable | not-started | `doctor` tests with absent/partial tools |
 | Release procedure requires no unpublished local step | complete | [v0.1.2 publication run 33312422488](https://github.com/smartnuf/agent-tools/actions/runs/33312422488) verified the signed GitHub release artifacts against tag checksums/attestations and published them through GitHub OIDC/Trusted Publishing |
 | Native/system-first final-provider selection reuses suitable pre-seeded providers independently of bootstrap process architecture | complete | #14 supplies pure selection fixtures; #49 adds repeatable pre-seeded Python and capability fixtures plus Windows, Ubuntu, and macOS runner evidence. ARM64/translation combinations remain fixture or locally reported evidence and are not claimed as hosted ARM64 coverage. Native-provisioning overrides and zero-action provider plans belong to #50; managed mutation provenance belongs to #52. |
-| Provider mutation consumes an inspectable plan, requires a flag, reports changes, records provenance, and is shared by clone wrappers | not-started | Unit/disposable-host tests prove plan generation and executor consumption, installation flag enforcement, complete change reports, persisted record contents, and mandatory post-provision rediscovery plus final verification before selection; if provider removal is added, its separate flag and refusal rules are tested; bootstrap wrappers delegate without duplicate package mappings |
+| Provider mutation consumes an inspectable plan, requires a flag, reports changes, records provenance, and is shared by clone wrappers | complete | #50 supplies canonical plans, #51 supplies explicitly authorized execution and complete verification reports, #52 persists non-owning provenance, and #53 delegates both clone wrappers without duplicate package mappings; unit, disposable-filesystem, and Windows/Ubuntu/macOS native-runner tests cover the combined boundary |
 | Desired-state and integration configuration changes are authorized, backed up, validated, reversible, preserve unrelated state, and never uninstall providers | not-started | Tests for existing configuration prove explicit authorization, recoverable backup, resulting-state validation, failure restoration, unrelated-state preservation, and no provider uninstall; integration cases cover shared/dedicated providers and Git for Windows |
 
-Estimate: **1.75–5 person-days remaining** after the #14, #49, #50, #77, #51,
-and #52 selection, seeded-evidence, read-only-planning, governance, explicit
-execution, and provenance slices. The combined provider-mutation gate remains
-open until clone-delegation evidence merges.
+Estimate: **1.25–4.25 person-days remaining** after the #14, #49, #50, #77,
+#51, #52, and #53 selection, seeded-evidence, read-only-planning, governance,
+explicit execution, provenance, and clone-delegation slices.
 [Issue #26](https://github.com/smartnuf/agent-tools/issues/26)
 records the reviewed dependency order. Native/system-first selection (#14) and
 pre-seeded workstation evidence (#49) precede read-only provider planning

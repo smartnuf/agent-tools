@@ -14,19 +14,17 @@ NATIVE_PATHS = (
     "scripts/bootstrap.ps1",
     "scripts/bootstrap.sh",
     "scripts/select-python.py",
-    "scripts/install-native.sh",
     "scripts/select_native_integration.py",
-    "scripts/windows-tools.ps1",
     "src/agent_tools/capabilities.py",
     "src/agent_tools/cli.py",
+    "src/agent_tools/native_setup.py",
     "src/agent_tools/python_selection.py",
     "tests/check_installed_cli.py",
     "tests/check_preseeded_selection.py",
     "tests/test_capabilities.py",
     "tests/test_cli.py",
-    "tests/test_install_native.sh",
+    "tests/test_native_setup.py",
     "tests/test_select_native_integration.py",
-    "tests/test_windows_tools.ps1",
 )
 
 

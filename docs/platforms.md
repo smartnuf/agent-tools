@@ -18,6 +18,23 @@ Bootstrap reports the selected interpreter before package synchronization and
 lets `uv pip` report an unavailable wheel or build-tool failure; it does not
 silently retry under an emulated interpreter.
 
+## Clone native setup
+
+The explicit native-install bootstrap flag delegates required-capability
+detection, package-manager selection, the immutable provider plan, managed
+execution, provenance persistence, and final verification to packaged Python.
+The shell and PowerShell wrappers do not maintain package identifiers or native
+installation commands. They install the editable package before delegation and
+pass the dedicated provider-mutation authorization only when the user supplied
+the existing native-install flag.
+
+The delegated operation reports requested commands before mutation and keeps
+the host outcome distinct from provenance durability. A repeated all-satisfied
+run executes no provider command. Partial or uncertain execution is not retried
+automatically. Process-only PATH refresh may be used for post-install
+verification and is restored afterward; profile or persistent PATH changes
+remain controlled by the separate explicit PATH flag.
+
 ## Read-only capability discovery
 
 The reviewed M1.5 package build supports `agent-tools tools list` and

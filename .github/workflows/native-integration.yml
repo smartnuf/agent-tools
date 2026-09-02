@@ -75,6 +75,38 @@ jobs:
       - name: Install native tools through external providers
         timeout-minutes: 10
         uses: ./.github/actions/install-native
+      - name: Preseed clone bootstrap Python
+        run: uv python install 3.11
+      - name: Exercise delegated clone native setup twice (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $first = & ./scripts/bootstrap.ps1 -InstallNativeTools 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Delegated bootstrap failed: $first" }
+          $first
+          if ($first -notmatch 'no host changes required') { throw 'Expected an all-satisfied native plan.' }
+          $second = & .venv\Scripts\python.exe -I -m agent_tools.native_setup --allow-provider-mutation poppler ghostscript 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Repeated delegated setup failed: $second" }
+          $second
+          if ($second -notmatch 'no host changes required') { throw 'Expected repeated setup to remain all-satisfied.' }
+      - name: Exercise delegated clone native setup twice (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set +e
+          first="$(sh scripts/bootstrap.sh --install-native-tools 2>&1)"
+          first_status=$?
+          set -e
+          printf '%s\n' "$first"
+          test "$first_status" -eq 0
+          grep -F 'no host changes required' <<<"$first"
+          set +e
+          second="$(.venv/bin/python -I -m agent_tools.native_setup --allow-provider-mutation poppler ghostscript 2>&1)"
+          second_status=$?
+          set -e
+          printf '%s\n' "$second"
+          test "$second_status" -eq 0
+          grep -F 'no host changes required' <<<"$second"
       - name: Verify repeated pre-seeded native selection
         env:
           PYTHONPATH: src

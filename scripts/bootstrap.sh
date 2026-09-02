@@ -145,10 +145,11 @@ if [ -n "$PYTHON_PATH" ]; then
 else
   "$BOOTSTRAP_PYTHON" -I "$ROOT/scripts/select-python.py" $SELECTOR_ARGS --verify-final "$ROOT/.venv/bin/python" >/dev/null
 fi
-if [ "$INSTALL_NATIVE" -eq 1 ]; then
-  sh "$ROOT/scripts/install-native.sh"
-fi
 uv pip install --exact --python "$ROOT/.venv/bin/python" -r "$ROOT/requirements.txt" -e "$ROOT"
+if [ "$INSTALL_NATIVE" -eq 1 ]; then
+  "$ROOT/.venv/bin/python" -I -m agent_tools.native_setup \
+    --allow-provider-mutation poppler ghostscript
+fi
 if [ "$ADD_PATH" -eq 1 ]; then
   "$ROOT/scripts/path.sh" --apply
 fi
