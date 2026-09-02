@@ -44,6 +44,7 @@ from .python_selection import normalize_architecture
 
 
 SCHEMA_VERSION = 1
+MAX_MANAGED_STATE_JSON_DEPTH = 64
 _MANAGED_STATE_LOCK = threading.RLock()
 _PERSISTED_ATTEMPT_OUTCOMES = {
     ActionOutcome.SUCCEEDED.value,
@@ -291,6 +292,7 @@ def load_document(path: Path) -> dict[str, Any]:
         value = json.loads(text, object_pairs_hook=_unique_json_object)
     except (ValueError, OverflowError, RecursionError) as error:
         raise ManagedStateError(f"managed state is unreadable or corrupt: {error}") from error
+    _validate_json_depth(value)
     if not isinstance(value, dict):
         raise ManagedStateError("managed state root must be a JSON object")
     version = value.get("schema_version")
@@ -722,6 +724,27 @@ def _is_absolute_for_platform(value: str, platform_name: object) -> bool:
     if platform_name in {"nt", "Windows"}:
         return PureWindowsPath(value).is_absolute()
     return posixpath.isabs(value)
+
+
+def _validate_json_depth(value: object) -> None:
+    """Bound every parsed JSON container; the root container has depth one."""
+
+    if not isinstance(value, (dict, list)):
+        return
+    pending: list[tuple[dict[str, Any] | list[Any], int]] = [(value, 1)]
+    while pending:
+        container, depth = pending.pop()
+        if depth > MAX_MANAGED_STATE_JSON_DEPTH:
+            raise ManagedStateError(
+                "managed state is unreadable or corrupt: JSON container depth "
+                f"exceeds {MAX_MANAGED_STATE_JSON_DEPTH}"
+            )
+        children = container.values() if isinstance(container, dict) else container
+        pending.extend(
+            (child, depth + 1)
+            for child in children
+            if isinstance(child, (dict, list))
+        )
 
 
 def _command_output_is_bounded(value: str) -> bool:

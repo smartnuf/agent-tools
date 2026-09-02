@@ -11,6 +11,20 @@ from unittest.mock import Mock, patch
 from agent_tools import capabilities, managed_state, provider_execution, provider_plans
 
 
+def _nested_json_array(container_count: int) -> object:
+    value: object = None
+    for _ in range(container_count):
+        value = [value]
+    return value
+
+
+def _nested_json_object(container_count: int) -> object:
+    value: object = None
+    for _ in range(container_count):
+        value = {"child": value}
+    return value
+
+
 class _InterruptOnExit:
     def __enter__(self):
         return self
@@ -241,11 +255,50 @@ class ManagedStateTests(unittest.TestCase):
             with self.assertRaisesRegex(managed_state.ManagedStateError, "corrupt"):
                 managed_state.load_document(path)
 
-    def test_excessive_json_nesting_is_structured_corruption_and_blocks_mutation(self) -> None:
+    def test_json_depth_bound_covers_every_container_and_blocks_mutation(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
-            path.write_text("[" * 2000 + "0" + "]" * 2000, encoding="utf-8")
-            with self.assertRaisesRegex(managed_state.ManagedStateError, "corrupt"):
+            managed_state.execute_provider_plan(
+                self.plan,
+                state_path=path,
+                executor=Mock(return_value=self.report()),
+                allow_provider_mutation=True,
+            )
+            canonical = managed_state.load_document(path)
+            self.assertEqual(canonical["schema_version"], 1)
+
+            exactly_bounded = json.loads(json.dumps(canonical))
+            exactly_bounded["extra"] = _nested_json_array(
+                managed_state.MAX_MANAGED_STATE_JSON_DEPTH - 1
+            )
+            path.write_text(json.dumps(exactly_bounded), encoding="utf-8")
+            managed_state.load_document(path)
+
+            hostile_values = (
+                _nested_json_array(managed_state.MAX_MANAGED_STATE_JSON_DEPTH + 1),
+                _nested_json_object(managed_state.MAX_MANAGED_STATE_JSON_DEPTH + 1),
+            )
+            for value in hostile_values:
+                with self.subTest(root_type=type(value).__name__):
+                    encoded = json.dumps(value)
+                    json.loads(encoded)
+                    path.write_text(encoded, encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        managed_state.ManagedStateError, "JSON container depth"
+                    ):
+                        managed_state.load_document(path)
+
+            schema_shaped = json.loads(json.dumps(canonical))
+            schema_shaped["ignored_extra"] = _nested_json_array(
+                managed_state.MAX_MANAGED_STATE_JSON_DEPTH
+            )
+            encoded = json.dumps(schema_shaped)
+            json.loads(encoded)
+            path.write_text(encoded, encoding="utf-8")
+            original = path.read_text(encoding="utf-8")
+            with self.assertRaisesRegex(
+                managed_state.ManagedStateError, "JSON container depth"
+            ):
                 managed_state.load_document(path)
 
             executor = Mock(side_effect=AssertionError("must not execute"))
@@ -257,7 +310,7 @@ class ManagedStateTests(unittest.TestCase):
             )
             self.assertEqual(result.persistence, managed_state.PersistenceOutcome.BLOCKED)
             executor.assert_not_called()
-            self.assertTrue(path.read_text(encoding="utf-8").startswith("[[[["))
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
 
     def test_schema_version_requires_an_exact_integer(self) -> None:
         with TemporaryDirectory() as directory:
@@ -335,9 +388,30 @@ class ManagedStateTests(unittest.TestCase):
                     allow_provider_mutation=True,
                 )
             document = managed_state.load_document(path)
+            self.assertEqual(document["schema_version"], 1)
             record = document["records"][0]
             self.assertEqual(record["requested_at"], record["completed_at"])
             self.assertEqual(record["completed_at"], record["recorded_at"])
+
+            increasing_path = Path(directory) / "increasing-managed-state.json"
+            with patch.object(
+                managed_state,
+                "_timestamp",
+                side_effect=(
+                    "2026-09-02T12:00:00Z",
+                    "2026-09-02T12:00:01Z",
+                    "2026-09-02T12:00:02Z",
+                ),
+            ):
+                managed_state.execute_provider_plan(
+                    self.plan,
+                    state_path=increasing_path,
+                    executor=Mock(return_value=self.report()),
+                    allow_provider_mutation=True,
+                )
+            increasing = managed_state.load_document(increasing_path)["records"][0]
+            self.assertLess(increasing["requested_at"], increasing["completed_at"])
+            self.assertLess(increasing["completed_at"], increasing["recorded_at"])
 
             for first, second in (
                 ("requested_at", "completed_at"),
