@@ -1,0 +1,46 @@
+name: Windows manager identity
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-manager-identity.yml'
+      - 'src/agent_tools/**'
+      - 'tests/probe_windows_manager_image.py'
+      - 'tests/test_manager_identity.py'
+      - 'pyproject.toml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observe-installed-manager-image:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.12.7'
+      - name: Build and install the exact candidate
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          uv build --out-dir "$RUNNER_TEMP/identity-dist"
+          uv tool install --python 3.13 "$RUNNER_TEMP"/identity-dist/*.whl
+      - name: Observe the actual WinGet image through its owned process handle
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          "$UV_TOOL_DIR/smartnuf-agent-tools/Scripts/python.exe" -I \
+            "$GITHUB_WORKSPACE/tests/probe_windows_manager_image.py" \
+            --output "$RUNNER_TEMP/windows-manager-image.json"
+      - name: Retain identity observations even on failure
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-manager-image-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-manager-image.json
+          if-no-files-found: error
+          retention-days: 90
