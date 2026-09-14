@@ -91,3 +91,16 @@ termination completes the established contract. The 23-minute step and 40-minute
 job bounds remain infrastructure backstops; infrastructure cancellation means
 failed/incomplete evidence, never orderly cleanup or mutation success. Full
 validation now includes 420 tests and the unchanged M3 cancellation suite.
+
+Run 34868870908 supplied actual successful apt/Homebrew requests for both
+capabilities, final verification, provenance and no-op repetition. Windows
+failed the public dry-run before mutation with WinError 1920; #118 owns the
+focused identity prerequisite. #117 remains unmerged until that proof passes.
+A subsequent review found the independent after-capture process also needed
+the same PATH policy. It now runs through the installed read-only driver mode
+and shared refresh helper, completing the driver/capture environment seam.
+Local installed snapshots, authorization refusal and after-capture mode pass.
+The remaining ShellCheck style finding is corrected with one grouped GITHUB_ENV
+write, after setup-uv so the intended private tool paths are not overwritten.
+Actionlint plus the official distro ShellCheck package now both run locally;
+no system package was installed to obtain that validator.
