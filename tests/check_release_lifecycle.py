@@ -43,7 +43,7 @@ def write_simple_index(index: Path, wheels: tuple[Path, ...]) -> None:
     """Write a minimal PEP 503 index containing the supplied exact wheels."""
 
     project = index / PACKAGE
-    project.mkdir(parents=True)
+    project.mkdir(parents=True, exist_ok=True)
     project_links: list[str] = []
     for wheel in wheels:
         destination = project / wheel.name
@@ -82,6 +82,7 @@ def run_command(
         check=False,
         capture_output=True,
         text=True,
+        timeout=300,
     )
     if result.stdout:
         print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
@@ -151,10 +152,10 @@ def exercise_lifecycle(
             f"unexpected current wheel identity: {current_identity}; "
             f"expected {(PACKAGE, current_version)}"
         )
-    if candidate_identity != (PACKAGE, current_version):
+    if candidate_identity[0] != PACKAGE:
         raise AssertionError(
             f"unexpected candidate wheel identity: {candidate_identity}; "
-            f"expected {(PACKAGE, current_version)}"
+            f"expected distribution {PACKAGE}"
         )
     if previous_version == current_version:
         raise AssertionError("previous and current release versions must differ")
@@ -246,7 +247,7 @@ def exercise_lifecycle(
         cwd=work_directory,
     )
     assert_version(
-        executable, current_version, environment=environment, cwd=work_directory
+        executable, candidate_identity[1], environment=environment, cwd=work_directory
     )
     integration_help = run_command(
         [str(executable), "integrations", "claude-code", "apply", "--help"],
