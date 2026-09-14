@@ -40,6 +40,7 @@ from .cooperative_cancellation import (
     _ForceAbort,
     _SigintBroker,
 )
+from .manager_identity import resolve_manager_identity
 from .provider_plans import (
     EnvironmentRefresh,
     ExecutionPrivilege,
@@ -282,6 +283,7 @@ def _run(
     privileged_supervision: bool = False,
     environment: Mapping[str, str] | None = None,
     _cancellation: _CancellationContext | None = None,
+    _image_observations: list[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     cancellation = _cancellation or _CancellationContext()
     process_options: dict[str, object]
@@ -305,6 +307,15 @@ def _run(
         **process_options,
     )
     try:
+        if _image_observations is not None:
+            started = time.monotonic()
+            try:
+                _image_observations.append(_windows_process_image(process))
+            except Exception as error:
+                # Every observation/publication failure remains inside the owned
+                # process cleanup boundary, including non-OS ctypes failures.
+                raise OSError(f"process image observation failed: {error}") from error
+            timeout = max(0, timeout - (time.monotonic() - started))
         return _supervise_started_process(
             process,
             argv,
@@ -388,6 +399,37 @@ def run_bounded_command(
     """Run a non-mutating external evidence probe with bounded lifecycle and output."""
 
     return _run(argv, timeout_seconds, environment=environment)
+
+
+def _windows_process_image(process: subprocess.Popen[str]) -> str:
+    """Query the borrowed owned handle; no PID lookup or reparse-payload parsing."""
+    if os.name != "nt":
+        raise OSError("Windows process image observation requires native Windows")
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    query = kernel.QueryFullProcessImageNameW
+    query.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                      ctypes.POINTER(wintypes.DWORD)]
+    query.restype = wintypes.BOOL
+    buffer = ctypes.create_unicode_buffer(32768)
+    size = wintypes.DWORD(len(buffer))
+    if not query(int(process._handle), 0, buffer, ctypes.byref(size)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    value = buffer.value
+    if not 0 < size.value < len(buffer) or len(value.encode("utf-16-le")) // 2 != size.value:
+        raise OSError("process image observation is empty, malformed or truncated")
+    return value
+
+
+def run_bounded_command_with_image(
+    argv: tuple[str, ...], timeout_seconds: TimeoutSeconds,
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    """Observe an owned Windows probe image under the existing lifecycle guard."""
+    images: list[str] = []
+    completed = _run(argv, timeout_seconds, _image_observations=images)
+    return completed, images[0]
 
 
 def _best_effort_started_process_cleanup(
@@ -936,9 +978,7 @@ def _detect(capability: CapabilitySpec, machine: MachineState) -> CapabilityStat
 def _verify_manager(state: PackageManagerState, machine: MachineState) -> bool:
     path = Path(state.executable_path)
     try:
-        if not path.is_file():
-            return False
-        resolved = str(path.resolve(strict=True))
+        resolved = str(resolve_manager_identity(path, state.manager, machine.platform))
     except OSError:
         return False
     expected = state.resolved_executable_path or state.executable_path

@@ -25,6 +25,7 @@ from .desired_state import (
     load_document as load_desired_document,
     provider_preferences,
 )
+from .manager_identity import resolve_manager_identity
 from .managed_state import (
     ManagedExecutionInterrupted,
     ManagedExecutionResult,
@@ -109,9 +110,7 @@ def detect_package_managers(
                 f"package manager resolved to a non-absolute path: {manager}: {located}"
             )
         try:
-            if not executable.is_file():
-                raise OSError("entry is not a regular file")
-            resolved = executable.resolve(strict=True)
+            resolved = resolve_manager_identity(executable, manager, machine.platform)
         except OSError as error:
             raise NativeSetupError(
                 f"package manager identity could not be verified: {manager}: {error}"
