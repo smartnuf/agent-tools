@@ -185,3 +185,19 @@ class ManagerIdentityTests(unittest.TestCase):
                     for pipe in (process.stdout, process.stderr):
                         if pipe and not pipe.closed:
                             pipe.close()
+
+    def test_probe_artifact_rerun_and_failed_replace_preserve_previous_state(self):
+        import json
+        from probe_windows_manager_image import write_observation
+
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / "observation.json"
+            write_observation(output, {"status": "first"})
+            write_observation(output, {"status": "second"})
+            self.assertEqual(json.loads(output.read_text()), {"status": "second"})
+            previous = output.read_bytes()
+            with patch("probe_windows_manager_image.os.replace", side_effect=OSError("disk error")):
+                with self.assertRaises(OSError):
+                    write_observation(output, {"status": "third"})
+            self.assertEqual(output.read_bytes(), previous)
+            self.assertEqual(list(Path(directory).iterdir()), [output])

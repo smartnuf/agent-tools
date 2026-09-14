@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
+import tempfile
 from unittest import mock
 
 from agent_tools import native_setup, provider_execution
@@ -25,6 +27,21 @@ def process_image(process):
     if not query(int(process._handle), 0, buffer, ctypes.byref(size)):
         raise ctypes.WinError(ctypes.get_last_error())
     return buffer.value
+
+
+def write_observation(output, result):
+    """Atomically replace the explicitly selected artifact; preserve it on failure."""
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output.parent,
+                                         prefix=output.name + ".", delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(result, stream, indent=2)
+            stream.write("\n")
+        os.replace(temporary, output)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def main():
@@ -65,7 +82,7 @@ def main():
         assert state.executable_path.casefold() == alias.casefold(), state
         assert provider_execution._verify_manager(state, current_machine()), state
         result["production_identity"] = state.resolved_executable_path
-        executable = Path(__import__("sys").executable).with_name("agent-tools.exe")
+        executable = Path(sys.executable).with_name("agent-tools.exe")
         dry_run = subprocess.run((str(executable), "install", "poppler", "--dry-run"),
                                  capture_output=True, text=True, timeout=60)
         result["installed_dry_run"] = {"returncode": dry_run.returncode,
@@ -76,9 +93,13 @@ def main():
         result.update(status="failed", error=str(error))
         raise
     finally:
-        with args.output.open("x", encoding="utf-8") as stream:
-            json.dump(result, stream, indent=2)
-            stream.write("\n")
+        original_error = sys.exception()
+        try:
+            write_observation(args.output, result)
+        except OSError as error:
+            if original_error is None:
+                raise
+            print(f"Could not retain observation: {error}", file=sys.stderr)
         print(json.dumps(result))
     return 0
 
