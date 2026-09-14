@@ -2,7 +2,7 @@
 
 - Base: `4888887cd19f5f17e1556a011392b06e2d48d49a`, current main.
 - Milestone 8 open; 4/8 gates complete. Focused prerequisite for #115/#104.
-- Estimate: 0.5–1.5 person-days including discovery/repair; actual effort untracked.
+- Estimate: 0.5–1.5 person-days including discovery/repair; review/CI wait excluded; actual effort untracked.
 - Single merge owner. PR #117 remains unmerged until its Windows proof passes.
 
 ## Confirmed problem and intent
@@ -89,3 +89,10 @@ syntax/PATH checks, actionlint with ShellCheck, wheel/sdist contents and install
 CLI checks pass. Doctor reports only this workstation's known absent Poppler and
 Ghostscript. Independent implementation closure found no blocking architecture
 defect; requested observation-path interruption/force-abort tests now pass.
+
+The implementation head's hosted checks all passed, including installed Windows
+production proof ([run 34870474749](https://github.com/smartnuf/agent-tools/actions/runs/34870474749)).
+The next review found estimate-basis wording and probe artifact rerun handling.
+Forecasts consistently exclude review/CI wait. The explicitly selected artifact
+is now replaced atomically; failed replacement preserves prior bytes and does
+not mask an original observation failure. Full local validation passes 426 tests.

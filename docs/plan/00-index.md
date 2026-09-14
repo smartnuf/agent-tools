@@ -99,7 +99,7 @@ pass and the wheel rebuilt from the restricted sdist passes outside-checkout
 CLI tests. #106 adds the third completed gate: `tests/test_cli_reference.py`,
 `tests/check_cli_docs.py`, installed-help comparisons and pre-publication checks
 keep the generated reference and guide invocations aligned with argparse.
-The suite now has 425 passing tests. These changes await the next feature-bearing
+The suite now has 426 passing tests. These changes await the next feature-bearing
 release. #57 discovery specifies the `documents` extra and explicit
 `doctor --documents` validation in [Decision 0010](../decisions/0010-document-extra-and-diagnostics.md),
 backed by disposable uv selection experiments. #109 now supplies optional
@@ -113,7 +113,7 @@ capture. #115/PR #117 has real apt/Homebrew mutation evidence, but its WinGet
 proof exposed an App Execution Alias identity defect before mutation. The focused
 [#118 prerequisite](10-v0.2-productisation/08-winget-identity.md) adds 0.5–1.5 days
 for discovery, repair and Windows proof; integrate it before completing #115's
-1–2 day mutation-evidence slice. Both estimates include review; no extra gate is
+1–2 day mutation-evidence slice. Both estimates exclude review/CI wait; no extra gate is
 claimed from the discovery experiment.
 See the [native evidence plan](10-v0.2-productisation/06-native-evidence.md).
 Neither #104 gate completes from external-preseed observations. The [v0.2 plan](10-v0.2-productisation/README.md) retains the
