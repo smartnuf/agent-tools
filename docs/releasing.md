@@ -45,18 +45,18 @@ If trusted publication fails before PyPI accepts an upload, leave the GitHub tag
 
 ## v0.2 document boundary qualification
 
-The current source identifies the unpublished candidate as 0.2.0. Public
-v0.1.2 remains the current release until an authorized publication completes.
-Candidate CI checks verified old-release artifacts against the exact rebuilt
-wheel for core/documents migration, pins, extra removal, resolution failure,
-rollback and application removal with state/provider preservation. Its separate
-source-version fixture tests extra retention; it is not a published release.
+v0.2.0 was published on 2026-09-14 from reviewed commit
+`7e1eea88c8e4ea497529ee8a9f6b0918996ab627`. The immutable tag workflow
+repeated installed CLI/core/documents shape and old-release migration,
+pin/reinstall, rollback and preservation checks before attestation and
+prerelease creation. Stable promotion and protected PyPI publication were
+separately authorized.
 
-Before attestation/publication, the tag workflow repeats installed-shape and
-candidate lifecycle checks. Published GitHub-wheel and PyPI smoke paths then
-check core/documents selection, exact source/pin reconciliation, removal of the
-extra and application removal. They retain legacy mandatory-stack validation
-for v0.1.x. Inspect all three platform results; pre-publication local-index
-migration is not evidence of a successful public PyPI upload or resolution.
-Keep final guide reconciliation, provider/platform qualification and the
-milestone's exact-tag release gate open until their own evidence exists.
+The downloaded PyPI wheel and source archive match the signed GitHub assets
+byte for byte. The GitHub-wheel and public-PyPI lifecycle workflows passed on
+Windows, Ubuntu and macOS, including separately selected document libraries,
+exact pins, extra removal and application removal. See the
+[release qualification record](plan/10-v0.2-productisation/11-release-qualification.md)
+for exact runs, hashes and the distinction between candidate, public-artifact
+and native-provider evidence. Future releases must repeat their own exact-tag
+qualification; this record does not expand the documented platform matrix.

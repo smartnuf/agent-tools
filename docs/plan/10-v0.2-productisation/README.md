@@ -71,21 +71,21 @@ Reconcile the current repository and published artifacts, including:
 
 ## Acceptance gates
 
-The [v0.2 milestone](https://github.com/smartnuf/agent-tools/milestone/8) is
-open with #103, #57, #104 and #106 assigned. #103 is specified in its
-[task plan](01-installed-cli.md). The owner added #106 as a release-quality
-requirement after the initial seven gates.
+All eight gates have durable evidence, including the published v0.2.0
+artifacts. #124 reconciles the release record and closes
+[GitHub milestone 8](https://github.com/smartnuf/agent-tools/milestone/8) after
+merge. #103 is specified in its [task plan](01-installed-cli.md); the owner
+added #106 as a release-quality requirement after the initial seven gates.
 
-| Gate | Initial state | Primary tracker |
+| Gate | State | Primary tracker |
 |---|---|---|
 | Installed `agent-tools` is the sole supported ordinary-user command surface; repository operational scripts are not required by released workflows | complete | #103; `tests/test_install.py`, `tests/check_installed_cli.py`, `tests/check_distribution.py` |
 | `agent-tools install <capability> [<capability> ...]` reuses the existing managed provider lifecycle and works from an installed artifact | complete | #103; `tests/test_install.py`, `tests/check_installed_cli.py`, `tests/check_distribution.py` |
 | Core installation no longer requires document libraries; a separately requested document install has a specified compatibility contract | complete | #57/#109/#111; [runtime and installed shapes](04-document-implementation.md), [artifact lifecycle evidence](05-document-lifecycle.md) |
 | CI evidence distinguishes seeded/simulated/native mutation paths and exercises primary real provider mutations through the installed CLI where practical | complete | #104/#115; [inspected mutation run and maintained matrix](../../platforms.md#observed-installed-cli-native-mutations) |
 | Maintained platform evidence reports OS/distribution version, architecture, provider path, evidence class, and important common gaps without overclaiming | complete | #104/#115; [inspected mutation run and maintained matrix](../../platforms.md#observed-installed-cli-native-mutations) |
-| README/PyPI front door describes the new core/doc/CLI contract and builds on merged PR #102 | complete on #122 PR merge | #122; [final guide plan](10-final-guides.md) |
-| A reviewed v0.2 candidate passes exact-artifact install, upgrade-from-v0.1.x, pin/reinstall, rollback where supported, and removal/preservation tests before publication | not-started | split during planning |
-
+| README/PyPI front door describes the new core/doc/CLI contract and builds on merged PR #102 | complete | #122; [final guide plan](10-final-guides.md) |
+| A reviewed v0.2 candidate passes exact-artifact install, upgrade-from-v0.1.x, pin/reinstall, rollback where supported, and removal/preservation tests before publication | complete | #124; [exact-tag qualification and publication evidence](11-release-qualification.md) |
 | CLI help and generated reference share one command model with automated drift prevention | complete | #106; `tests/test_cli_reference.py`, `tests/check_cli_docs.py`, installed help and release checks; [task plan](02-cli-reference.md) |
 
 ## Likely sequencing
