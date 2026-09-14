@@ -2,7 +2,7 @@
 
 - Last reconciled: 2026-09-14
 - Current completed milestone: M3 — complete
-- Next bounded objective: v0.2 productisation — planning, not yet activated as a GitHub milestone
+- Next bounded objective: v0.2 productisation — not-started, not yet activated as a GitHub milestone
 - Current state: turn the completed M3 machinery into one minimally useful installed `agent-tools` product before selecting any broader future intent
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
 - Current published release: v0.1.2; M3 functionality on `main` remains pending the next feature-bearing release
@@ -18,14 +18,19 @@
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
 | M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
 | M3 | Tested update and capability lifecycle | complete | 9/9 | 6.5–11 days | none |
-| v0.2 productisation | One installed CLI, explicit native install, optional documents, qualified platform evidence, feature-bearing release | planning | 0/7 proposed | revise after discovery/specification | TBD |
-| former M4a/M4b | Alternative WinGet/Homebrew distribution of Agent Tools | retired | n/a | n/a | not planned |
+| v0.2 discovery/specification | Inventory entry points and specify the installed CLI contract before implementation | not-started | prerequisite to 0/7 proposed v0.2 gates | 0.25–0.5 day | 0.25–0.5 day |
 
-Estimated implementation effort through M3: **complete**. The v0.2 objective is
-intentionally not estimated as one block until the accepted product decisions
-have been reconciled with the current CLI, artifact, dependency, CI, platform,
-and PR state. Tasks above two person-days must be split under the planning
-protocol.
+Estimated implementation effort through M3: **complete**. The current forecast
+is the bounded v0.2 discovery/specification slice above, not delivery of all
+seven proposed gates. It inventories CLI/artifact entry points, maps existing
+M3 contracts, identifies unresolved public-policy choices, and produces a
+reviewable implementation plan for #103. Remaining v0.2 implementation is
+unestimated until discovery supports a defensible range; tasks above two
+person-days must be split under the planning protocol.
+
+Former M4a/M4b are historical, cancelled objectives rather than deferred work
+or completed implementation. Their GitHub milestones are closed as not planned
+and they are excluded from current readiness and effort totals.
 
 Gate counts are binary readiness measures. Estimates are ranges and must be revised when implementation reveals new facts.
 
