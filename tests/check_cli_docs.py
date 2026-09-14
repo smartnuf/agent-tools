@@ -12,10 +12,14 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from agent_tools import __version__  # noqa: E402
 from agent_tools.cli import build_parser  # noqa: E402
 from agent_tools.cli_reference import check_reference, command_parsers  # noqa: E402
 
 GUIDES = (ROOT / "README.md", ROOT / "docs/platforms.md", ROOT / "docs/packaging.md")
+CURRENT_RELEASE_NOTES = ROOT / "docs/releases" / f"v{__version__}.md"
+if CURRENT_RELEASE_NOTES.is_file():
+    GUIDES += (CURRENT_RELEASE_NOTES,)
 # These are launcher spellings in the guides, not a command/option inventory.
 LAUNCHERS = (
     '& "$(uv tool dir --bin)\\agent-tools.exe"',

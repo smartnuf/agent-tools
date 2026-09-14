@@ -27,7 +27,8 @@
 | v0.2 #104/#114 | Provider/platform discovery and retained environment capture | complete | no additional gate complete | 0.5–1 day | none |
 | v0.2 #118 | WinGet activation identity prerequisite | complete | no additional gate complete | 0.5–1.5 days | none |
 | v0.2 #120 | Legacy-encoded native reporting prerequisite | complete | no additional gate complete | 0.25–0.5 day | none |
-| v0.2 #104/#115 | Real installed-CLI native mutation and explicit platform matrix | complete on #117 merge | 6/8 v0.2 gates complete overall on merge | 1–2 days | exact-head review/integration only |
+| v0.2 #104/#115 | Real installed-CLI native mutation and explicit platform matrix | complete | 6/8 v0.2 gates complete overall | 1–2 days | none |
+| v0.2 #122 | Final front door and release notes | complete on merge | 7/8 v0.2 gates complete overall on merge | 0.5–1 day | exact-head review/integration only |
 
 Estimated implementation effort through M3: **complete**. Discovery for #103
 is recorded in its [task plan](10-v0.2-productisation/01-installed-cli.md), and
@@ -40,8 +41,9 @@ human-approved named-only request contract. The forecast above covers #103 and
 revises this to 2–3 days: runtime/installed-shape work (1–1.5 days) and #111
 lifecycle evidence (1–1.5 days), both implemented;
 the #104 discovery/evidence work and its bounded prerequisites are implemented
-as recorded above. Final guide and release qualification work still needs
-discovery-based estimates. Actual effort is untracked.
+as recorded above. Final guide reconciliation is specified in
+[#122](10-v0.2-productisation/10-final-guides.md) at 0.5–1 day and implemented;
+release qualification still needs its own discovery-based estimate. Actual effort is untracked.
 
 Former M4a/M4b are historical, cancelled objectives rather than deferred work
 or completed implementation. Their GitHub milestones are closed as not planned
@@ -119,14 +121,17 @@ capture; #118/#119 repaired WinGet activation identity, and #120/#121 repaired
 legacy-encoded native reporting. #115/PR #117 now supplies inspected real apt,
 Homebrew and WinGet mutation, provenance, fresh rediscovery and byte-preserving
 no-op evidence plus the [maintained platform matrix](../platforms.md#observed-installed-cli-native-mutations).
-Its two #104 gates complete on merge (6/8 overall); Windows Ghostscript and
+Its two #104 gates are complete (6/8 overall); Windows Ghostscript and
 untested common variants remain explicit gaps, not fallback success. See the
 [native evidence plan](10-v0.2-productisation/06-native-evidence.md) and
 [mutation implementation record](10-v0.2-productisation/07-native-mutation.md).
 The 1–2 day evidence slice and focused 0.5–1.5 day identity / 0.25–0.5 day
 reporting prerequisites are implemented, excluding review/CI wait. Final guide
-reconciliation and exact-artifact release qualification remain open; discover
-and estimate those next, preserving public v0.1.2 until authorized publication.
+reconciliation in #122 completes on merge (7/8 overall): version-qualified
+README/PyPI examples, 43 checked guide invocations and reviewed v0.2 release
+notes preserve the accepted boundary and retained evidence. Exact-artifact
+release qualification remains separate. Preserve public v0.1.2
+until authorized publication.
 
 The v0.2 goal is deliberately minimal: one installed CLI, `agent-tools install
 <list>`, optional document dependencies, real-provider evidence where practical,
