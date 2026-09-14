@@ -165,13 +165,15 @@ jobs:
             manager: winget
             capabilities: poppler
     runs-on: ${{ matrix.os }}
-    env:
-      UV_TOOL_DIR: ${{ runner.temp }}/mutation-tools
-      UV_TOOL_BIN_DIR: ${{ runner.temp }}/mutation-bin
-      XDG_CONFIG_HOME: ${{ runner.temp }}/mutation-config
-      XDG_STATE_HOME: ${{ runner.temp }}/mutation-state
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Configure private mutation fixture environment
+        shell: bash
+        run: |
+          echo "UV_TOOL_DIR=$RUNNER_TEMP/mutation-tools" >> "$GITHUB_ENV"
+          echo "UV_TOOL_BIN_DIR=$RUNNER_TEMP/mutation-bin" >> "$GITHUB_ENV"
+          echo "XDG_CONFIG_HOME=$RUNNER_TEMP/mutation-config" >> "$GITHUB_ENV"
+          echo "XDG_STATE_HOME=$RUNNER_TEMP/mutation-state" >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: "0.12.7"
