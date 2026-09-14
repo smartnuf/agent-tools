@@ -1,6 +1,11 @@
 # Packaging contract
 
-The public Python distribution is `smartnuf-agent-tools`. It provides agent workstation capability discovery and diagnostics alongside reusable document tools, and installs the `agent-tools` command and `agent_tools` import package. The version in `src/agent_tools/__init__.py` is the single source used by Hatchling to produce distribution metadata.
+The public Python distribution is `smartnuf-agent-tools`. It provides
+cross-platform capability discovery and diagnostics for coding-agent
+workstations, alongside the document libraries verified by `doctor`, and
+installs the `agent-tools` command and `agent_tools` import package. The version
+in `src/agent_tools/__init__.py` is the single source used by Hatchling to
+produce distribution metadata.
 
 ## Supported product boundary
 
@@ -94,20 +99,22 @@ never redirects `HOME`.
 ## PyPI presentation review
 
 The root `README.md` is the package long description and therefore serves both
-GitHub readers and the PyPI project page. The stable v0.1.2 metadata correctly
-publishes Markdown content, the SPDX `MIT` license expression, the packaged
-license file, the supported Python range, and the current product summary and
-keywords. Publication uses PyPI Trusted Publishing through the dedicated
-GitHub Actions release workflow and protected `pypi` environment; it does not
-use a long-lived upload token.
+GitHub readers and the PyPI project page. Its first path now introduces the
+application, gives one ordinary installation command, invokes read-only health
+and capability inspection without requiring a profile change, and shows
+upgrade and removal before source-development detail. Repository documentation
+links use absolute, genuine GitHub destinations so they also work from PyPI.
 
-Current PyPA guidance deprecates `License ::` classifiers when an SPDX license
-expression is present, and recommends well-known project URL labels such as
-Documentation and Changelog when genuine destinations exist. A bounded
-[casual-user README and metadata issue](https://github.com/smartnuf/agent-tools/issues/56)
-owns that presentation cleanup before the next release. It is kept out of the
-provider-selection design change so the larger PyPI front-door rewrite can be
-reviewed on its own rendered result.
+Distribution metadata publishes Markdown content, the SPDX `MIT` license
+expression, the packaged license file, the supported Python range, and a
+product-aligned summary and keyword set. It omits the deprecated `License ::`
+classifier and publishes the well-known `Documentation` and `Changelog` URLs
+for the repository documentation and canonical GitHub release history.
+`tests/check_distribution.py` verifies those fields and the product-first
+long-description order in both the wheel and source distribution. Publication
+uses PyPI Trusted Publishing through the dedicated GitHub Actions release
+workflow and protected `pypi` environment; it does not use a long-lived upload
+token.
 
 The required document libraries are also a real product-boundary question for
 casual users, not a mechanical metadata cleanup. [Issue #57](https://github.com/smartnuf/agent-tools/issues/57)
