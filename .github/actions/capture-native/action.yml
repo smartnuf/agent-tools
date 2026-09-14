@@ -1,0 +1,37 @@
+name: Capture external native fixture outcome
+description: Observe state independently of the bounded installation action
+inputs:
+  fixture-outcome:
+    description: Outcome of the caller's installation step
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Expose observable Windows fixture paths after partial installation
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $roots = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages", 'C:\Program Files\gs'
+        foreach ($name in 'pdfinfo.exe', 'pdftotext.exe', 'pdftoppm.exe', 'gswin64c.exe') {
+          Get-ChildItem $roots -Filter $name -File -Recurse -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.DirectoryName } | Select-Object -Unique |
+            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        }
+        # This affects later CI processes only, never a user's persistent PATH.
+
+    - name: Report Windows external-provider failure
+      if: always() && runner.os == 'Windows' && inputs.fixture-outcome != 'success'
+      shell: pwsh
+      run: |
+        Get-Process -ErrorAction SilentlyContinue |
+          Where-Object { $_.ProcessName -match '^(AppInstallerCLI|choco|gs|msiexec|winget)' } |
+          Select-Object ProcessName, Id, StartTime
+        $log = 'C:\ProgramData\chocolatey\logs\chocolatey.log'
+        if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 200 }
+
+    - name: Capture environment after external preseed
+      if: always()
+      shell: bash
+      env:
+        FIXTURE_OUTCOME: ${{ inputs.fixture-outcome }}
+      run: python tests/capture_native_evidence.py --phase after --fixture-outcome "$FIXTURE_OUTCOME" --output "$RUNNER_TEMP/native-environment/after.json"
