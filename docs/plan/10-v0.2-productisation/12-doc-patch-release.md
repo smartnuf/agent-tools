@@ -50,3 +50,14 @@ its explicit version check is updated to v0.2.1. This is release-validation
 bookkeeping, not an application behavior change. The hidden workflow files
 were included in the follow-up version-reference sweep. The failing check was
 preserved, not bypassed; corrected-head CI and review must pass before tagging.
+
+
+## Completed outcome
+
+PR #126 merged the reviewed preparation; v0.2.1 was tagged, qualified and
+published with unchanged runtime behavior and corrected README metadata.
+The public lifecycle passed on all three platforms after one inspected Ubuntu
+retry for initial PyPI propagation. Independent post-distribution review found
+no unresolved issue. The [final record](13-v021-distribution-review.md) contains
+exact identities, hashes and workflow evidence. Estimate unchanged; actual
+effort untracked. No further product work is selected.

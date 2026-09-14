@@ -1,11 +1,11 @@
 # Plan status
 
 - Last reconciled: 2026-09-14
-- Current completed milestone: M3 — complete
-- Current milestone: v0.2 productisation — in-progress: authorized v0.2.1 correction ([GitHub milestone 8](https://github.com/smartnuf/agent-tools/milestone/8), #124)
-- Current state: v0.2.0 is published and qualified; v0.2.1 is authorized to correct its immutable PyPI description
+- Latest completed product slice: v0.2 productisation — 8/8 acceptance gates evidenced
+- GitHub tracking: [milestone 8](https://github.com/smartnuf/agent-tools/milestone/8), [issue #124](https://github.com/smartnuf/agent-tools/issues/124)
+- Current state: v0.2.1 is published and independently reviewed after distribution; a fresh human Intent is required before broader work
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
-- Current published release: [v0.2.0](https://github.com/smartnuf/agent-tools/releases/tag/v0.2.0), also verified on [PyPI](https://pypi.org/project/smartnuf-agent-tools/0.2.0/)
+- Current published release: [v0.2.1](https://github.com/smartnuf/agent-tools/releases/tag/v0.2.1), also verified on [PyPI](https://pypi.org/project/smartnuf-agent-tools/0.2.1/)
 - Distribution policy: PyPI via `uv tool` is the sole supported Agent Tools distribution channel; alternative WinGet/Homebrew distribution work is retired as not planned
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
 
@@ -27,9 +27,9 @@
 | v0.2 #118 | WinGet activation identity prerequisite | complete | no additional gate complete | 0.5–1.5 days | none |
 | v0.2 #120 | Legacy-encoded native reporting prerequisite | complete | no additional gate complete | 0.25–0.5 day | none |
 | v0.2 #104/#115 | Real installed-CLI native mutation and explicit platform matrix | complete | 6/8 v0.2 gates complete overall | 1–2 days | none |
-| v0.2 #122/#124 | Final front door and release notes | in-progress; authorized v0.2.1 correction | front-door gate reopened | 0.5–1 day historical | v0.2.1 qualification |
-| v0.2 #124 | Exact-tag qualification, publication and release record | v0.2.0 release gate complete; patch in progress | 7/8 overall | up to 0.5 day | v0.2.1 qualification and final review |
-| v0.2.1 #124 | Documentation patch publication and final review | in-progress | front-door gate remains open | up to 0.5 day | up to 0.5 day |
+| v0.2 #122/#124 | Final front door and release notes | complete; corrected PyPI description in v0.2.1 | front-door gate complete | 0.5–1 day historical | none |
+| v0.2 #124 | Exact-tag qualification, publication and release record | complete | 8/8 overall with v0.2.1 | up to 0.5 day | none |
+| v0.2.1 #124 | Documentation patch publication and final review | complete | 8/8 overall | up to 0.5 day | none |
 
 Estimated implementation effort through M3: **complete**. Discovery for #103
 is recorded in its [task plan](10-v0.2-productisation/01-installed-cli.md), and
@@ -48,8 +48,10 @@ release qualification and record reconciliation are recorded in
 [#124](10-v0.2-productisation/11-release-qualification.md), estimated at up to
 0.5 day excluding CI/review waits. Actual effort is untracked. The separately
 authorized [v0.2.1 documentation patch](10-v0.2-productisation/12-doc-patch-release.md)
-is estimated at up to 0.5 additional day including qualification and final
-review, excluding external waits.
+was estimated at up to 0.5 additional day including qualification and final
+review, excluding external waits. Its
+[post-distribution evidence](10-v0.2-productisation/13-v021-distribution-review.md)
+is complete; no product implementation remains. Actual effort is untracked.
 
 Former M4a/M4b are historical, cancelled objectives rather than deferred work
 or completed implementation. Their GitHub milestones are closed as not planned
@@ -101,35 +103,23 @@ review and CI wait were excluded.
 
 ## Recommended next work
 
-[PR #102](https://github.com/smartnuf/agent-tools/pull/102) merged as
-`226c81f` on 2026-09-14 and closed #56, supplying the product-first README
-and checked PyPI metadata. Preserve that front door while adapting it to v0.2.
+All eight [v0.2 gates](10-v0.2-productisation/README.md#acceptance-gates)
+have durable evidence. #103 exposes the named-only installed CLI; #106 keeps
+help and examples aligned; #57/#109/#111 supply the optional-document contract
+and preservation evidence; #104/#115 supply real native mutation evidence and
+the explicit platform matrix. PR #123 supplied final product guides; #125
+corrected stale availability prose and recorded the v0.2.0 metadata limitation.
 
-Seven of eight [v0.2 gates](10-v0.2-productisation/README.md#acceptance-gates)
-are complete. The front-door gate was reopened after publication review found
-a stale availability claim in the immutable PyPI README. #103 exposes the named-only installed CLI; #106 keeps
-help and guide invocations aligned; #57/#109/#111 supply the optional-document
-contract and migration/preservation evidence; #104/#115 supply real native
-mutation evidence and the explicit platform matrix. PR #123 merged the final
-front door and release notes with 433 unit tests and 43 guide invocations.
+The authorized documentation-only v0.2.1 patch now supplies corrected public
+PyPI metadata. Its exact-tag qualification, protected publication, public-file
+comparison, three-platform lifecycle and independent post-distribution review
+are recorded in the [final evidence](10-v0.2-productisation/13-v021-distribution-review.md).
+v0.2.0 remains immutable; no runtime behavior, dependencies or support boundary
+changed in the patch.
 
-The authorized immutable `v0.2.0` tag identifies reviewed commit
-`7e1eea88c8e4ea497529ee8a9f6b0918996ab627`. Exact-tag qualification,
-protected PyPI publication, public-file checksum comparison and three-platform
-PyPI lifecycle evidence are recorded in the
-[release qualification record](10-v0.2-productisation/11-release-qualification.md).
-#124 remains open: correcting the source README and adding a GitHub release
-erratum do not replace PyPI metadata embedded in immutable v0.2.0 files.
-The installed commands work; the description incorrectly calls desired-state
-and integration commands main-only pending a release.
-
-**Recommended next task: complete the authorized v0.2.1 documentation patch.**
-Follow its [plan](10-v0.2-productisation/12-doc-patch-release.md) through reviewed
-preparation, exact-tag qualification, protected publication and final
-post-distribution review. Keep milestone 8 open until that evidence and
-reconciliation complete. Then require fresh human Intent before broader work;
-[future product research](90-future-product-research.md) is not authorized
-implementation. Existing platform gaps remain explicit in the
+**Recommended next task: fresh human Intent (not yet selected or estimated).**
+Do not automatically turn [future product research](90-future-product-research.md)
+into implementation. Existing platform gaps remain explicit in the
 [maintained matrix](../platforms.md#observed-installed-cli-native-mutations).
 
 ## Known risks and assumptions

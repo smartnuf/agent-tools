@@ -64,10 +64,11 @@ qualification; this record does not expand the documented platform matrix.
 
 
 Post-publication review found one stale availability sentence in the immutable
-v0.2.0 PyPI README. Source documentation and a GitHub release erratum correct
-the presentation but cannot replace published PyPI metadata. The front-door
-gate remains open while the authorized v0.2.1 documentation patch is qualified
-and published; follow its
-[execution plan](plan/10-v0.2-productisation/12-doc-patch-release.md) and the
-[known-limit record](plan/10-v0.2-productisation/11-release-qualification.md#published-text-defect-and-disposition)
-before declaring the milestone complete.
+v0.2.0 PyPI README. The separately authorized documentation-only v0.2.1 patch
+publishes the corrected description; v0.2.0 remains historical and unchanged.
+Exact-tag qualification, protected publication, public metadata/byte comparison
+and Windows/Ubuntu/macOS lifecycle checks passed, followed by independent
+post-distribution review. See the
+[final evidence](plan/10-v0.2-productisation/13-v021-distribution-review.md),
+including the original registry-propagation failure and single successful
+same-head retry. Each future release must establish its own evidence.
