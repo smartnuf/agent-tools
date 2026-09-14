@@ -29,10 +29,14 @@ uv tool uninstall smartnuf-agent-tools
 ```
 
 The second command explicitly selects documents (also valid for first install);
-the fourth explicitly returns to core-only. For exact reinstall, upgrade target
-or rollback, append `==VERSION` to the selected package requirement, after the
-closing bracket when selecting documents. Preserve the existing documented
-interpreter choice when it differs from the recommended 3.13.
+the fourth explicitly returns to core-only. `uv tool upgrade` retains the
+installation's source and version constraints; an exact pin will not advance.
+To change an exact pin (in either direction), use `uv tool install --reinstall`
+with `smartnuf-agent-tools==VERSION` or
+`smartnuf-agent-tools[documents]==VERSION`. Do not append a new pin to the
+`uv tool upgrade` command. To resume unpinned index upgrades, reinstall the
+selected bare or extra requirement without a version constraint. Preserve the
+existing documented interpreter choice when it differs from recommended 3.13.
 
 These operations affect uv's isolated application environment and launcher.
 They do not authorize native install/removal, desired/managed-state changes,
@@ -73,13 +77,36 @@ and give actionable absence errors, never break unrelated CLI startup.
 
 ## Migration and checkout compatibility
 
-v0.1.x declares document libraries unconditionally. A normal upgrade that did
-not previously request an extra selects the new core contract; users requiring
-the old library bundle must explicitly select `[documents]` at migration.
-Subsequent uv tool upgrades retain the selected extra. Exact reinstalls must
-spell the intended shape explicitly. Rollback to v0.1.x uses the bare pinned
-distribution because those releases predate the extra and include documents
-unconditionally. Test actual package contents, not just installer exit codes.
+v0.1.x declares document libraries unconditionally. Preserve its distinct
+published installation paths:
+
+- An unpinned PyPI v0.1.2 installation can use `uv tool upgrade
+  smartnuf-agent-tools` to reach the new core release. A pinned installation
+  requires the explicit reinstall/constraint replacement described above.
+- v0.1.1 was GitHub-only. Its recorded direct-wheel source does not become
+  PyPI through `uv tool upgrade`. Retain the README migration command,
+  `uv tool install --python 3.13 --upgrade smartnuf-agent-tools`, to explicitly
+  replace that source with the unpinned PyPI core request.
+- Users requiring the old library bundle must explicitly reinstall the selected
+  new release with `[documents]` at migration. This also replaces any recorded
+  direct-wheel source. Subsequent uv tool upgrades retain the extra within the
+  stored version constraints. Test a real version change, not only a pinned
+  no-op. Exact reinstalls must spell the intended shape explicitly.
+- Rollback to PyPI v0.1.2 uses `uv tool install --python 3.13 --reinstall
+  'smartnuf-agent-tools==0.1.2'`. Do not request an extra from v0.1.x: its
+  document requirements are unconditional.
+- Rollback to GitHub-only v0.1.1 retains its exact reviewed, checksum-bound
+  wheel requirement (below), not an unavailable PyPI version pin.
+
+```sh
+uv tool install --python 3.13 --reinstall "smartnuf-agent-tools @ https://github.com/smartnuf/agent-tools/releases/download/v0.1.1/smartnuf_agent_tools-0.1.1-py3-none-any.whl#sha256=b790d7c30294fae43f57ef6e83de02396489dac97ffe59e3616202dff289c14f"
+```
+
+Preserve the [README's integration-restoration guidance](../../README.md#pin-or-roll-back):
+if restoration is intended, explicitly remove the integration using the current
+CLI before a rollback to a release lacking that command, or before uninstall.
+Python package operations themselves still do not mutate integration settings.
+Test actual package contents, not just installer exit codes.
 
 Repository bootstrap/update remain development/compatibility infrastructure.
 Their explicit `requirements.txt` lock continues to request the document stack;
@@ -98,8 +125,9 @@ work with all document libraries absent. Cover absent, partial, broken and
 healthy document probes, including explicit-mode status and unchanged native
 status semantics.
 
-Extend candidate and release lifecycle evidence for actual v0.1.x-to-candidate
-core/documents migration, extra-preserving upgrade, exact reinstall,
+Extend candidate and release lifecycle evidence for actual v0.1.1 direct-wheel
+and v0.1.2 PyPI-to-candidate core/documents migration, version-changing
+extra-preserving upgrade, exact-pin replacement/reinstall,
 documents-to-core removal, rollback and application removal. Verify desired,
 managed and integration state and an external provider remain unchanged;
 include failed resolution preserving the prior valid installation. Clearly
