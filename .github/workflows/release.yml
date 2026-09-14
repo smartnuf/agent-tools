@@ -55,6 +55,18 @@ jobs:
           uv pip install --python "$RUNNER_TEMP/release-cli-check/bin/python" dist/*.whl
           python tests/check_installed_cli.py "$RUNNER_TEMP/release-cli-check/bin/agent-tools" dist
           python tests/check_document_installs.py dist --python 3.13
+      - name: Verify document migration contract before publication
+        timeout-minutes: 15
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python tests/fetch_release_bundle.py v0.1.1 "$RUNNER_TEMP/lifecycle-previous"
+          python tests/fetch_release_bundle.py v0.1.2 "$RUNNER_TEMP/lifecycle-current"
+          python tests/check_document_lifecycle.py \
+            --previous-wheel "$RUNNER_TEMP"/lifecycle-previous/*.whl \
+            --current-wheel "$RUNNER_TEMP"/lifecycle-current/*.whl \
+            --candidate-wheel dist/*.whl --python 3.13
       - name: Attest distributions built from the release tag
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:
@@ -134,3 +146,14 @@ jobs:
           uv tool install --python 3.13 --reinstall "$url"
           uv tool uninstall smartnuf-agent-tools
           test ! -e "$tool_bin/agent-tools"
+
+      - name: Verify published optional-document lifecycle
+        timeout-minutes: 15
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python tests/fetch_release_bundle.py "$RELEASE_TAG" "$RUNNER_TEMP/published-document-bundle"
+          python tests/check_published_documents.py \
+            --wheel "$RUNNER_TEMP"/published-document-bundle/*.whl \
+            --python 3.13 --allow-home-config-mutation

@@ -15,7 +15,9 @@ The workflow has repository read permission by default. Only its release job rec
 
 ## Publish a stable release to PyPI
 
-The PyPI project uses a pending trusted publisher until the first successful upload creates the project. A pending publisher does not reserve the project name. Recheck that `smartnuf-agent-tools` remains available immediately before the first publication.
+The `smartnuf-agent-tools` PyPI project was created by the verified v0.1.2
+publication. Preserve its existing trusted-publisher identity for subsequent
+releases; no project-name reservation or new API token is needed.
 
 The trusted-publisher identity must match these values exactly:
 
@@ -25,7 +27,7 @@ The trusted-publisher identity must match these values exactly:
 - Workflow: `publish-pypi.yml`
 - GitHub environment: `pypi`
 
-This pending publisher and the protected `pypi` environment were configured and verified on 2026-08-30. The environment requires approval from `smartnuf`, permits that sole maintainer to approve their own deployment, accepts only the `main` branch and `v[0-9]*` tags, and contains no secrets. The publisher remains pending until its first successful upload creates the PyPI project.
+The publisher and protected `pypi` environment were configured and verified on 2026-08-30. The environment requires approval from `smartnuf`, permits that sole maintainer to approve their own deployment, accepts only the `main` branch and `v[0-9]*` tags, and contains no secrets. The first successful v0.1.2 upload completed that pending-publisher transition.
 
 Configure the GitHub `pypi` environment with required reviewer protection so publication requires a maintainer's explicit approval. Do not add a PyPI API token, username, password, repository secret, or environment secret.
 
@@ -40,3 +42,21 @@ Download all three release assets and verify the checksums and GitHub attestatio
 If the workflow fails before creating a release, correct the cause through a pull request and create a new version rather than moving a published tag. If GitHub created an incomplete draft or prerelease, record what happened before removing it, then use a new version for the replacement. Never overwrite an artifact attached to an existing release.
 
 If trusted publication fails before PyPI accepts an upload, leave the GitHub tag and release immutable. Diagnose the exact owner, repository, workflow filename, environment, and OIDC permission against the trusted-publisher configuration. If no code change is needed, retry the failed job only when the same release artifacts and tag remain valid. A rerun uses the original workflow revision; after correcting workflow code through a reviewed pull request, run the merged workflow manually from `main` with the existing stable `release_tag`. The recovery job revalidates the stable release, tag ancestry, artifact names, and checksums and still requires `pypi` environment approval. If PyPI accepted any file, do not overwrite or reuse that version; record the partial publication and release a new version.
+
+## v0.2 document boundary qualification
+
+The current source identifies the unpublished candidate as 0.2.0. Public
+v0.1.2 remains the current release until an authorized publication completes.
+Candidate CI checks verified old-release artifacts against the exact rebuilt
+wheel for core/documents migration, pins, extra removal, resolution failure,
+rollback and application removal with state/provider preservation. Its separate
+source-version fixture tests extra retention; it is not a published release.
+
+Before attestation/publication, the tag workflow repeats installed-shape and
+candidate lifecycle checks. Published GitHub-wheel and PyPI smoke paths then
+check core/documents selection, exact source/pin reconciliation, removal of the
+extra and application removal. They retain legacy mandatory-stack validation
+for v0.1.x. Inspect all three platform results; pre-publication local-index
+migration is not evidence of a successful public PyPI upload or resolution.
+Keep final guide reconciliation, provider/platform qualification and the
+milestone's exact-tag release gate open until their own evidence exists.

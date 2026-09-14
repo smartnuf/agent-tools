@@ -64,3 +64,7 @@ Runtime implementation is complete on merge, but #109/#57 remain open. Remaining
 work is #111 (1–1.5 days); total revised implementation estimate is 2–3 days,
 actual effort untracked. No release, optional-document upgrade qualification or
 new milestone-gate completion is claimed by this partial evidence.
+
+The subsequent [#111 lifecycle slice](05-document-lifecycle.md) completes the
+parent implementation/evidence target on merge. Its actual-artifact and fixture
+evidence remain separate from the still-open final publication gate.

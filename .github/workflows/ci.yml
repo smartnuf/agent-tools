@@ -41,7 +41,7 @@ jobs:
       - name: Validate release version and checksums
         shell: bash
         run: |
-          python scripts/release.py verify-tag v0.1.2
+          python scripts/release.py verify-tag v0.2.0
           python scripts/release.py checksums "${{ runner.temp }}/dist/SHA256SUMS" "${{ runner.temp }}"/dist/*.whl "${{ runner.temp }}"/dist/*.tar.gz
       - name: Install wheel and declared dependencies
         run: |
@@ -87,21 +87,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p "$RUNNER_TEMP/previous-release" "$RUNNER_TEMP/current-release"
-          gh release download v0.1.1 \
-            --repo "$GITHUB_REPOSITORY" \
-            --dir "$RUNNER_TEMP/previous-release" \
-            --pattern '*.whl' \
-            --pattern '*.tar.gz' \
-            --pattern SHA256SUMS
-          gh release download v0.1.2 \
-            --repo "$GITHUB_REPOSITORY" \
-            --dir "$RUNNER_TEMP/current-release" \
-            --pattern '*.whl' \
-            --pattern '*.tar.gz' \
-            --pattern SHA256SUMS
-          python scripts/release.py verify-checksums "$RUNNER_TEMP/previous-release/SHA256SUMS"
-          python scripts/release.py verify-checksums "$RUNNER_TEMP/current-release/SHA256SUMS"
+          python tests/fetch_release_bundle.py v0.1.1 "$RUNNER_TEMP/previous-release" --repository "$GITHUB_REPOSITORY"
+          python tests/fetch_release_bundle.py v0.1.2 "$RUNNER_TEMP/current-release" --repository "$GITHUB_REPOSITORY"
           python scripts/release.py verify-checksums "$RUNNER_TEMP/release-dist/SHA256SUMS"
 
       - name: Exercise upgrade, pin, rollback, and removal lifecycle
@@ -117,6 +104,16 @@ jobs:
             --work-directory "$RUNNER_TEMP/release-lifecycle" \
             --python 3.13 \
             --allow-home-config-mutation
+
+      - name: Verify optional-document migrations and preservation
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          python tests/check_document_lifecycle.py \
+            --previous-wheel "$RUNNER_TEMP"/previous-release/*.whl \
+            --current-wheel "$RUNNER_TEMP"/current-release/*.whl \
+            --candidate-wheel "$RUNNER_TEMP"/release-dist/*.whl \
+            --python 3.13 --allow-home-config-mutation
 
       - name: Install and test shared release wheel (Windows)
         if: runner.os == 'Windows'
