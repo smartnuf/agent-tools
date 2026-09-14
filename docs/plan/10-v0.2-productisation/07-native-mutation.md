@@ -72,3 +72,22 @@ POSIX syntax/PATH checks, sdist-rebuilt wheel metadata and installed read-only
 snapshots pass. The installed driver refuses execution without explicit
 hosted-runner mutation authority. Local doctor has only the known absent native
 tools. No local native packages were installed; hosted results/review pending.
+
+The first hosted wave stopped at workflow validation: `runner.temp` is not
+available in job-level environment definitions. No real mutation ran. The
+correction initializes private paths in a step through GITHUB_ENV and passes
+the same pinned actionlint 1.7.12 locally (official ARM64 archive, published
+checksum verified). The public CLI dry-run now precedes internal plan capture,
+so planning failures are recorded at the actual installed command surface.
+
+
+The first review found two valid evidence/lifecycle defects. Fresh Windows
+rediscovery and no-op repetition now reuse the production persisted-PATH reader
+in a child-only environment, without changing the driver's or user's PATH.
+The driver no longer kills the CLI on an independent aggregate timeout: M3
+retains its existing command supervision, cancellation and provenance ownership.
+Independent adjudication confirmed that removing competing parent-only
+termination completes the established contract. The 23-minute step and 40-minute
+job bounds remain infrastructure backstops; infrastructure cancellation means
+failed/incomplete evidence, never orderly cleanup or mutation success. Full
+validation now includes 420 tests and the unchanged M3 cancellation suite.
