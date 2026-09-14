@@ -354,13 +354,46 @@ def _change_claude_code_integration(*, apply: bool, allow_config_mutation: bool)
     return 1 if result.outcome is IntegrationOutcome.REFUSED else 0
 
 
+class _HelpFormatter(argparse.HelpFormatter):
+    """Keep runtime help and generated reference independent of terminal width."""
+
+    def __init__(self, prog: str):
+        super().__init__(prog, width=88)
+
+
+class _CommandParser(argparse.ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("formatter_class", _HelpFormatter)
+        super().__init__(*args, **kwargs)
+
+
+def _command(subparsers, name: str, purpose: str, **kwargs):
+    """Reuse each command's purpose in its menu and its own help page."""
+
+    kwargs.setdefault("description", purpose)
+    return subparsers.add_parser(name, help=purpose, **kwargs)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="agent-tools")
-    parser.add_argument("--version", action="version", version=f"%(prog)s {_application_version()}")
+    parser = _CommandParser(
+        prog="agent-tools",
+        description=(
+            "Discover workstation capabilities, install named native tools, and manage "
+            "desired configuration and supported agent integrations. Read-only commands "
+            "need no authorization; mutations require their dedicated flag."
+        ),
+        epilog=(
+            "Use COMMAND --help for its purpose, safety requirements and exit statuses. "
+            "Help and version return 0 without operational work; invalid syntax returns 2. "
+            "Application installation, upgrade and removal are managed by uv tool."
+        ),
+    )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {_application_version()}",
+                        help="show the installed application version and exit")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    install_parser = subparsers.add_parser(
+    install_parser = _command(subparsers,
         "install",
-        help="install only named native capabilities with explicit authorization",
+        "Install only named native capabilities with explicit authorization.",
         description=(
             "Discover and plan only the named capabilities, honoring their exact "
             "stored provider preferences. Other enabled capabilities are not added. "
@@ -391,53 +424,59 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true",
         help="display a read-only discovery/plan without execution or provenance writes",
     )
-    subparsers.add_parser("doctor", help="show Python and native-tool availability")
-    tools_parser = subparsers.add_parser("tools", help="list capabilities or detect host state")
+    _command(subparsers, "doctor", "Inspect Python libraries and default native tools without changing the host.",
+             epilog="Exit status: 0 = all checks pass; 1 = a required library or default native capability needs attention.")
+    tools_parser = _command(subparsers, "tools", "Inspect capabilities or configure optional desired capabilities.")
     tools_subparsers = tools_parser.add_subparsers(dest="tools_command", required=True)
-    tools_subparsers.add_parser("list", help="list project-supported capabilities")
-    status_parser = tools_subparsers.add_parser("status", help="show detected capability state")
-    status_parser.add_argument("capability", nargs="?", help="capability identity")
-    enable_parser = tools_subparsers.add_parser(
-        "enable", help="enable an optional desired capability"
-    )
-    enable_parser.add_argument("capability", help="capability identity")
-    enable_parser.add_argument("--provider", help="exact built-in provider preference")
-    enable_parser.add_argument(
-        "--allow-config-mutation",
-        action="store_true",
-        help="authorize desired-state configuration mutation",
-    )
-    disable_parser = tools_subparsers.add_parser(
-        "disable", help="disable an optional desired capability"
-    )
-    disable_parser.add_argument("capability", help="capability identity")
-    disable_parser.add_argument(
-        "--allow-config-mutation",
-        action="store_true",
-        help="authorize desired-state configuration mutation",
-    )
-    integrations_parser = subparsers.add_parser(
-        "integrations", help="manage explicitly supported agent integrations"
-    )
-    integration_subparsers = integrations_parser.add_subparsers(
-        dest="integration", required=True
-    )
-    claude_parser = integration_subparsers.add_parser(
-        "claude-code", help="manage native-Windows Claude Code Git Bash selection"
-    )
-    claude_subparsers = claude_parser.add_subparsers(
-        dest="integration_command", required=True
-    )
-    claude_subparsers.add_parser("status", help="show separate integration state")
-    for command in ("apply", "remove"):
-        change_parser = claude_subparsers.add_parser(
-            command, help=f"{command} the Claude Code Git Bash setting"
-        )
-        change_parser.add_argument(
-            "--allow-config-mutation",
-            action="store_true",
-            help="authorize Claude Code and integration-state mutation",
-        )
+    _command(tools_subparsers, "list", "List the built-in capability catalogue without probing or changing the host.",
+             epilog="Exit status: 0 = catalogue displayed.")
+    status_parser = _command(tools_subparsers, "status", "Inspect detected capability availability, desired state and mutation provenance without writes.",
+        epilog=(
+            "Exit status for one capability: 0 = available; 1 = absent; 2 = unknown or "
+            "unsupported. Without a capability: 0 = all default required capabilities "
+            "available; 1 = a default capability is unavailable. Configuration/provenance "
+            "read errors are reported separately and do not change the availability status."
+        ))
+    status_parser.add_argument("capability", nargs="?", help="built-in capability identity (default: inspect all capabilities)")
+    enable_parser = _command(tools_subparsers, "enable", "Enable an optional desired capability without installing a provider.",
+        epilog=(
+            "Changes require --allow-config-mutation and back up existing configuration. "
+            "Unrelated valid entries are preserved. Exit status: 0 = changed or already "
+            "enabled; 1 = refused or failed (including invalid capability/provider)."
+        ))
+    enable_parser.add_argument("capability", help="optional built-in capability identity (see tools list)")
+    enable_parser.add_argument("--provider", help="exact built-in provider preference; no fallback (default: catalogue order)")
+    enable_parser.add_argument("--allow-config-mutation", action="store_true",
+                              help="authorize desired-state configuration writes (default: %(default)s)")
+    disable_parser = _command(tools_subparsers, "disable", "Disable an optional desired capability without removing any provider package.",
+        epilog=(
+            "Changes require --allow-config-mutation and back up existing configuration. "
+            "Unrelated valid entries are preserved. Exit status: 0 = changed or already "
+            "disabled; 1 = refused or failed (including invalid capability)."
+        ))
+    disable_parser.add_argument("capability", help="optional built-in capability identity (see tools list)")
+    disable_parser.add_argument("--allow-config-mutation", action="store_true",
+                               help="authorize desired-state configuration writes (default: %(default)s)")
+    integrations_parser = _command(subparsers, "integrations", "Inspect or manage explicitly supported agent integrations.")
+    integration_subparsers = integrations_parser.add_subparsers(dest="integration", required=True)
+    claude_parser = _command(integration_subparsers, "claude-code", "Manage Claude Code Git Bash selection on a native Windows host.")
+    claude_subparsers = claude_parser.add_subparsers(dest="integration_command", required=True)
+    _command(claude_subparsers, "status", "Read Claude Code settings and separate integration state without writes.",
+             epilog="Exit status: 0 = state inspected; 1 = unsupported context or unreadable/invalid integration state.")
+    for command, purpose in (
+        ("apply", "Apply the verified Git Bash path to Claude Code settings on native Windows."),
+        ("remove", "Restore the prior Claude Code setting for an Agent Tools-managed integration."),
+    ):
+        change_parser = _command(claude_subparsers, command, purpose,
+            epilog=(
+                "Changes require --allow-config-mutation. Back up existing settings, "
+                "preserve unrelated entries and report recovery evidence. Never install "
+                "or remove provider packages; an unowned setting is not claimed. "
+                "Exit status: 0 = completed or no changes; 1 = refused or failed, "
+                "including unsupported context or unresolved recovery."
+            ))
+        change_parser.add_argument("--allow-config-mutation", action="store_true",
+            help="authorize Claude Code settings and integration-state writes (default: %(default)s)")
     return parser
 
 
