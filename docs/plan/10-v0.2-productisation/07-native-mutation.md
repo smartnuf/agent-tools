@@ -65,3 +65,10 @@ review head; preserve failures and allow at most one inspected same-head retry.
 Pending actual runs and review. Update the maintained platform matrix only from
 observed outcomes; close #104 only when both its evidence gates are supported.
 Final guides and release qualification remain separate tasks afterward.
+
+
+Initial implementation validation: 419 unit tests, 36 guide invocations,
+POSIX syntax/PATH checks, sdist-rebuilt wheel metadata and installed read-only
+snapshots pass. The installed driver refuses execution without explicit
+hosted-runner mutation authority. Local doctor has only the known absent native
+tools. No local native packages were installed; hosted results/review pending.
