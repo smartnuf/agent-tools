@@ -69,20 +69,24 @@ Reconcile the current repository and published artifacts, including:
 6. the README/PyPI front door merged in PR #102 (`226c81f`), preserving its
    ordinary-user presentation while adapting it to the v0.2 contracts.
 
-## Proposed acceptance gates
+## Acceptance gates
 
-These are proposed v0.2 gates to turn into the next GitHub milestone before
-implementation begins.
+The [v0.2 milestone](https://github.com/smartnuf/agent-tools/milestone/8) is
+open with #103, #57, #104 and #106 assigned. #103 is specified in its
+[task plan](01-installed-cli.md). The owner added #106 as a release-quality
+requirement after the initial seven gates.
 
 | Gate | Initial state | Primary tracker |
 |---|---|---|
-| Installed `agent-tools` is the sole supported ordinary-user command surface; repository operational scripts are not required by released workflows | not-started | #103 |
-| `agent-tools install <capability> [<capability> ...]` reuses the existing managed provider lifecycle and works from an installed artifact | not-started | #103 |
+| Installed `agent-tools` is the sole supported ordinary-user command surface; repository operational scripts are not required by released workflows | in-progress | #103 |
+| `agent-tools install <capability> [<capability> ...]` reuses the existing managed provider lifecycle and works from an installed artifact | in-progress | #103 |
 | Core installation no longer requires document libraries; a separately requested document install has a specified compatibility contract | not-started | #57 |
 | CI evidence distinguishes seeded/simulated/native mutation paths and exercises primary real provider mutations through the installed CLI where practical | not-started | #104 |
 | Maintained platform evidence reports OS/distribution version, architecture, provider path, evidence class, and important common gaps without overclaiming | not-started | #104 |
 | README/PyPI front door describes the new core/doc/CLI contract and is builds on merged PR #102 | not-started | #103 / #57 |
 | A reviewed v0.2 candidate passes exact-artifact install, upgrade-from-v0.1.x, pin/reinstall, rollback where supported, and removal/preservation tests before publication | not-started | split during planning |
+
+| CLI help and generated reference share one command model with automated drift prevention | not-started | #106 |
 
 ## Likely sequencing
 
@@ -123,7 +127,7 @@ later research/exploration phase.
 
 ## Completion and stop condition
 
-When the proposed gates have durable evidence and v0.2 is published, stop the
+When the gates have durable evidence and v0.2 is published, stop the
 bounded productisation programme. Reconcile the roadmap and deliberately choose
 a new Intent rather than automatically promoting future research ideas into
 implementation work.
