@@ -19,6 +19,7 @@
 | M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
 | M3 | Tested update and capability lifecycle | complete | 9/9 | 6.5–11 days | none |
 | v0.2 #103 | Installed CLI and named-only native installation | complete | contributes 2 gates | 1.5–2 days | none |
+| v0.2 #57 specification | Optional-document contract and migration discovery | complete | no additional gate complete | 0.5–1 day | none |
 | v0.2 #106 | Generated CLI reference and help/docs drift prevention | complete | 3/8 v0.2 gates complete overall | 0.25–0.75 day | none |
 
 Estimated implementation effort through M3: **complete**. Discovery for #103
@@ -26,8 +27,9 @@ is recorded in its [task plan](10-v0.2-productisation/01-installed-cli.md), and
 [Decision 0009](../decisions/0009-installed-capability-install.md) records the
 human-approved named-only request contract. The forecast above covers #103 and
 #106 only (originally 1.75–2.75 days combined; implementation complete);
-remaining #57/#104/release work needs its
-own discovery-based estimates before implementation. Actual effort is untracked.
+#57 implementation is now estimated at 1–2 days from its
+[discovery and specification](10-v0.2-productisation/03-document-boundary.md);
+remaining #104/release work needs its own discovery-based estimates. Actual effort is untracked.
 
 Former M4a/M4b are historical, cancelled objectives rather than deferred work
 or completed implementation. Their GitHub milestones are closed as not planned
@@ -92,9 +94,11 @@ CLI tests. #106 adds the third completed gate: `tests/test_cli_reference.py`,
 `tests/check_cli_docs.py`, installed-help comparisons and pre-publication checks
 keep the generated reference and guide invocations aligned with argparse.
 The suite now has 407 passing tests. These changes await the next feature-bearing
-release. Next, discover/specify #57's accepted optional-document boundary;
-its implementation estimate remains to be determined from import, packaging and
-upgrade evidence. The [v0.2 plan](10-v0.2-productisation/README.md) retains the
+release. #57 discovery specifies the `documents` extra and explicit
+`doctor --documents` validation in [Decision 0010](../decisions/0010-document-extra-and-diagnostics.md),
+backed by a disposable uv selection experiment. The specification adds no
+completed gate; implementation and actual-artifact lifecycle evidence remain
+open. Next, implement that bounded contract in #109 (1–2 days). The [v0.2 plan](10-v0.2-productisation/README.md) retains the
 remaining document-dependency, platform, final-guide and release gates.
 
 The v0.2 goal is deliberately minimal: one installed CLI, `agent-tools install
