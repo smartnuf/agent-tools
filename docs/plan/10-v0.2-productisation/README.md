@@ -71,10 +71,11 @@ Reconcile the current repository and published artifacts, including:
 
 ## Acceptance gates
 
-All eight gates have durable evidence, including the published v0.2.0
-artifacts. #124 reconciles the release record and closes
-[GitHub milestone 8](https://github.com/smartnuf/agent-tools/milestone/8) after
-merge. #103 is specified in its [task plan](01-installed-cli.md); the owner
+Seven gates are complete, including exact-artifact release qualification.
+The front-door gate is reopened because immutable PyPI v0.2.0 metadata
+incorrectly calls included commands unreleased; #124 records the defect and
+required human disposition. Keep
+[GitHub milestone 8](https://github.com/smartnuf/agent-tools/milestone/8) open. #103 is specified in its [task plan](01-installed-cli.md); the owner
 added #106 as a release-quality requirement after the initial seven gates.
 
 | Gate | State | Primary tracker |
@@ -84,7 +85,7 @@ added #106 as a release-quality requirement after the initial seven gates.
 | Core installation no longer requires document libraries; a separately requested document install has a specified compatibility contract | complete | #57/#109/#111; [runtime and installed shapes](04-document-implementation.md), [artifact lifecycle evidence](05-document-lifecycle.md) |
 | CI evidence distinguishes seeded/simulated/native mutation paths and exercises primary real provider mutations through the installed CLI where practical | complete | #104/#115; [inspected mutation run and maintained matrix](../../platforms.md#observed-installed-cli-native-mutations) |
 | Maintained platform evidence reports OS/distribution version, architecture, provider path, evidence class, and important common gaps without overclaiming | complete | #104/#115; [inspected mutation run and maintained matrix](../../platforms.md#observed-installed-cli-native-mutations) |
-| README/PyPI front door describes the new core/doc/CLI contract and builds on merged PR #102 | complete | #122; [final guide plan](10-final-guides.md) |
+| README/PyPI front door describes the new core/doc/CLI contract and builds on merged PR #102 | blocked | #122/#124; [published-text defect and disposition](11-release-qualification.md#published-text-defect-and-disposition) |
 | A reviewed v0.2 candidate passes exact-artifact install, upgrade-from-v0.1.x, pin/reinstall, rollback where supported, and removal/preservation tests before publication | complete | #124; [exact-tag qualification and publication evidence](11-release-qualification.md) |
 | CLI help and generated reference share one command model with automated drift prevention | complete | #106; `tests/test_cli_reference.py`, `tests/check_cli_docs.py`, installed help and release checks; [task plan](02-cli-reference.md) |
 

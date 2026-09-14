@@ -1,9 +1,9 @@
 # Plan status
 
 - Last reconciled: 2026-09-14
-- Current completed milestone: v0.2 productisation — complete (8/8 gates)
-- Current milestone: none selected; reconcile [GitHub milestone 8](https://github.com/smartnuf/agent-tools/milestone/8) closure with #124
-- Current state: v0.2 is published; stop for a fresh human Intent before selecting broader work
+- Current completed milestone: M3 — complete
+- Current milestone: v0.2 productisation — blocked on front-door disposition ([GitHub milestone 8](https://github.com/smartnuf/agent-tools/milestone/8), #124)
+- Current state: v0.2.0 is published and qualified; immutable PyPI description has a known availability error requiring human disposition
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
 - Current published release: [v0.2.0](https://github.com/smartnuf/agent-tools/releases/tag/v0.2.0), also verified on [PyPI](https://pypi.org/project/smartnuf-agent-tools/0.2.0/)
 - Distribution policy: PyPI via `uv tool` is the sole supported Agent Tools distribution channel; alternative WinGet/Homebrew distribution work is retired as not planned
@@ -27,8 +27,8 @@
 | v0.2 #118 | WinGet activation identity prerequisite | complete | no additional gate complete | 0.5–1.5 days | none |
 | v0.2 #120 | Legacy-encoded native reporting prerequisite | complete | no additional gate complete | 0.25–0.5 day | none |
 | v0.2 #104/#115 | Real installed-CLI native mutation and explicit platform matrix | complete | 6/8 v0.2 gates complete overall | 1–2 days | none |
-| v0.2 #122 | Final front door and release notes | complete | 7/8 v0.2 gates complete overall | 0.5–1 day | none |
-| v0.2 #124 | Exact-tag qualification, publication and release record | complete on #124 merge | 8/8 overall | up to 0.5 day | none after merge |
+| v0.2 #122/#124 | Final front door and release notes | blocked; published-text defect found after release | front-door gate reopened | 0.5–1 day historical | disposition required |
+| v0.2 #124 | Exact-tag qualification, publication and release record | release gate complete; front-door disposition pending | 7/8 overall | up to 0.5 day | record review, then human decision |
 
 Estimated implementation effort through M3: **complete**. Discovery for #103
 is recorded in its [task plan](10-v0.2-productisation/01-installed-cli.md), and
@@ -45,8 +45,9 @@ as recorded above. Final guide reconciliation is specified in
 [#122](10-v0.2-productisation/10-final-guides.md) at 0.5–1 day and implemented;
 release qualification and record reconciliation are recorded in
 [#124](10-v0.2-productisation/11-release-qualification.md), estimated at up to
-0.5 day excluding CI/review waits. Actual effort is untracked; no product
-implementation remains.
+0.5 day excluding CI/review waits. Actual effort is untracked. A newly
+authorized patch publication, if selected to repair immutable PyPI metadata,
+needs a separate estimate; it is not included in this completed publication.
 
 Former M4a/M4b are historical, cancelled objectives rather than deferred work
 or completed implementation. Their GitHub milestones are closed as not planned
@@ -102,8 +103,9 @@ review and CI wait were excluded.
 `226c81f` on 2026-09-14 and closed #56, supplying the product-first README
 and checked PyPI metadata. Preserve that front door while adapting it to v0.2.
 
-All eight [v0.2 gates](10-v0.2-productisation/README.md#acceptance-gates)
-have durable evidence. #103 exposes the named-only installed CLI; #106 keeps
+Seven of eight [v0.2 gates](10-v0.2-productisation/README.md#acceptance-gates)
+are complete. The front-door gate was reopened after publication review found
+a stale availability claim in the immutable PyPI README. #103 exposes the named-only installed CLI; #106 keeps
 help and guide invocations aligned; #57/#109/#111 supply the optional-document
 contract and migration/preservation evidence; #104/#115 supply real native
 mutation evidence and the explicit platform matrix. PR #123 merged the final
@@ -114,11 +116,16 @@ The authorized immutable `v0.2.0` tag identifies reviewed commit
 protected PyPI publication, public-file checksum comparison and three-platform
 PyPI lifecycle evidence are recorded in the
 [release qualification record](10-v0.2-productisation/11-release-qualification.md).
-#124 reconciles this documentation; close milestone 8 after its merge and
-confirmation that no required issue remains open.
+#124 remains open: correcting the source README and adding a GitHub release
+erratum do not replace PyPI metadata embedded in immutable v0.2.0 files.
+The installed commands work; the description incorrectly calls desired-state
+and integration commands main-only pending a release.
 
-**Recommended next task: fresh human Intent (not yet estimated).** The bounded
-productisation programme is complete. Do not automatically implement ideas in
+**Recommended next task: human disposition of the published-text defect.**
+Authorize a new immutable patch release (recommended), or explicitly accept
+the documented v0.2.0 metadata limitation. Keep milestone 8 open until that
+disposition and any required work complete. Then require fresh human Intent
+before broader work. Do not automatically implement ideas in
 [future product research](90-future-product-research.md), add distribution
 channels, or expand native-provider support. Existing platform gaps remain
 explicit in the [maintained matrix](../platforms.md#observed-installed-cli-native-mutations).

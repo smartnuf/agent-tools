@@ -60,3 +60,11 @@ exact pins, extra removal and application removal. See the
 for exact runs, hashes and the distinction between candidate, public-artifact
 and native-provider evidence. Future releases must repeat their own exact-tag
 qualification; this record does not expand the documented platform matrix.
+
+
+Post-publication review found one stale availability sentence in the immutable
+v0.2.0 PyPI README. Source documentation and a GitHub release erratum correct
+the presentation but cannot replace published PyPI metadata. The front-door
+gate remains open pending human disposition; follow the
+[known-limit record](plan/10-v0.2-productisation/11-release-qualification.md#published-text-defect-and-disposition)
+before declaring the milestone complete or selecting another release.

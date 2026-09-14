@@ -52,19 +52,47 @@ Candidate migration tests and source-version fixtures retain the distinctions
 recorded in [the document lifecycle plan](05-document-lifecycle.md); no new
 public rollback version or broader OS/architecture coverage is claimed.
 
+## Published-text defect and disposition
+
+PR #125 review found that the immutable v0.2.0 wheel/sdist README, also served
+as the PyPI description, says desired-state and integration commands are
+available only from `main` pending the next release. They are included in
+v0.2.0. This is a documentation availability error, not a runtime failure;
+the installed-artifact and public lifecycle validation above remains valid.
+
+The source README correction uses version-qualified availability. An appended
+GitHub release erratum corrects the mutable release presentation, while the
+tag, distribution files and their signed hashes remain unchanged. Neither
+correction repairs the already-published PyPI description.
+
+Independent read-only adjudication under the development workflow confirmed
+that immutable-file preservation determines the conservative result: reopen
+the front-door gate, retain seven completed gates, keep #124 and milestone 8
+open, and reserve disposition for the human. No new architecture, supported
+platform, host mutation or persistent state is involved. No release asset may
+be overwritten or tag moved to repair prose.
+
+Recommended disposition: authorize a new immutable patch release with corrected
+metadata and repeat reviewed-source, exact-tag, protected-publication and
+public-lifecycle qualification. The alternative is explicit human acceptance
+of the documented v0.2.0 metadata limitation. Current authority covers v0.2.0
+publication only; it does not choose a new version or waive the front-door gate.
+
 ## Completion and learning
 
-All eight v0.2 product gates now have evidence. #124 merges the factual record;
-then confirm no required milestone issue remains open and explicitly close
-milestone 8. Remaining engineering work is documentation review/integration,
-with no change to the estimate. Historical task plans describe their original
-execution state and are not rewritten as current release status.
+The release gate is complete; the front-door gate is blocked on the disposition
+above. This record does not close #124 or milestone 8. The up-to-0.5-day record
+reconciliation estimate is unchanged; actual effort is untracked. A patch
+publication, if authorized, receives its own estimate. Historical task plans
+describe their original execution state and are not current release snapshots.
 
-Release validation exposed local tooling and transient index observations,
-not product defects: the host GitHub CLI lacked attestation support, so an
-official checksum-verified temporary CLI performed verification; the public
-version endpoint was available before the unversioned project endpoint caught
-up. No credential, package-manager or release-asset changes were needed.
+Local tooling and transient index observations were not product defects: the
+host GitHub CLI lacked attestation support, so an official checksum-verified
+temporary CLI performed verification; the public version endpoint was available
+before the unversioned project endpoint caught up. The README defect also shows
+that parsed examples and installed help checks do not detect stale surrounding
+availability prose. Future release review must inspect that prose before the
+immutable tag, in addition to validating executable examples.
 
-The recommended next task is a fresh human Intent decision, not estimated or
-authorized here. Stop the bounded programme; future research remains research.
+After v0.2 disposition, require a fresh human Intent decision before expanding
+product work. Future research remains research.
