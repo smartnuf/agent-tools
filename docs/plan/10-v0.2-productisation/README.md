@@ -80,7 +80,7 @@ requirement after the initial seven gates.
 |---|---|---|
 | Installed `agent-tools` is the sole supported ordinary-user command surface; repository operational scripts are not required by released workflows | complete | #103; `tests/test_install.py`, `tests/check_installed_cli.py`, `tests/check_distribution.py` |
 | `agent-tools install <capability> [<capability> ...]` reuses the existing managed provider lifecycle and works from an installed artifact | complete | #103; `tests/test_install.py`, `tests/check_installed_cli.py`, `tests/check_distribution.py` |
-| Core installation no longer requires document libraries; a separately requested document install has a specified compatibility contract | not-started | #57 |
+| Core installation no longer requires document libraries; a separately requested document install has a specified compatibility contract | in-progress | #57; [discovery/specification](03-document-boundary.md), implementation pending |
 | CI evidence distinguishes seeded/simulated/native mutation paths and exercises primary real provider mutations through the installed CLI where practical | not-started | #104 |
 | Maintained platform evidence reports OS/distribution version, architecture, provider path, evidence class, and important common gaps without overclaiming | not-started | #104 |
 | README/PyPI front door describes the new core/doc/CLI contract and is builds on merged PR #102 | not-started | #103 / #57 |
