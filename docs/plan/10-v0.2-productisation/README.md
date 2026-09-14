@@ -83,7 +83,7 @@ requirement after the initial seven gates.
 | Core installation no longer requires document libraries; a separately requested document install has a specified compatibility contract | complete | #57/#109/#111; [runtime and installed shapes](04-document-implementation.md), [artifact lifecycle evidence](05-document-lifecycle.md) |
 | CI evidence distinguishes seeded/simulated/native mutation paths and exercises primary real provider mutations through the installed CLI where practical | complete | #104/#115; [inspected mutation run and maintained matrix](../../platforms.md#observed-installed-cli-native-mutations) |
 | Maintained platform evidence reports OS/distribution version, architecture, provider path, evidence class, and important common gaps without overclaiming | complete | #104/#115; [inspected mutation run and maintained matrix](../../platforms.md#observed-installed-cli-native-mutations) |
-| README/PyPI front door describes the new core/doc/CLI contract and builds on merged PR #102 | in-progress | #122; [final guide plan](10-final-guides.md) |
+| README/PyPI front door describes the new core/doc/CLI contract and builds on merged PR #102 | complete on #122 PR merge | #122; [final guide plan](10-final-guides.md) |
 | A reviewed v0.2 candidate passes exact-artifact install, upgrade-from-v0.1.x, pin/reinstall, rollback where supported, and removal/preservation tests before publication | not-started | split during planning |
 
 | CLI help and generated reference share one command model with automated drift prevention | complete | #106; `tests/test_cli_reference.py`, `tests/check_cli_docs.py`, installed help and release checks; [task plan](02-cli-reference.md) |

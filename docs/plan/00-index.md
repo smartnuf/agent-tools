@@ -28,7 +28,7 @@
 | v0.2 #118 | WinGet activation identity prerequisite | complete | no additional gate complete | 0.5–1.5 days | none |
 | v0.2 #120 | Legacy-encoded native reporting prerequisite | complete | no additional gate complete | 0.25–0.5 day | none |
 | v0.2 #104/#115 | Real installed-CLI native mutation and explicit platform matrix | complete | 6/8 v0.2 gates complete overall | 1–2 days | none |
-| v0.2 #122 | Final front door and release notes | in-progress | front-door gate pending | 0.5–1 day | 0.5–1 day |
+| v0.2 #122 | Final front door and release notes | complete on merge | 7/8 v0.2 gates complete overall on merge | 0.5–1 day | exact-head review/integration only |
 
 Estimated implementation effort through M3: **complete**. Discovery for #103
 is recorded in its [task plan](10-v0.2-productisation/01-installed-cli.md), and
@@ -42,8 +42,8 @@ revises this to 2–3 days: runtime/installed-shape work (1–1.5 days) and #111
 lifecycle evidence (1–1.5 days), both implemented;
 the #104 discovery/evidence work and its bounded prerequisites are implemented
 as recorded above. Final guide reconciliation is specified in
-[#122](10-v0.2-productisation/10-final-guides.md) at 0.5–1 day; release
-qualification still needs its own discovery-based estimate. Actual effort is untracked.
+[#122](10-v0.2-productisation/10-final-guides.md) at 0.5–1 day and implemented;
+release qualification still needs its own discovery-based estimate. Actual effort is untracked.
 
 Former M4a/M4b are historical, cancelled objectives rather than deferred work
 or completed implementation. Their GitHub milestones are closed as not planned
@@ -127,8 +127,10 @@ untested common variants remain explicit gaps, not fallback success. See the
 [mutation implementation record](10-v0.2-productisation/07-native-mutation.md).
 The 1–2 day evidence slice and focused 0.5–1.5 day identity / 0.25–0.5 day
 reporting prerequisites are implemented, excluding review/CI wait. Final guide
-reconciliation proceeds in #122 (0.5–1 day, excluding review/CI wait);
-exact-artifact release qualification remains separate. Preserve public v0.1.2
+reconciliation in #122 completes on merge (7/8 overall): version-qualified
+README/PyPI examples, 43 checked guide invocations and reviewed v0.2 release
+notes preserve the accepted boundary and retained evidence. Exact-artifact
+release qualification remains separate. Preserve public v0.1.2
 until authorized publication.
 
 The v0.2 goal is deliberately minimal: one installed CLI, `agent-tools install

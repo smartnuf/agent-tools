@@ -41,3 +41,18 @@ notes are absent; historical release notes must keep their original meaning.
 A seventh gate can complete on this PR merge. The remaining release gate needs
 its own exact-artifact evidence and publication authorization; no tag, release
 promotion or package upload occurs in this task.
+
+## Implementation and validation
+
+README native examples now use the installed launcher and separate Windows
+Poppler from Unix Poppler+Ghostscript. Names, explicit authorization/no-op,
+status/recovery and optional-document boundaries match Decisions 0009/0010.
+Source maintenance is labelled accordingly. Reviewed candidate release notes
+retain exact observed versions, source/wheel identity, migration/preservation
+and common gaps. Public v0.1.2 remains explicitly distinct from the candidate.
+
+All 433 tests, 43 parsed guide invocations (including current release notes),
+POSIX syntax/PATH, actionlint with ShellCheck, wheel/sdist contents and installed
+CLI checks pass. The wheel's UTF-8 Markdown description exactly matches README.md.
+Doctor reports only the known missing native workstation tools. The front-door
+gate completes on merge after exact-head CI/review; no release gate is claimed.
