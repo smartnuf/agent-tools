@@ -18,6 +18,20 @@ Bootstrap reports the selected interpreter before package synchronization and
 lets `uv pip` report an unavailable wheel or build-tool failure; it does not
 silently retry under an emulated interpreter.
 
+## Optional Python documents
+
+The next-release wheel core requires no document libraries. The explicit
+`smartnuf-agent-tools[documents]` extra supplies the existing library stack on
+the same supported Python 3.11–3.13 range. Binary-wheel availability remains
+architecture-dependent; core-only operation does not establish document support
+on an untested architecture. Published v0.1.2 still bundles these libraries.
+
+Use `agent-tools doctor --documents` to require document imports; plain doctor
+reports their availability without counting optional failures. Both modes retain
+native Poppler/Ghostscript checks. See the [installation and migration guide](../README.md#optional-document-libraries-next-release).
+Checkout bootstrap/update retain their explicit document lock; they are not
+core-only installation tests. No Python-extra operation installs native tools.
+
 ## Installed native setup
 
 The CLI built from current `main` supports `agent-tools install poppler

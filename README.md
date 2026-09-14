@@ -41,8 +41,9 @@ what is already available and never installs software, edits configuration, or
 changes `PATH`. `tools list` shows the packaged capability catalogue;
 `tools status [CAPABILITY]` reports detected providers, executable paths,
 versions, execution environments, and architectures where observable. A
-missing required Python library or native executable makes `doctor` report the
-gap and return a nonzero status.
+missing required native executable makes `doctor` report the gap and return a
+nonzero status. Published v0.1.2 also requires its bundled Python libraries; the
+next-release optional-library behavior is described below.
 
 Upgrade an unpinned installation:
 
@@ -87,6 +88,44 @@ capabilities, remove shared providers, or alter your shell profile. See the
 [platform guide](https://github.com/smartnuf/agent-tools/blob/main/docs/platforms.md)
 for provider and privilege requirements; `install --help` describes options and
 exit statuses.
+
+## Optional document libraries (next release)
+
+The wheel built from current `main` installs a core CLI without third-party
+Python dependencies. To include the existing PDF, image, Word and Excel library
+bundle, explicitly select the `documents` extra. This extra and diagnostic flag
+are next-release functionality; published v0.1.2 still bundles the libraries.
+
+```sh
+uv tool install --python 3.13 --reinstall 'smartnuf-agent-tools[documents]'
+agent-tools doctor --documents
+```
+
+Plain `doctor` reports optional-library availability separately; missing or
+broken optional libraries do not affect its exit status. `doctor --documents`
+requires the full stack to import successfully. Both modes still check native
+Poppler and Ghostscript, which are installed separately. Neither mode installs
+anything. Use the absolute launcher path shown above if it is not on `PATH`.
+
+An unpinned PyPI v0.1.2 upgrade will select the new core behavior; explicitly
+select `[documents]` to retain the library bundle. Later `uv tool upgrade
+smartnuf-agent-tools` retains the selected extra and stored version constraints.
+To change an exact pin, reinstall the intended `smartnuf-agent-tools==VERSION`
+or `smartnuf-agent-tools[documents]==VERSION` requirement. For v0.1.1 direct-wheel
+migration and checksum-bound rollback, follow [the release guidance below](#pin-or-roll-back).
+
+Return to an unpinned core-only installation explicitly:
+
+```sh
+uv tool install --python 3.13 --reinstall smartnuf-agent-tools
+```
+
+These requests manage only uv's application environment and launcher; they do
+not change native providers, desired state or integration settings. There are
+currently no document-processing subcommands. The extra does not expose its
+Python imports to arbitrary project interpreters; use a project environment for
+project document processing. `documents` is a Python extra, not a native
+capability accepted by `agent-tools install`.
 
 ## Advanced use and source development
 
@@ -242,6 +281,11 @@ Native setup reports the reviewed package-manager commands and then reports host
 
 PATH changes are also opt-in. Windows backups are written under `.backups/path/`; Unix shell-profile changes create a timestamped sibling backup before editing an existing profile.
 Unix profile updates use a per-profile lock. If an interrupted update leaves that lock behind, the command stops without changing the profile and reports the exact lock path and recorded PID. Verify that no update process owns it before removing it manually and rerunning.
+
+The checkout deliberately retains the complete document-library lock in
+`requirements.txt`; bootstrap and update continue to install that development
+environment independently of the lightweight wheel core. Project-local Python
+environments remain authoritative.
 
 To refresh Python packages later:
 

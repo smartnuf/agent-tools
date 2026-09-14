@@ -46,3 +46,21 @@ No new persistent application state or host mutation is introduced. uv owns
 explicit Python environment requests. Disposable tests use private tool/bin
 roots and never alter user profiles/native packages. Existing M3 tests retain
 responsibility for native mutation/provenance/recovery behavior.
+
+## Runtime slice evidence
+
+409 unit tests pass, including absent/partial/broken/metadata-missing/healthy
+optional-library fixtures in both modes and unchanged native failure status.
+The rebuilt sdist/wheel metadata checker requires exactly seven guarded
+requirements and zero unconditional runtime requirements. Independent isolated
+uv tool installs verify a one-distribution core and the complete documents
+stack; both exercise CLI/help and diagnostic modes outside the checkout.
+CI runs these checks on all three platforms; release checks both shapes before
+publication. README/PyPI and platform/packaging guides distinguish current
+published v0.1.2 from next-release behavior; generated help and 36 concrete guide
+invocations are checked. Exact-head CI/review and full local checks gate merge.
+
+Runtime implementation is complete on merge, but #109/#57 remain open. Remaining
+work is #111 (1–1.5 days); total revised implementation estimate is 2–3 days,
+actual effort untracked. No release, optional-document upgrade qualification or
+new milestone-gate completion is claimed by this partial evidence.

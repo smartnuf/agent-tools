@@ -2,7 +2,7 @@
 
 The public Python distribution is `smartnuf-agent-tools`. It provides
 cross-platform capability discovery and diagnostics for coding-agent
-workstations, alongside the document libraries verified by `doctor`, and
+workstations, with optional document libraries verified by `doctor`, and
 installs the `agent-tools` command and `agent_tools` import package. The version
 in `src/agent_tools/__init__.py` is the single source used by Hatchling to
 produce distribution metadata.
@@ -95,7 +95,8 @@ maintenance/tests; installing the sdist is not a clone-bootstrap route.
 
 ## Dependencies
 
-The seven document libraries probed by `agent-tools doctor` are direct runtime dependencies of the ordinary installation:
+The current source has no third-party core runtime dependencies. Its public
+`documents` extra contains the seven libraries probed by `agent-tools doctor`:
 
 - `pypdf`, `pdfplumber`, and `PyMuPDF` for PDF inspection and manipulation;
 - `Pillow` and `reportlab` for image and PDF generation support;
@@ -106,7 +107,17 @@ They use compatible release-series bounds in `pyproject.toml`. The exact, review
 
 Poppler and Ghostscript are native runtime prerequisites, not Python dependencies. Install and update them through the operating system package manager. `uv` is the external environment and application installer; Hatchling is a build-system dependency. Neither is an application runtime dependency.
 
-There are currently no optional dependency groups: omitting the document libraries would make the supported `doctor` command report an incomplete ordinary installation. Introduce optional groups only alongside a corresponding change to that product contract.
+Use `uv tool install --python 3.13 --reinstall 'smartnuf-agent-tools[documents]'`
+to select the extra, and reinstall the bare distribution to return to core.
+`doctor` reports missing/partial/broken document imports without counting them
+as required checks; `agent-tools doctor --documents` explicitly requires the
+full stack. Both modes retain default native checks. No requested-extra state
+is inferred or persisted. There are no document-processing commands; uv's
+isolated tool imports do not become available in arbitrary project interpreters.
+The [README](../README.md#optional-document-libraries-next-release) and
+[Decision 0010](decisions/0010-document-extra-and-diagnostics.md) describe exact
+pins, extra-preserving upgrades, direct-wheel migration and checksum-bound
+rollback. Published v0.1.2 predates this boundary and still bundles documents.
 
 ## Metadata and compatibility
 
@@ -117,9 +128,13 @@ There are currently no optional dependency groups: omitting the document librari
   behaviours but does not itself promote the distribution classifier; maturity
   promotion requires a separate reviewed release decision.
 
-`tests/check_distribution.py` validates wheel and source-distribution metadata, required contents (including desired-state and Claude Code integration support), archive safety, and exclusion of machine-local state without importing from the checkout. CI installs the wheel and all declared dependencies in a clean environment, then `tests/check_installed_cli.py` requires `--version`, `doctor`, `tools list`, the platform-appropriate Bash provider status, and the non-mutating desired-state and integration command help surfaces to pass from an unrelated directory. Build and smoke-test state is kept outside the checkout, which must remain unchanged.
+`tests/check_distribution.py` validates wheel and source-distribution metadata, required contents (including desired-state and Claude Code integration support), archive safety, and exclusion of machine-local state without importing from the checkout. CI installs the core wheel in a clean environment, then `tests/check_installed_cli.py` requires `--version`, `doctor`, `tools list`, the platform-appropriate Bash provider status, and the non-mutating desired-state and integration command help surfaces to pass from an unrelated directory. Build and smoke-test state is kept outside the checkout, which must remain unchanged.
 
-CI builds one release bundle on Ubuntu, verifies its checksum manifest, and passes the same wheel to Windows, Ubuntu, and macOS jobs for isolated `uv tool` installation. This proves operating-system portability of the pure-Python artifact, but it is not native ARM64 coverage. Windows ARM64 may use x64-emulated uv-managed Python; native interpreter selection and architecture reporting are tracked in issue #14.
+CI builds one release bundle on Ubuntu, verifies its checksum manifest, and passes the same wheel to Windows, Ubuntu, and macOS jobs for isolated `uv tool` installation. `tests/check_document_installs.py` separately installs that exact wheel as core
+and with documents into private uv tool roots, asserts distribution inventories,
+checks both doctor modes and all CLI help, and removes each installation. The
+pre-publication installed check exercises both shapes too. This proves
+operating-system portability of the pure-Python artifact, but it is not native ARM64 coverage. Windows ARM64 may use x64-emulated uv-managed Python; native interpreter selection and architecture reporting are tracked in issue #14.
 
 The same platform jobs download the complete published v0.1.1 and v0.1.2
 release bundles and verify both release checksum manifests. The
@@ -158,11 +173,10 @@ uses PyPI Trusted Publishing through the dedicated GitHub Actions release
 workflow and protected `pypi` environment; it does not use a long-lived upload
 token.
 
-[Decision 0008](decisions/0008-optional-document-capability-boundary.md) now
-settles the v0.2 policy: document-processing libraries must be separately
-requested, and omitting them must not make core diagnostics fail.
-[Issue #57](https://github.com/smartnuf/agent-tools/issues/57) owns specification
-of the exact packaging name and upgrade contract, followed by implementation
-and artifact tests. The current mandatory dependencies and `doctor` behavior
-described above remain implemented until that change lands; the accepted
-optional boundary is not an open product-policy question.
+[Decision 0008](decisions/0008-optional-document-capability-boundary.md) and
+[Decision 0010](decisions/0010-document-extra-and-diagnostics.md) define the
+implemented optional packaging/diagnostic boundary. #109/#57 remain open until
+[#111](https://github.com/smartnuf/agent-tools/issues/111) extends actual-artifact
+migration and preservation evidence. The existing lifecycle described above
+is not evidence of version-changing optional-document upgrades; it still
+qualifies historical releases. No v0.2 publication is claimed.
