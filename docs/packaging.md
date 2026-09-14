@@ -9,6 +9,13 @@ produce distribution metadata.
 
 ## Supported product boundary
 
+This section describes the current implementation. For v0.2,
+[Decision 0007](decisions/0007-v0.2-product-and-distribution-boundary.md)
+establishes `agent-tools` as the sole ordinary-user CLI and PyPI through
+`uv tool` as the sole Agent Tools distribution channel. Issue #103 must expose
+installed native installation through the existing M3 lifecycle and reconcile
+artifact contents; checkout helpers remain development/compatibility infrastructure.
+
 The wheel is the ordinary-user command-line application. It contains portable Python code from `src/agent_tools/`; it does not contain the repository's clone-oriented `bin/`, `scripts/`, configuration, exact environment lock, or `.venv`.
 
 [Decision 0002](decisions/0002-native-capability-provider-model.md) extends
@@ -116,7 +123,11 @@ uses PyPI Trusted Publishing through the dedicated GitHub Actions release
 workflow and protected `pypi` environment; it does not use a long-lived upload
 token.
 
-The required document libraries are also a real product-boundary question for
-casual users, not a mechanical metadata cleanup. [Issue #57](https://github.com/smartnuf/agent-tools/issues/57)
-will decide the core-versus-`documents` contract before any dependency moves;
-the present mandatory dependencies and `doctor` behavior remain unchanged.
+[Decision 0008](decisions/0008-optional-document-capability-boundary.md) now
+settles the v0.2 policy: document-processing libraries must be separately
+requested, and omitting them must not make core diagnostics fail.
+[Issue #57](https://github.com/smartnuf/agent-tools/issues/57) owns specification
+of the exact packaging name and upgrade contract, followed by implementation
+and artifact tests. The current mandatory dependencies and `doctor` behavior
+described above remain implemented until that change lands; the accepted
+optional boundary is not an open product-policy question.
