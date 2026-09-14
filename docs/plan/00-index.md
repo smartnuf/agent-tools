@@ -2,8 +2,8 @@
 
 - Last reconciled: 2026-09-14
 - Current completed milestone: M3 — complete
-- Current milestone: v0.2 productisation — blocked on front-door disposition ([GitHub milestone 8](https://github.com/smartnuf/agent-tools/milestone/8), #124)
-- Current state: v0.2.0 is published and qualified; immutable PyPI description has a known availability error requiring human disposition
+- Current milestone: v0.2 productisation — in-progress: authorized v0.2.1 correction ([GitHub milestone 8](https://github.com/smartnuf/agent-tools/milestone/8), #124)
+- Current state: v0.2.0 is published and qualified; v0.2.1 is authorized to correct its immutable PyPI description
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
 - Current published release: [v0.2.0](https://github.com/smartnuf/agent-tools/releases/tag/v0.2.0), also verified on [PyPI](https://pypi.org/project/smartnuf-agent-tools/0.2.0/)
 - Distribution policy: PyPI via `uv tool` is the sole supported Agent Tools distribution channel; alternative WinGet/Homebrew distribution work is retired as not planned
@@ -27,8 +27,9 @@
 | v0.2 #118 | WinGet activation identity prerequisite | complete | no additional gate complete | 0.5–1.5 days | none |
 | v0.2 #120 | Legacy-encoded native reporting prerequisite | complete | no additional gate complete | 0.25–0.5 day | none |
 | v0.2 #104/#115 | Real installed-CLI native mutation and explicit platform matrix | complete | 6/8 v0.2 gates complete overall | 1–2 days | none |
-| v0.2 #122/#124 | Final front door and release notes | blocked; published-text defect found after release | front-door gate reopened | 0.5–1 day historical | disposition required |
-| v0.2 #124 | Exact-tag qualification, publication and release record | release gate complete; front-door disposition pending | 7/8 overall | up to 0.5 day | record review, then human decision |
+| v0.2 #122/#124 | Final front door and release notes | in-progress; authorized v0.2.1 correction | front-door gate reopened | 0.5–1 day historical | v0.2.1 qualification |
+| v0.2 #124 | Exact-tag qualification, publication and release record | v0.2.0 release gate complete; patch in progress | 7/8 overall | up to 0.5 day | v0.2.1 qualification and final review |
+| v0.2.1 #124 | Documentation patch publication and final review | in-progress | front-door gate remains open | up to 0.5 day | up to 0.5 day |
 
 Estimated implementation effort through M3: **complete**. Discovery for #103
 is recorded in its [task plan](10-v0.2-productisation/01-installed-cli.md), and
@@ -45,9 +46,10 @@ as recorded above. Final guide reconciliation is specified in
 [#122](10-v0.2-productisation/10-final-guides.md) at 0.5–1 day and implemented;
 release qualification and record reconciliation are recorded in
 [#124](10-v0.2-productisation/11-release-qualification.md), estimated at up to
-0.5 day excluding CI/review waits. Actual effort is untracked. A newly
-authorized patch publication, if selected to repair immutable PyPI metadata,
-needs a separate estimate; it is not included in this completed publication.
+0.5 day excluding CI/review waits. Actual effort is untracked. The separately
+authorized [v0.2.1 documentation patch](10-v0.2-productisation/12-doc-patch-release.md)
+is estimated at up to 0.5 additional day including qualification and final
+review, excluding external waits.
 
 Former M4a/M4b are historical, cancelled objectives rather than deferred work
 or completed implementation. Their GitHub milestones are closed as not planned
@@ -121,14 +123,14 @@ erratum do not replace PyPI metadata embedded in immutable v0.2.0 files.
 The installed commands work; the description incorrectly calls desired-state
 and integration commands main-only pending a release.
 
-**Recommended next task: human disposition of the published-text defect.**
-Authorize a new immutable patch release (recommended), or explicitly accept
-the documented v0.2.0 metadata limitation. Keep milestone 8 open until that
-disposition and any required work complete. Then require fresh human Intent
-before broader work. Do not automatically implement ideas in
-[future product research](90-future-product-research.md), add distribution
-channels, or expand native-provider support. Existing platform gaps remain
-explicit in the [maintained matrix](../platforms.md#observed-installed-cli-native-mutations).
+**Recommended next task: complete the authorized v0.2.1 documentation patch.**
+Follow its [plan](10-v0.2-productisation/12-doc-patch-release.md) through reviewed
+preparation, exact-tag qualification, protected publication and final
+post-distribution review. Keep milestone 8 open until that evidence and
+reconciliation complete. Then require fresh human Intent before broader work;
+[future product research](90-future-product-research.md) is not authorized
+implementation. Existing platform gaps remain explicit in the
+[maintained matrix](../platforms.md#observed-installed-cli-native-mutations).
 
 ## Known risks and assumptions
 

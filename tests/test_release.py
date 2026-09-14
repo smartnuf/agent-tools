@@ -83,8 +83,8 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("uv tool uninstall smartnuf-agent-tools", workflow)
 
     def test_current_tag_matches_package_version(self) -> None:
-        self.assertEqual(release.verify_tag("v0.2.0"), "v0.2.0")
-        self.assertEqual(release.package_version(), "0.2.0")
+        self.assertEqual(release.verify_tag("v0.2.1"), "v0.2.1")
+        self.assertEqual(release.package_version(), "0.2.1")
 
     def test_mismatched_tag_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "does not match"):
