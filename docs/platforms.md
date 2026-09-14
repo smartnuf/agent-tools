@@ -206,6 +206,8 @@ candidate wheel, SHA-256
 `3dbf6f5fde622f00e6285efee825489d47194b432ed52df519f879f24370a080`, installed
 through uv 0.12.7 with Python 3.13.15 outside the checkout. This is candidate
 provider evidence, not a published PyPI release or exact-tag qualification.
+The matrix retains a dated observation; the PR review record separately links
+the required successful native run for its exact current head before merge.
 
 | Observed OS/image and architecture | Actual installed-CLI provider requests | Observed versions and result |
 |---|---|---|

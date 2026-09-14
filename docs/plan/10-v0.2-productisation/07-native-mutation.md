@@ -138,3 +138,10 @@ removing providers. Partial executable discovery within an unsatisfied capabilit
 remains valid and preserved. This completes the per-target oracle contract;
 the observed successful three-host run already had every target unsatisfied.
 Full local validation passes 433 tests plus documentation/workflow/POSIX checks.
+
+The closure-head run [34874142662](https://github.com/smartnuf/agent-tools/actions/runs/34874142662)
+tested `a0e799f00464a77b6bacb04276329479b8c2c461` with the stricter per-target
+oracle. All three mutation artifacts were inspected and passed with every
+advertised target initially unsatisfied. The PR review record retains current-
+head gate evidence separately from the matrix's dated observation. Review's
+remaining roadmap-table/forecast inconsistency is reconciled in the index.
