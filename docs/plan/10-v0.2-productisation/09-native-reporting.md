@@ -42,3 +42,10 @@ the implementation; no new platform abstraction or dependency is needed.
 
 No native package is installed on this workstation. The existing Windows probe
 qualifies read-only identity; #117 supplies actual mutation proof afterward.
+
+Implementation validation: 429 unit tests pass, including strict ASCII/cp1252/UTF-8
+reporting of success/partial outcomes, error/path text, unchanged command evidence
+and propagation of real write failures. CLI reference/36 guide invocations,
+POSIX syntax/PATH, actionlint with ShellCheck, sdist-rebuilt wheel metadata and
+installed CLI checks pass. Doctor reports only known absent workstation native
+tools. Exact-head hosted CI and review remain required before integration.

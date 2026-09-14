@@ -99,7 +99,7 @@ pass and the wheel rebuilt from the restricted sdist passes outside-checkout
 CLI tests. #106 adds the third completed gate: `tests/test_cli_reference.py`,
 `tests/check_cli_docs.py`, installed-help comparisons and pre-publication checks
 keep the generated reference and guide invocations aligned with argparse.
-The suite now has 426 passing tests. These changes await the next feature-bearing
+The suite now has 429 passing tests. These changes await the next feature-bearing
 release. #57 discovery specifies the `documents` extra and explicit
 `doctor --documents` validation in [Decision 0010](../decisions/0010-document-extra-and-diagnostics.md),
 backed by disposable uv selection experiments. #109 now supplies optional
