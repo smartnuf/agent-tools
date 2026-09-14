@@ -288,6 +288,66 @@ class NativeSetupTests(unittest.TestCase):
         self.assertIn("rediscover current machine state before retry", rendered)
         self.assertIn("Managed provenance: succeeded", rendered)
 
+    def test_encoded_reports_preserve_status_recovery_and_command_evidence(self) -> None:
+        from io import BytesIO, TextIOWrapper
+
+        evidence = "progress █; path C:/工具/é; recovery 😀"
+        command = provider_execution.CommandReport(("C:/工具/manager.exe", "install"), 0,
+                                                     evidence, evidence)
+        for encoding in ("ascii", "cp1252", "utf-8"):
+            for succeeded in (True, False):
+                outcome = (provider_execution.PlanOutcome.SUCCEEDED if succeeded
+                           else provider_execution.PlanOutcome.PARTIAL_FAILURE)
+                action = provider_execution.ActionReport(
+                    "poppler", "host-poppler", "winget", "poppler",
+                    provider_execution.ActionOutcome.SUCCEEDED if succeeded
+                    else provider_execution.ActionOutcome.COMMAND_FAILED,
+                    (command,), detail=evidence, final_verified_paths=("C:/工具/pdfinfo.exe",))
+                result = managed_state.ManagedExecutionResult(
+                    provider_execution.PlanExecutionReport(
+                        capabilities.MachineState("Windows", "x86_64"), ("poppler",),
+                        outcome, (action,), (evidence,)),
+                    managed_state.PersistenceOutcome.SUCCEEDED,
+                )
+                with self.subTest(encoding=encoding, succeeded=succeeded):
+                    raw = BytesIO()
+                    with TextIOWrapper(raw, encoding=encoding, errors="strict", newline="") as stream:
+                        with redirect_stdout(stream):
+                            status = native_setup._run_setup(lambda: result)
+                        stream.flush()
+                        rendered = raw.getvalue().decode(encoding)
+                        self.assertEqual(stream.errors, "strict")
+                    self.assertEqual(status, 0 if succeeded else 1)
+                    self.assertIn(f"Host mutation: {outcome.value}", rendered)
+                    self.assertIn("Managed provenance: succeeded", rendered)
+                    self.assertIn(evidence.encode(encoding, "backslashreplace").decode(encoding), rendered)
+                    self.assertIn("verified executable:", rendered)
+                    self.assertIn("recovery:", rendered)
+                    self.assertEqual(command.stdout, evidence)
+                    self.assertEqual(command.stderr, evidence)
+
+    def test_encoded_error_and_plan_paths_remain_reportable(self) -> None:
+        from io import BytesIO, TextIOWrapper
+
+        raw = BytesIO()
+        with TextIOWrapper(raw, encoding="ascii", errors="strict") as stream:
+            with redirect_stderr(stream):
+                def fail():
+                    raise native_setup.NativeSetupError("unavailable 工具")
+                self.assertEqual(native_setup._run_setup(fail), 1)
+            with redirect_stdout(stream):
+                native_setup._print_report(native_setup._render_argv(("C:/工具/manager.exe",)))
+            stream.flush()
+            rendered = raw.getvalue().decode("ascii")
+        self.assertIn("Native provider setup failed:", rendered)
+        self.assertIn(r"\u5de5\u5177", rendered)
+
+    def test_report_write_errors_are_not_swallowed(self) -> None:
+        stream = Mock(encoding="ascii")
+        stream.write.side_effect = OSError("broken destination")
+        with self.assertRaisesRegex(OSError, "broken destination"):
+            native_setup._print_report("report 工具", file=stream)
+
 
 if __name__ == "__main__":
     unittest.main()
