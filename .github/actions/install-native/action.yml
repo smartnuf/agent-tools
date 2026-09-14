@@ -1,9 +1,13 @@
-name: Install native runtime prerequisites
-description: Install and verify Poppler and Ghostscript on supported GitHub runners
+name: Externally seed native runtime fixtures
+description: Prepare external-provider fixtures; this does not prove Agent Tools mutation
 
 runs:
   using: composite
   steps:
+    - name: Capture environment before external preseed
+      shell: bash
+      run: python tests/capture_native_evidence.py --phase before --output "$RUNNER_TEMP/native-environment/before.json"
+
     - name: Install native tools (Ubuntu)
       if: runner.os == 'Linux'
       shell: bash
@@ -57,3 +61,19 @@ runs:
         } else {
           Write-Warning "Chocolatey log not found at $chocolateyLog."
         }
+
+    - name: Capture environment after external preseed
+      if: always()
+      shell: bash
+      env:
+        FIXTURE_OUTCOME: ${{ job.status }}
+      run: python tests/capture_native_evidence.py --phase after --fixture-outcome "$FIXTURE_OUTCOME" --output "$RUNNER_TEMP/native-environment/after.json"
+
+    - name: Retain native fixture environment evidence
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: native-environment-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/native-environment/
+        if-no-files-found: error
+        retention-days: 90

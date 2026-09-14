@@ -57,6 +57,7 @@ jobs:
           retention-days: 1
 
   native-install-and-test:
+    name: external-preseed-and-test (${{ matrix.os }})
     needs: build-native-test-artifact
     strategy:
       fail-fast: false

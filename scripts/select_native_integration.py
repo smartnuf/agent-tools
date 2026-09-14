@@ -22,6 +22,8 @@ NATIVE_PATHS = (
     "src/agent_tools/desired_state.py",
     "src/agent_tools/native_setup.py",
     "src/agent_tools/python_selection.py",
+    "tests/capture_native_evidence.py",
+    "tests/test_native_evidence.py",
     "tests/check_installed_cli.py",
     "tests/check_cli_docs.py",
     "tests/check_preseeded_selection.py",

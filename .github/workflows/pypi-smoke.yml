@@ -28,7 +28,7 @@ jobs:
       - name: Validate stable release version
         shell: bash
         run: '[[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]'
-      - name: Qualify fresh native installation through external providers
+      - name: Prepare external native fixtures for PyPI lifecycle
         timeout-minutes: 10
         uses: ./.github/actions/install-native
       - name: Install, pin, and uninstall from PyPI (Windows)
