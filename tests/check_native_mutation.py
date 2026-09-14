@@ -43,6 +43,13 @@ def snapshot(names):
             } for state in states}}
 
 
+def validate_mutation_coverage(requested, unsatisfied):
+    if not requested or set(unsatisfied) != set(requested):
+        raise AssertionError(
+            "coverage gap: every advertised target must be initially unsatisfied; "
+            "preserve existing providers and choose another disposable image")
+
+
 def validate_mutation_records(records, expected, manager):
     # The production reader validates schema and command/verification consistency;
     # this oracle additionally demands actual successful requests for this test.
@@ -121,8 +128,7 @@ def main():
         unsatisfied = [name for name, state in before["capabilities"].items() if state["availability"] != "available"]
         write(args.output, "coverage", {"unsatisfied": unsatisfied,
               "already_satisfied": [name for name in args.capabilities if name not in unsatisfied]})
-        if not unsatisfied:
-            raise AssertionError("coverage gap: image has no unsatisfied target; no mutation credit")
+        validate_mutation_coverage(args.capabilities, unsatisfied)
 
         def command(label, *operands, environment=None):
             # M3 owns manager deadlines, cancellation and provenance finalization.

@@ -36,6 +36,13 @@ class NativeMutationOracleTests(unittest.TestCase):
             with self.subTest(record=record), self.assertRaises(AssertionError):
                 mutation.validate_mutation_records([record], ["poppler"], "apt")
 
+    def test_every_advertised_target_requires_mutation_coverage(self):
+        requested = ["poppler", "ghostscript"]
+        mutation.validate_mutation_coverage(requested, requested)
+        for unsatisfied in ([], ["poppler"], ["ghostscript"]):
+            with self.subTest(unsatisfied=unsatisfied), self.assertRaisesRegex(AssertionError, "coverage gap"):
+                mutation.validate_mutation_coverage(requested, unsatisfied)
+
     def test_windows_rediscovery_refreshes_only_child_environment(self):
         original = os.environ.get("PATH")
         with mock.patch.object(mutation.os, "name", "nt"), mock.patch.object(
