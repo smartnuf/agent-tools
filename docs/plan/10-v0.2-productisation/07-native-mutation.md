@@ -1,6 +1,6 @@
 # Installed native mutation evidence — #115
 
-- Base: `4888887cd19f5f17e1556a011392b06e2d48d49a` (PR #116).
+- Base: `6ae3bec9b40602cdba844faa6fc26f61fe371794` (PR #119), reconciled from PR #116.
 - Milestone 8: open, 4/8 gates complete; #104 remains the end-to-end target.
 - Estimate: 1–2 person-days, actual effort untracked; provider/review wait excluded.
 - Merge owner: this stream. No concurrent repository mutation work.
@@ -104,3 +104,10 @@ The remaining ShellCheck style finding is corrected with one grouped GITHUB_ENV
 write, after setup-uv so the intended private tool paths are not overwritten.
 Actionlint plus the official distro ShellCheck package now both run locally;
 no system package was installed to obtain that validator.
+
+PR #119/#118 merged after 426 tests, all hosted checks and clean exact-head
+review. This branch is rebased onto that authoritative main, preserving the two
+unpublished after-capture/validation corrections. Native path selection now
+includes the shared manager-identity module and its tests. The combined baseline
+passes 429 tests; installed-wheel snapshots, mutation authorization refusal and
+after-capture pass locally. New real mutation evidence remains pending.
