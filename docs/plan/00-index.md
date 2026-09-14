@@ -29,7 +29,6 @@
 | v0.2 #104/#115 | Real installed-CLI native mutation and explicit platform matrix | complete | 6/8 v0.2 gates complete overall | 1–2 days | none |
 | v0.2 #122/#124 | Final front door and release notes | in-progress; authorized v0.2.1 correction | front-door gate reopened | 0.5–1 day historical | v0.2.1 qualification |
 | v0.2 #124 | Exact-tag qualification, publication and release record | v0.2.0 release gate complete; patch in progress | 7/8 overall | up to 0.5 day | v0.2.1 qualification and final review |
-
 | v0.2.1 #124 | Documentation patch publication and final review | in-progress | front-door gate remains open | up to 0.5 day | up to 0.5 day |
 
 Estimated implementation effort through M3: **complete**. Discovery for #103

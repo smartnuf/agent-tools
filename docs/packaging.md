@@ -194,8 +194,8 @@ home-state authority, refuses existing state roots, and preserves changed state
 on cleanup failure.
 
 A separate current-source fixture, labelled as such, supplies an earlier
-0.2.0.dev0 identity to test extra retention across a version change into the
-actual 0.2.0 build. It is not a historical document-enabled release. CI runs
+`<candidate-version>.dev0` identity to test extra retention across a version
+change into the actual candidate build (for example, 0.2.1.dev0 into 0.2.1). It is not a historical document-enabled release. CI runs
 these checks on all three platforms, and the tag workflow repeats the candidate
 contract before publication. GitHub/PyPI smoke checks exercise both shapes,
 exact source/pin reconciliation, extra removal and uninstall after publication;

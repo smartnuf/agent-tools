@@ -16,7 +16,7 @@ v0.2.1 sequence; new product/policy choices remain human-reserved.
 
 Discovery found the README correction and maintained-guide fixes already merged
 in #125. Release metadata is derived from README.md; package version is defined
-in `src/agent_tools/__init__.py`, with explicit expectations in two test files.
+in `src/agent_tools/__init__.py`, with explicit expectations in two test files and the CI release-version step.
 Existing migration drivers derive their candidate version from wheel metadata.
 The release and public-PyPI workflows support the patch without code changes.
 
@@ -43,3 +43,10 @@ The release and public-PyPI workflows support the patch without code changes.
 A source candidate or preparation PR is not completion evidence for publication.
 Record exact run IDs, commit and asset hashes after distribution. Stop at fresh
 human Intent after the bounded v0.2 programme; future research stays research.
+
+
+Initial CI exposed the retained v0.2.0 expectation in the artifact workflow;
+its explicit version check is updated to v0.2.1. This is release-validation
+bookkeeping, not an application behavior change. The hidden workflow files
+were included in the follow-up version-reference sweep. The failing check was
+preserved, not bypassed; corrected-head CI and review must pass before tagging.
