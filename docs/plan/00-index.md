@@ -2,7 +2,7 @@
 
 - Last reconciled: 2026-09-14
 - Current completed milestone: M3 — complete
-- Next bounded objective: v0.2 productisation — not-started, not yet activated as a GitHub milestone
+- Current milestone: v0.2 productisation — in-progress ([GitHub milestone 8](https://github.com/smartnuf/agent-tools/milestone/8))
 - Current state: turn the completed M3 machinery into one minimally useful installed `agent-tools` product before selecting any broader future intent
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
 - Current published release: v0.1.2; M3 functionality on `main` remains pending the next feature-bearing release
@@ -18,15 +18,16 @@
 | M1.5 | Reviewed capability-ready package build | complete | 5/5 | 2–3.25 days | none |
 | M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
 | M3 | Tested update and capability lifecycle | complete | 9/9 | 6.5–11 days | none |
-| v0.2 discovery/specification | Inventory entry points and specify the installed CLI contract before implementation | not-started | prerequisite to 0/7 proposed v0.2 gates | 0.25–0.5 day | 0.25–0.5 day |
+| v0.2 #103 | Installed CLI and named-only native installation | complete | 2/8 v0.2 gates | 1.5–2 days | none |
+| v0.2 #106 | Generated CLI reference and help/docs drift prevention | not-started | release-quality gate | 0.25–0.75 day | 0.25–0.75 day |
 
-Estimated implementation effort through M3: **complete**. The current forecast
-is the bounded v0.2 discovery/specification slice above, not delivery of all
-seven proposed gates. It inventories CLI/artifact entry points, maps existing
-M3 contracts, identifies unresolved public-policy choices, and produces a
-reviewable implementation plan for #103. Remaining v0.2 implementation is
-unestimated until discovery supports a defensible range; tasks above two
-person-days must be split under the planning protocol.
+Estimated implementation effort through M3: **complete**. Discovery for #103
+is recorded in its [task plan](10-v0.2-productisation/01-installed-cli.md), and
+[Decision 0009](../decisions/0009-installed-capability-install.md) records the
+human-approved named-only request contract. The forecast above covers #103 and
+#106 only (originally 1.75–2.75 days combined; now 0.25–0.75 day remains
+for #106); remaining #57/#104/release work needs its
+own discovery-based estimates before implementation. Actual effort is untracked.
 
 Former M4a/M4b are historical, cancelled objectives rather than deferred work
 or completed implementation. Their GitHub milestones are closed as not planned
@@ -82,13 +83,14 @@ review and CI wait were excluded.
 `226c81f` on 2026-09-14 and closed #56, supplying the product-first README
 and checked PyPI metadata. Preserve that front door while adapting it to v0.2.
 
-Use the bounded [v0.2 productisation plan](10-v0.2-productisation/README.md) as
-the next planning context. Before implementation, reconcile current `main`, the
-published v0.1.2 artifact, current script/bin/package surfaces, CI
-installation mechanics, document dependency coupling, and actual platform
-evidence. Then create/open the matching GitHub milestone, assign the reviewable
-issues, specify the public CLI/dependency contracts, and execute the bounded
-slices.
+The [v0.2 milestone](https://github.com/smartnuf/agent-tools/milestone/8) is open
+with #103, #57, #104 and #106 assigned. The first two gates have
+source and installed-artifact evidence in `tests/test_install.py`,
+`tests/check_installed_cli.py` and `tests/check_distribution.py`: 401 unit tests
+pass and the wheel rebuilt from the restricted sdist passes outside-checkout
+CLI tests. These changes await the next feature-bearing release. Execute
+#106's generated reference/drift prevention as a separate bounded PR. The [v0.2 plan](10-v0.2-productisation/README.md) retains the remaining
+document-dependency, platform, documentation and release gates.
 
 The v0.2 goal is deliberately minimal: one installed CLI, `agent-tools install
 <list>`, optional document dependencies, real-provider evidence where practical,

@@ -512,6 +512,11 @@ bootstrap orchestration after editable installation; the obsolete independent
 native mapping scripts were removed. This does not add the deferred public
 `tools install` command.
 
+[Decision 0009](0009-installed-capability-install.md) completes the public
+installation stage under the top-level `agent-tools install` spelling selected
+in Decision 0007. Its named-only request membership differs from clone
+bootstrap; all provider planning/execution safety contracts above still apply.
+
 ## Rejected or deferred alternatives
 
 - Adding an `InstallBash` bootstrap switch: quick, but deepens the duplication

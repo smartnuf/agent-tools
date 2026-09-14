@@ -1,4 +1,4 @@
-"""Clone-bootstrap delegation to packaged native provider management."""
+"""Shared native provider orchestration for installed CLI and clone bootstrap."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from .capabilities import (
     get_capability,
 )
 from .desired_state import (
+    DesiredCapability,
     DesiredStateError,
     desired_capabilities,
     desired_state_path,
@@ -173,6 +174,34 @@ def build_bootstrap_plan(
     )
     if not requested:
         raise NativeSetupError("at least one native capability must be requested")
+    return _build_plan(requested, machine, configured)
+
+
+def build_install_plan(
+    capability_ids: Sequence[str],
+    *,
+    config_path: Path | None = None,
+) -> ProviderPlan:
+    """Plan only explicit operands, honoring their stored exact preferences."""
+
+    machine = current_machine()
+    requested = tuple(dict.fromkeys(capability_ids))
+    if not requested:
+        raise NativeSetupError("at least one native capability must be requested")
+    document = load_desired_document(
+        config_path or desired_state_path(platform_name=machine.platform)
+    )
+    configured = desired_capabilities(document, machine, capability_ids=requested)
+    return _build_plan(requested, machine, configured)
+
+
+def _build_plan(
+    requested: tuple[str, ...],
+    machine: MachineState,
+    configured: tuple[DesiredCapability, ...],
+) -> ProviderPlan:
+    """Use one discovery/planning path for both request-membership policies."""
+
     capabilities = []
     for capability_id in requested:
         try:
@@ -206,6 +235,9 @@ def report_plan(plan: ProviderPlan) -> None:
     """Print the reviewed requested mutations before execution begins."""
 
     print("Native provider plan:")
+    print(f"  requested capabilities: {', '.join(plan.requested_capabilities)}")
+    for capability_id, provider_id in plan.provider_preferences:
+        print(f"  exact provider preference: {capability_id} = {provider_id}")
     if not plan.actions:
         print("  no host changes required; all requested capabilities verify")
         return
@@ -261,10 +293,33 @@ def native_setup(
 
     plan = build_bootstrap_plan(capability_ids)
     report_plan(plan)
+    sys.stdout.flush()
     return execute_provider_plan(
         plan,
         allow_provider_mutation=allow_provider_mutation,
     )
+
+
+def install_capabilities(
+    capability_ids: Sequence[str],
+    *,
+    allow_provider_mutation: bool = False,
+    dry_run: bool = False,
+) -> int:
+    """Run the installed command through the shared managed lifecycle."""
+
+    def operation() -> ManagedExecutionResult | None:
+        plan = build_install_plan(capability_ids)
+        report_plan(plan)
+        sys.stdout.flush()
+        if dry_run:
+            print("Dry run: plan only; no provider execution or provenance write")
+            return None
+        return execute_provider_plan(
+            plan, allow_provider_mutation=allow_provider_mutation
+        )
+
+    return _run_setup(operation)
 
 
 def _successful(result: ManagedExecutionResult) -> bool:
@@ -292,11 +347,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    try:
-        result = native_setup(
+    return _run_setup(
+        lambda: native_setup(
             args.capability,
             allow_provider_mutation=args.allow_provider_mutation,
         )
+    )
+
+
+def _run_setup(operation: Callable[[], ManagedExecutionResult | None]) -> int:
+    """Keep status, interruption and partial-result reporting shared."""
+
+    try:
+        result = operation()
     except (
         ManagedExecutionInterrupted,
         PersistenceInterrupted,
@@ -319,6 +382,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Native provider setup interrupted before managed execution", file=sys.stderr)
         return 130
+    if result is None:  # successful read-only plan display
+        return 0
     report_result(result)
     return 0 if _successful(result) else 1
 

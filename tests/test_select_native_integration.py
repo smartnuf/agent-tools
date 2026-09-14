@@ -28,6 +28,7 @@ class NativeIntegrationSelectionTests(unittest.TestCase):
 
     def test_selects_packaged_bootstrap_orchestration_tests(self) -> None:
         self.assertTrue(requires_native(["tests/test_native_setup.py"]))
+        self.assertTrue(requires_native(["tests/test_install.py"]))
 
 
 if __name__ == "__main__":

@@ -116,6 +116,11 @@ preferences into the immutable provider plan. Provider mutation still requires
 its separate authorization. `tools status` reports desired state separately
 from detected availability and managed provenance.
 
+[Decision 0009](0009-installed-capability-install.md) adds the public install
+consumer: it interprets only named entries after whole-document schema/path
+validation, applies their exact preferences, and does not add other enabled or
+unknown entries. Clone native setup retains whole-document semantic consumption.
+
 `tools enable CAPABILITY [--provider PROVIDER]` and
 `tools disable CAPABILITY` are the public lifecycle commands. They report the
 configuration outcome and backup path. They do not install, remove, or inspect

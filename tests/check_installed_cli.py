@@ -58,6 +58,35 @@ def run(executable: Path, expected_version: str, require_native: bool) -> None:
             capture_output=True,
             text=True,
         )
+        install_help = subprocess.run(
+            [executable, "install", "--help"], cwd=unrelated_directory,
+            check=True, capture_output=True, text=True,
+        )
+        invalid_install = subprocess.run(
+            [executable, "install", "not-a-capability"], cwd=unrelated_directory,
+            check=False, capture_output=True, text=True,
+        )
+        # Bash is pre-existing on these runners. No mutation flag is supplied:
+        # an absent provider must be refused rather than provisioned by the test.
+        for invocation in (("bash", "--dry-run"), ("bash", "bash")):
+            installed_noop = subprocess.run(
+                [executable, "install", *invocation], cwd=unrelated_directory,
+                check=True, capture_output=True, text=True,
+            )
+            assert "requested capabilities: bash\n" in installed_noop.stdout
+            assert "no host changes required" in installed_noop.stdout
+            if "--dry-run" in invocation:
+                assert "Dry run: plan only" in installed_noop.stdout
+            else:
+                assert "Host mutation: no-changes" in installed_noop.stdout
+                assert "Managed provenance: not-required" in installed_noop.stdout
+        if require_native:
+            all_noop = subprocess.run(
+                [executable, "install", "poppler", "ghostscript"],
+                cwd=unrelated_directory, check=True, capture_output=True, text=True,
+            )
+            assert "Host mutation: no-changes" in all_noop.stdout
+            assert "Managed provenance: not-required" in all_noop.stdout
         enable_help = subprocess.run(
             [executable, "tools", "enable", "--help"],
             cwd=unrelated_directory,
@@ -98,6 +127,11 @@ def run(executable: Path, expected_version: str, require_native: bool) -> None:
     assert "bash: available (optional)" in bash_status.stdout
     expected_provider = "git-bash" if platform.system() == "Windows" else "system-bash"
     assert f"{expected_provider}: available" in bash_status.stdout
+    assert "--allow-provider-mutation" in install_help.stdout
+    assert "--dry-run" in install_help.stdout
+    assert "Other enabled capabilities are not added" in " ".join(install_help.stdout.split())
+    assert invalid_install.returncode == 2
+    assert "Native provider plan:" not in invalid_install.stdout
     assert "--allow-config-mutation" in enable_help.stdout
     assert "--provider" in enable_help.stdout
     assert "--allow-config-mutation" in disable_help.stdout
