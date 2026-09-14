@@ -151,6 +151,15 @@ research into which tools different agents prefer for different jobs — are
 preserved in [90-future-product-research.md](90-future-product-research.md).
 They are not active roadmap work.
 
+For post-v0.2 rediscovery, the
+[Windows provider/capability survey hypotheses](90-future-product-research.md#windows-provider-choice-by-capability)
+preserve the Ghostscript/Scoop case and a candidate 50–100-tool empirical
+programme. The [release-engineering learning](../releasing.md#post-v02-release-engineering-learning)
+records process versus enforced tag immutability, bounded PyPI propagation
+observation and the limits of example/help checks for prose. These are research
+and maintenance inputs, not a selected project or a reopened v0.2 gate. The next
+action remains a fresh human Intent decision.
+
 See [release milestones and acceptance gates](08-releases/README.md), the
 [capability-foundation milestone](09-capabilities/README.md), and the
 [v0.2 productisation plan](10-v0.2-productisation/README.md) for detailed

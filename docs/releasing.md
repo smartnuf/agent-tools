@@ -2,6 +2,10 @@
 
 GitHub tags and releases are the canonical artifact history. The tag workflow creates a prerelease and does not publish to PyPI. Publishing to PyPI is a separate, stable-release-only workflow protected by GitHub's `pypi` environment and PyPI trusted publishing.
 
+Here, “immutable tag” means the repository invariant that a published version
+tag must never be moved or reused. It does not assert that GitHub technically
+prevents changes; see the [observed enforcement limits](#tag-immutability-terminology-and-enforcement).
+
 ## Prepare a release
 
 1. Update `src/agent_tools/__init__.py`, every version-sensitive test, and `docs/releases/v<version>.md` in a reviewed pull request.
@@ -72,3 +76,67 @@ post-distribution review. See the
 [final evidence](plan/10-v0.2-productisation/13-v021-distribution-review.md),
 including the original registry-propagation failure and single successful
 same-head retry. Each future release must establish its own evidence.
+
+## Post-v0.2 release-engineering learning
+
+The [independent v0.2.1 post-distribution review](plan/10-v0.2-productisation/13-v021-distribution-review.md#independent-review-and-scope-closure)
+found no release-blocking product defect; v0.2 productisation is legitimately
+complete. The following are **non-blocking future hardening opportunities**,
+harvested on 2026-09-14, not changes to release infrastructure, protections or
+policy. They do not reopen the completed milestone. Rediscover them alongside
+the [future research note](plan/90-future-product-research.md); selecting work
+still requires fresh human Intent.
+
+### Tag immutability terminology and enforcement
+
+GitHub observations, rechecked on 2026-09-14:
+
+- v0.2.0 and v0.2.1 are annotated but unsigned Git tags. Their tag-object API
+  responses report `verification.verified: false` and `reason: unsigned`:
+  [v0.2.0 object](https://api.github.com/repos/smartnuf/agent-tools/git/tags/329c36498655d7dc7afa9add5bb602d2b922da2e),
+  [v0.2.1 object](https://api.github.com/repos/smartnuf/agent-tools/git/tags/f1012995435f13c95e5d02ef5c055c5bb83d8a3a).
+- The [repository rulesets endpoint](https://api.github.com/repos/smartnuf/agent-tools/rulesets)
+  returned an empty list; the
+  [v0.2.0](https://api.github.com/repos/smartnuf/agent-tools/releases/tags/v0.2.0)
+  and [v0.2.1](https://api.github.com/repos/smartnuf/agent-tools/releases/tags/v0.2.1)
+  release objects reported `immutable: false`. These dated observations are
+  not a promise about future settings.
+
+Today tag immutability is principally a process invariant, not a fully
+technically enforced property. Artifact attestations, checksums, exact-tag and
+source-commit verification, and PyPI file immutability still provide strong
+provenance for distributed files; signed artifact attestations are distinct
+from Git tag signatures. Documentation must not imply stronger technical
+protection than observed. Future hardening should investigate appropriate
+GitHub tag rules/rulesets or other protection against movement/deletion, and
+whether signing release tags adds useful assurance. No protection or tag-policy
+change is adopted here.
+
+### PyPI propagation as a release state
+
+The [v0.2.1 public lifecycle run](https://github.com/smartnuf/agent-tools/actions/runs/34888687662)
+retains a legitimate initial Ubuntu failure: an unpinned install temporarily
+resolved v0.2.0 while the distributed index propagated. Once availability caught
+up, the same tag/artifacts passed one inspected failed-job retry. This is useful
+evidence; the version assertion was not weakened and the original failure was
+not concealed.
+
+Future release-process research should consider explicitly modelling registry
+propagation: verify exact-version files first, then use bounded observation or
+polling until the public simple/latest index exposes the expected new version,
+and only then assert what an ordinary unpinned user receives. Preserve delay,
+endpoint/version observations and failed-attempt evidence. Define bounds before
+adopting automation; do not introduce unbounded retries or silently classify a
+genuine product failure as propagation. This candidate pattern does not alter
+the current workflows or their existing inspected-retry limits.
+
+### Executable examples do not validate surrounding prose
+
+The [v0.2.0 description defect](plan/10-v0.2-productisation/11-release-qualification.md#published-text-defect-and-disposition)
+showed that parsed examples and installed `--help` checks can pass while prose
+still calls released commands “available only from main pending the next
+release.” They validate invocations and CLI projections, not all availability
+claims. The existing pre-tag preparation step therefore inspects the actual
+built README/metadata prose and version-qualified statements before creating
+the public artifact set. Keep the historical defect and v0.2.1 correction as
+evidence; source edits cannot repair already-published immutable file contents.
