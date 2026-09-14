@@ -5,9 +5,10 @@ GitHub tags and releases are the canonical artifact history. The tag workflow cr
 ## Prepare a release
 
 1. Update `src/agent_tools/__init__.py`, every version-sensitive test, and `docs/releases/v<version>.md` in a reviewed pull request.
-2. Confirm `main` is clean and all required CI checks pass after that pull request is merged.
-3. Create an annotated `v<version>` tag at the reviewed `main` commit, for example `v1.2.3`.
-4. Push only that tag. Do not move or reuse a published version tag.
+2. Before merging release preparation, inspect the built wheel/sdist README metadata and maintained guides for availability prose: distinguish historical versions, the intended release and source-only work. Check release-note publication caveats as well as executable examples; guide/help parsing does not validate surrounding prose.
+3. Confirm `main` is clean and all required CI checks pass after that pull request is merged.
+4. Create an annotated `v<version>` tag at the reviewed `main` commit, for example `v1.2.3`.
+5. Push only that tag. Do not move or reuse a published version tag.
 
 The tag workflow rejects a tag whose name differs from the package version, lacks reviewed release notes, or points to a commit outside the repository's default branch. It then builds and validates one wheel and one source distribution, writes deterministic `SHA256SUMS`, records signed GitHub build-provenance attestations for both distributions, creates a GitHub prerelease with the checked-in notes, and exercises install, pin, and uninstall against the published wheel on Windows, Ubuntu, and macOS.
 
@@ -45,18 +46,26 @@ If trusted publication fails before PyPI accepts an upload, leave the GitHub tag
 
 ## v0.2 document boundary qualification
 
-The current source identifies the unpublished candidate as 0.2.0. Public
-v0.1.2 remains the current release until an authorized publication completes.
-Candidate CI checks verified old-release artifacts against the exact rebuilt
-wheel for core/documents migration, pins, extra removal, resolution failure,
-rollback and application removal with state/provider preservation. Its separate
-source-version fixture tests extra retention; it is not a published release.
+v0.2.0 was published on 2026-09-14 from reviewed commit
+`7e1eea88c8e4ea497529ee8a9f6b0918996ab627`. The immutable tag workflow
+repeated installed CLI/core/documents shape and old-release migration,
+pin/reinstall, rollback and preservation checks before attestation and
+prerelease creation. Stable promotion and protected PyPI publication were
+separately authorized.
 
-Before attestation/publication, the tag workflow repeats installed-shape and
-candidate lifecycle checks. Published GitHub-wheel and PyPI smoke paths then
-check core/documents selection, exact source/pin reconciliation, removal of the
-extra and application removal. They retain legacy mandatory-stack validation
-for v0.1.x. Inspect all three platform results; pre-publication local-index
-migration is not evidence of a successful public PyPI upload or resolution.
-Keep final guide reconciliation, provider/platform qualification and the
-milestone's exact-tag release gate open until their own evidence exists.
+The downloaded PyPI wheel and source archive match the signed GitHub assets
+byte for byte. The GitHub-wheel and public-PyPI lifecycle workflows passed on
+Windows, Ubuntu and macOS, including separately selected document libraries,
+exact pins, extra removal and application removal. See the
+[release qualification record](plan/10-v0.2-productisation/11-release-qualification.md)
+for exact runs, hashes and the distinction between candidate, public-artifact
+and native-provider evidence. Future releases must repeat their own exact-tag
+qualification; this record does not expand the documented platform matrix.
+
+
+Post-publication review found one stale availability sentence in the immutable
+v0.2.0 PyPI README. Source documentation and a GitHub release erratum correct
+the presentation but cannot replace published PyPI metadata. The front-door
+gate remains open pending human disposition; follow the
+[known-limit record](plan/10-v0.2-productisation/11-release-qualification.md#published-text-defect-and-disposition)
+before declaring the milestone complete or selecting another release.

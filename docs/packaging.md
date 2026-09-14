@@ -175,9 +175,10 @@ token.
 
 [Decision 0008](decisions/0008-optional-document-capability-boundary.md) and
 [Decision 0010](decisions/0010-document-extra-and-diagnostics.md) define the
-optional packaging/diagnostic boundary. The unpublished candidate now has
-version 0.2.0, distinct from public v0.1.2; assigning this build identity does
-not publish or tag a release.
+optional packaging/diagnostic boundary, published in v0.2.0. Publication and
+exact-tag evidence are recorded in the
+[release qualification record](plan/10-v0.2-productisation/11-release-qualification.md);
+a source build identity alone is not evidence of publication.
 
 `tests/check_document_lifecycle.py` extends the historical lifecycle with four
 migrations: the checksum-verified GitHub v0.1.1 wheel and published PyPI v0.1.2
@@ -194,10 +195,13 @@ on cleanup failure.
 
 A separate current-source fixture, labelled as such, supplies an earlier
 0.2.0.dev0 identity to test extra retention across a version change into the
-actual 0.2.0 candidate. It is not a historical document-enabled release. CI runs
+actual 0.2.0 build. It is not a historical document-enabled release. CI runs
 these checks on all three platforms, and the tag workflow repeats the candidate
 contract before publication. GitHub/PyPI smoke checks exercise both shapes,
 exact source/pin reconciliation, extra removal and uninstall after publication;
-historical releases retain their mandatory-stack smoke path. Later exact-tag,
-attestation and public-index qualification remain required before claiming a
-v0.2 release. See the [lifecycle plan](plan/10-v0.2-productisation/05-document-lifecycle.md).
+historical releases retain their mandatory-stack smoke path. Exact-tag,
+attestation and public-index qualification passed for v0.2.0; the linked
+release record also discloses its immutable PyPI description erratum. Future
+versions require fresh qualification. See the
+[lifecycle plan](plan/10-v0.2-productisation/05-document-lifecycle.md) for
+candidate and source-fixture evidence boundaries.

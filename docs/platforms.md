@@ -20,7 +20,7 @@ silently retry under an emulated interpreter.
 
 ## Optional Python documents
 
-The next-release wheel core requires no document libraries. The explicit
+The v0.2.0 and later wheel core requires no document libraries. The explicit
 `smartnuf-agent-tools[documents]` extra supplies the existing library stack on
 the same supported Python 3.11–3.13 range. Binary-wheel availability remains
 architecture-dependent; core-only operation does not establish document support
@@ -34,10 +34,10 @@ core-only installation tests. No Python-extra operation installs native tools.
 
 ## Installed native setup
 
-The CLI built from current `main` supports `agent-tools install poppler
+The installed CLI in v0.2.0 and later supports `agent-tools install poppler
 ghostscript --dry-run` and the explicitly authorized form
 `agent-tools install poppler ghostscript --allow-provider-mutation`. This is
-next-release functionality, absent from published v0.1.2. `agent-tools` is the
+released functionality, absent from v0.1.2. `agent-tools` is the
 sole ordinary-user command surface; Agent Tools itself is installed/updated by
 `uv tool`, independently of these native providers.
 

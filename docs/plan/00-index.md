@@ -2,11 +2,10 @@
 
 - Last reconciled: 2026-09-14
 - Current completed milestone: M3 — complete
-- Current milestone: v0.2 productisation — in-progress ([GitHub milestone 8](https://github.com/smartnuf/agent-tools/milestone/8))
-- Current state: turn the completed M3 machinery into one minimally useful installed `agent-tools` product before selecting any broader future intent
+- Current milestone: v0.2 productisation — blocked on front-door disposition ([GitHub milestone 8](https://github.com/smartnuf/agent-tools/milestone/8), #124)
+- Current state: v0.2.0 is published and qualified; immutable PyPI description has a known availability error requiring human disposition
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
-- Current unpublished candidate: 0.2.0 (build identity only; not tagged or published)
-- Current published release: v0.1.2; M3 functionality on `main` remains pending the next feature-bearing release
+- Current published release: [v0.2.0](https://github.com/smartnuf/agent-tools/releases/tag/v0.2.0), also verified on [PyPI](https://pypi.org/project/smartnuf-agent-tools/0.2.0/)
 - Distribution policy: PyPI via `uv tool` is the sole supported Agent Tools distribution channel; alternative WinGet/Homebrew distribution work is retired as not planned
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
 
@@ -28,7 +27,8 @@
 | v0.2 #118 | WinGet activation identity prerequisite | complete | no additional gate complete | 0.5–1.5 days | none |
 | v0.2 #120 | Legacy-encoded native reporting prerequisite | complete | no additional gate complete | 0.25–0.5 day | none |
 | v0.2 #104/#115 | Real installed-CLI native mutation and explicit platform matrix | complete | 6/8 v0.2 gates complete overall | 1–2 days | none |
-| v0.2 #122 | Final front door and release notes | complete on merge | 7/8 v0.2 gates complete overall on merge | 0.5–1 day | exact-head review/integration only |
+| v0.2 #122/#124 | Final front door and release notes | blocked; published-text defect found after release | front-door gate reopened | 0.5–1 day historical | disposition required |
+| v0.2 #124 | Exact-tag qualification, publication and release record | release gate complete; front-door disposition pending | 7/8 overall | up to 0.5 day | record review, then human decision |
 
 Estimated implementation effort through M3: **complete**. Discovery for #103
 is recorded in its [task plan](10-v0.2-productisation/01-installed-cli.md), and
@@ -43,7 +43,11 @@ lifecycle evidence (1–1.5 days), both implemented;
 the #104 discovery/evidence work and its bounded prerequisites are implemented
 as recorded above. Final guide reconciliation is specified in
 [#122](10-v0.2-productisation/10-final-guides.md) at 0.5–1 day and implemented;
-release qualification still needs its own discovery-based estimate. Actual effort is untracked.
+release qualification and record reconciliation are recorded in
+[#124](10-v0.2-productisation/11-release-qualification.md), estimated at up to
+0.5 day excluding CI/review waits. Actual effort is untracked. A newly
+authorized patch publication, if selected to repair immutable PyPI metadata,
+needs a separate estimate; it is not included in this completed publication.
 
 Former M4a/M4b are historical, cancelled objectives rather than deferred work
 or completed implementation. Their GitHub milestones are closed as not planned
@@ -99,53 +103,40 @@ review and CI wait were excluded.
 `226c81f` on 2026-09-14 and closed #56, supplying the product-first README
 and checked PyPI metadata. Preserve that front door while adapting it to v0.2.
 
-The [v0.2 milestone](https://github.com/smartnuf/agent-tools/milestone/8) is open
-with #103, #57, #104 and #106 assigned. The first two gates have
-source and installed-artifact evidence in `tests/test_install.py`,
-`tests/check_installed_cli.py` and `tests/check_distribution.py`: 401 unit tests
-pass and the wheel rebuilt from the restricted sdist passes outside-checkout
-CLI tests. #106 adds the third completed gate: `tests/test_cli_reference.py`,
-`tests/check_cli_docs.py`, installed-help comparisons and pre-publication checks
-keep the generated reference and guide invocations aligned with argparse.
-The suite now has 433 passing tests. These changes await the next feature-bearing
-release. #57 discovery specifies the `documents` extra and explicit
-`doctor --documents` validation in [Decision 0010](../decisions/0010-document-extra-and-diagnostics.md),
-backed by disposable uv selection experiments. #109 now supplies optional
-metadata, explicit diagnostics, updated guides and independent core/documents
-installed-wheel checks. #111 supplies old-release artifact migration,
-pin/reinstall/removal/failure/rollback preservation and separately labelled
-source-fixture extra-retention evidence; see [the lifecycle plan](10-v0.2-productisation/05-document-lifecycle.md).
-The optional-document gate is complete on merge (4/8 overall), closing
-#111/#109/#57. #114/#116 supplied provider/platform discovery and environment
-capture; #118/#119 repaired WinGet activation identity, and #120/#121 repaired
-legacy-encoded native reporting. #115/PR #117 now supplies inspected real apt,
-Homebrew and WinGet mutation, provenance, fresh rediscovery and byte-preserving
-no-op evidence plus the [maintained platform matrix](../platforms.md#observed-installed-cli-native-mutations).
-Its two #104 gates are complete (6/8 overall); Windows Ghostscript and
-untested common variants remain explicit gaps, not fallback success. See the
-[native evidence plan](10-v0.2-productisation/06-native-evidence.md) and
-[mutation implementation record](10-v0.2-productisation/07-native-mutation.md).
-The 1–2 day evidence slice and focused 0.5–1.5 day identity / 0.25–0.5 day
-reporting prerequisites are implemented, excluding review/CI wait. Final guide
-reconciliation in #122 completes on merge (7/8 overall): version-qualified
-README/PyPI examples, 43 checked guide invocations and reviewed v0.2 release
-notes preserve the accepted boundary and retained evidence. Exact-artifact
-release qualification remains separate. Preserve public v0.1.2
-until authorized publication.
+Seven of eight [v0.2 gates](10-v0.2-productisation/README.md#acceptance-gates)
+are complete. The front-door gate was reopened after publication review found
+a stale availability claim in the immutable PyPI README. #103 exposes the named-only installed CLI; #106 keeps
+help and guide invocations aligned; #57/#109/#111 supply the optional-document
+contract and migration/preservation evidence; #104/#115 supply real native
+mutation evidence and the explicit platform matrix. PR #123 merged the final
+front door and release notes with 433 unit tests and 43 guide invocations.
 
-The v0.2 goal is deliberately minimal: one installed CLI, `agent-tools install
-<list>`, optional document dependencies, real-provider evidence where practical,
-and honest platform coverage. When v0.2 is published, stop and choose a new
-Intent rather than automatically continuing into the ideas retained in
-[future product research](90-future-product-research.md).
+The authorized immutable `v0.2.0` tag identifies reviewed commit
+`7e1eea88c8e4ea497529ee8a9f6b0918996ab627`. Exact-tag qualification,
+protected PyPI publication, public-file checksum comparison and three-platform
+PyPI lifecycle evidence are recorded in the
+[release qualification record](10-v0.2-productisation/11-release-qualification.md).
+#124 remains open: correcting the source README and adding a GitHub release
+erratum do not replace PyPI metadata embedded in immutable v0.2.0 files.
+The installed commands work; the description incorrectly calls desired-state
+and integration commands main-only pending a release.
+
+**Recommended next task: human disposition of the published-text defect.**
+Authorize a new immutable patch release (recommended), or explicitly accept
+the documented v0.2.0 metadata limitation. Keep milestone 8 open until that
+disposition and any required work complete. Then require fresh human Intent
+before broader work. Do not automatically implement ideas in
+[future product research](90-future-product-research.md), add distribution
+channels, or expand native-provider support. Existing platform gaps remain
+explicit in the [maintained matrix](../platforms.md#observed-installed-cli-native-mutations).
 
 ## Known risks and assumptions
 
 - `smartnuf-agent-tools` is the published PyPI project; trusted publication remains restricted to the exact repository, workflow, and protected environment.
-- v0.1.2 is the current published release and predates M3 mutation/configuration functionality now present on `main`.
-- The current CI native-integration path externally pre-seeds native tools before proving Agent Tools' all-satisfied behaviour; this is useful evidence but is not by itself end-to-end proof of real package-manager mutation through the installed CLI. Issue #104 owns the distinction.
+- v0.2.0 publishes the M3 mutation/configuration machinery through the installed CLI; historical v0.1.2 predates it.
+- The current CI native-integration path externally pre-seeds native tools before proving Agent Tools' all-satisfied behaviour; this is useful evidence but is not by itself end-to-end proof of real package-manager mutation through the installed CLI. The separate #104/#115 installed-CLI mutation evidence supplies that proof for the explicitly recorded cases.
 - The published wheel and sdist pass independent checksum and metadata audits; install, pin, and uninstall pass on Windows, Ubuntu, and macOS runners.
-- Repository wrappers and the shared `.venv` are not part of the future ordinary-user product contract; Decision 0007 requires released workflows through `agent-tools`.
+- Repository wrappers and the shared `.venv` are not part of the ordinary-user product contract; Decision 0007 requires released workflows through `agent-tools`.
 - Windows ARM64/x64 emulation and macOS Intel/Apple-silicon coverage require explicit evidence and must not be inferred from generic hosted-runner labels.
 - Debian, Fedora/RHEL, Arch, WSL, and other common variants must be labelled according to their actual evidence class rather than inferred from a nearby tested platform.
 - On Windows ARM64, unconstrained Python 3.14 selected a native interpreter but `cryptography` lacked a wheel and required an unavailable MSVC linker. The initial `<3.14` Python bound makes `uv tool` choose a supported managed interpreter; Python 3.14 support must be revalidated before widening it.
