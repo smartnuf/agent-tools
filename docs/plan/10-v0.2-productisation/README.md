@@ -66,9 +66,8 @@ Reconcile the current repository and published artifacts, including:
    published-PyPI installation, external native pre-seeding, simulated/disposable
    provider execution, and real provider mutation;
 5. current OS/distribution/version/architecture evidence and known gaps; and
-6. the still-open README/PyPI front-door work in PR #102, which must be
-   reconciled with these newer product decisions rather than merged from stale
-   assumptions.
+6. the README/PyPI front door merged in PR #102 (`226c81f`), preserving its
+   ordinary-user presentation while adapting it to the v0.2 contracts.
 
 ## Proposed acceptance gates
 
@@ -82,7 +81,7 @@ implementation begins.
 | Core installation no longer requires document libraries; a separately requested document install has a specified compatibility contract | not-started | #57 |
 | CI evidence distinguishes seeded/simulated/native mutation paths and exercises primary real provider mutations through the installed CLI where practical | not-started | #104 |
 | Maintained platform evidence reports OS/distribution version, architecture, provider path, evidence class, and important common gaps without overclaiming | not-started | #104 |
-| README/PyPI front door describes the new core/doc/CLI contract and is reconciled with PR #102 or its successor | not-started | #102 / successor |
+| README/PyPI front door describes the new core/doc/CLI contract and is builds on merged PR #102 | not-started | #103 / #57 |
 | A reviewed v0.2 candidate passes exact-artifact install, upgrade-from-v0.1.x, pin/reinstall, rollback where supported, and removal/preservation tests before publication | not-started | split during planning |
 
 ## Likely sequencing
@@ -97,7 +96,7 @@ implementation begins.
 4. **Close CI parity and support-evidence gaps** — #104; retain external
    pre-seeding as a clearly named fixture path where useful, but add real
    installed-CLI mutation evidence for primary provider paths where practical.
-5. **Reconcile user-facing documentation** — incorporate or supersede PR #102
+5. **Reconcile user-facing documentation** — adapt the merged PR #102 front door
    against the final v0.2 contract.
 6. **Qualify and publish v0.2** — exact artifact, exact head, explicit release
    gate.

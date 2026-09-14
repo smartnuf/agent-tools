@@ -1,6 +1,6 @@
 # Plan status
 
-- Last reconciled: 2026-09-08
+- Last reconciled: 2026-09-14
 - Current completed milestone: M3 — complete
 - Next bounded objective: v0.2 productisation — planning, not yet activated as a GitHub milestone
 - Current state: turn the completed M3 machinery into one minimally useful installed `agent-tools` product before selecting any broader future intent
@@ -63,7 +63,7 @@ Gate counts are binary readiness measures. Estimates are ranges and must be revi
 - [Issue #103](https://github.com/smartnuf/agent-tools/issues/103) records the v0.2 CLI-only product work and required `agent-tools install <list>` entry point.
 - [Issue #57](https://github.com/smartnuf/agent-tools/issues/57) records the separately installed document-capability boundary.
 - [Issue #104](https://github.com/smartnuf/agent-tools/issues/104) records the real-provider CI parity and explicit platform-evidence work required before v0.2.
-- The former M4 WinGet/Homebrew PR #71 and issues #59–#70 were closed as not planned on 2026-09-08. Their history remains available for provenance but is no longer an active roadmap direction.
+- The former M4 WinGet/Homebrew PR #71 and issues #59–#70 were closed as not planned on 2026-09-08. Their history remains available for provenance but is no longer an active roadmap direction. The empty GitHub milestones were explicitly closed as not planned on 2026-09-14.
 
 M1 is complete and its factual record is frozen except for corrections. M1.5
 completed on 2026-08-29; M2 completed on 2026-08-30 with the first stable PyPI
@@ -73,9 +73,13 @@ review and CI wait were excluded.
 
 ## Recommended next work
 
+[PR #102](https://github.com/smartnuf/agent-tools/pull/102) merged as
+`226c81f` on 2026-09-14 and closed #56, supplying the product-first README
+and checked PyPI metadata. Preserve that front door while adapting it to v0.2.
+
 Use the bounded [v0.2 productisation plan](10-v0.2-productisation/README.md) as
 the next planning context. Before implementation, reconcile current `main`, the
-published v0.1.2 artifact, PR #102, current script/bin/package surfaces, CI
+published v0.1.2 artifact, current script/bin/package surfaces, CI
 installation mechanics, document dependency coupling, and actual platform
 evidence. Then create/open the matching GitHub milestone, assign the reviewable
 issues, specify the public CLI/dependency contracts, and execute the bounded
