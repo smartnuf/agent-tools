@@ -43,9 +43,17 @@ jobs:
       - name: Build and validate artifacts
         shell: bash
         run: |
+          python tests/check_cli_docs.py
           uv build --out-dir dist
           python tests/check_distribution.py dist
           python scripts/release.py checksums dist/SHA256SUMS dist/*.whl dist/*.tar.gz
+      - name: Verify installed CLI contract before publication
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          uv venv "$RUNNER_TEMP/release-cli-check" --python 3.13
+          uv pip install --python "$RUNNER_TEMP/release-cli-check/bin/python" dist/*.whl
+          python tests/check_installed_cli.py "$RUNNER_TEMP/release-cli-check/bin/agent-tools" dist
       - name: Attest distributions built from the release tag
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:

@@ -10,6 +10,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import ZipFile
 
+from check_cli_docs import check_installed_help
+
 
 def wheel_version(artifact: Path) -> str:
     wheels = sorted(artifact.glob("*.whl")) if artifact.is_dir() else [artifact]
@@ -28,6 +30,7 @@ def wheel_version(artifact: Path) -> str:
 
 def run(executable: Path, expected_version: str, require_native: bool) -> None:
     with TemporaryDirectory() as unrelated_directory:
+        check_installed_help(executable, unrelated_directory)
         version = subprocess.run(
             [executable, "--version"],
             cwd=unrelated_directory,

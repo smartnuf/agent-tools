@@ -33,7 +33,8 @@ The whole configuration file still passes schema/path integrity checks.
 Installation never changes desired configuration or agent settings. Plan/help
 are read-only, no-op installation verifies existing providers, and host and
 provenance outcomes are reported separately. Use `agent-tools install --help`
-for the authoritative option and exit-status contract.
+for the authoritative option and exit-status contract, also rendered in the
+[CLI reference](cli-reference.md).
 
 The supported manager must already be available: WinGet on Windows; apt, dnf
 or pacman on their supported Linux environments; native Homebrew on macOS.
