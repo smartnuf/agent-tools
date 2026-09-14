@@ -120,3 +120,13 @@ failed before its version probe. The correction records realpath failure
 separately and still executes the fixed read-only version command; this does
 not weaken production manager-identity checks. A regression test preserves
 that distinction. The corrected head requires a fresh three-host capture run.
+
+Review also found that composite-step timeouts could cancel after-capture and
+upload, and that a later Windows installer failure could hide earlier Poppler
+installation from PATH-based probes. Caller-level `always()` capture and upload
+now have independent timeouts; upload survives failure of capture itself.
+The separate capture action exposes observable fixture executable directories
+on Windows even after partial installation and retains provider diagnostics.
+This is process-local CI discovery, not product PATH mutation or a manager
+fallback. All three fixture callers use the same ordering. The initial wave
+passed every required/native job; the corrected wave must repeat that evidence.
