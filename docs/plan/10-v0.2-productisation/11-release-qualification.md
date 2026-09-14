@@ -96,3 +96,12 @@ immutable tag, in addition to validating executable examples.
 
 After v0.2 disposition, require a fresh human Intent decision before expanding
 product work. Future research remains research.
+
+
+The second review wave extended the availability sweep to maintained platform
+and packaging guides; their stale next-release claims are corrected. Historical
+task plans and the generic generated source-reference caveat remain explicitly
+scoped. The reusable release runbook now requires pre-merge inspection of built
+README metadata and surrounding availability prose before tagging. Actual PR
+commit messages and its revised body contain no issue-closing keyword; merge
+metadata must also preserve #124 as open.

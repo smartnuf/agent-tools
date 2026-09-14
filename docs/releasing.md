@@ -5,9 +5,10 @@ GitHub tags and releases are the canonical artifact history. The tag workflow cr
 ## Prepare a release
 
 1. Update `src/agent_tools/__init__.py`, every version-sensitive test, and `docs/releases/v<version>.md` in a reviewed pull request.
-2. Confirm `main` is clean and all required CI checks pass after that pull request is merged.
-3. Create an annotated `v<version>` tag at the reviewed `main` commit, for example `v1.2.3`.
-4. Push only that tag. Do not move or reuse a published version tag.
+2. Before merging release preparation, inspect the built wheel/sdist README metadata and maintained guides for availability prose: distinguish historical versions, the intended release and source-only work. Check release-note publication caveats as well as executable examples; guide/help parsing does not validate surrounding prose.
+3. Confirm `main` is clean and all required CI checks pass after that pull request is merged.
+4. Create an annotated `v<version>` tag at the reviewed `main` commit, for example `v1.2.3`.
+5. Push only that tag. Do not move or reuse a published version tag.
 
 The tag workflow rejects a tag whose name differs from the package version, lacks reviewed release notes, or points to a commit outside the repository's default branch. It then builds and validates one wheel and one source distribution, writes deterministic `SHA256SUMS`, records signed GitHub build-provenance attestations for both distributions, creates a GitHub prerelease with the checked-in notes, and exercises install, pin, and uninstall against the published wheel on Windows, Ubuntu, and macOS.
 
