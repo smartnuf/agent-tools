@@ -114,7 +114,7 @@ as required checks; `agent-tools doctor --documents` explicitly requires the
 full stack. Both modes retain default native checks. No requested-extra state
 is inferred or persisted. There are no document-processing commands; uv's
 isolated tool imports do not become available in arbitrary project interpreters.
-The [README](../README.md#optional-document-libraries-next-release) and
+The [README](../README.md#optional-document-libraries) and
 [Decision 0010](decisions/0010-document-extra-and-diagnostics.md) describe exact
 pins, extra-preserving upgrades, direct-wheel migration and checksum-bound
 rollback. Published v0.1.2 predates this boundary and still bundles documents.

@@ -28,7 +28,7 @@ on an untested architecture. Published v0.1.2 still bundles these libraries.
 
 Use `agent-tools doctor --documents` to require document imports; plain doctor
 reports their availability without counting optional failures. Both modes retain
-native Poppler/Ghostscript checks. See the [installation and migration guide](../README.md#optional-document-libraries-next-release).
+native Poppler/Ghostscript checks. See the [installation and migration guide](../README.md#optional-document-libraries).
 Checkout bootstrap/update retain their explicit document lock; they are not
 core-only installation tests. No Python-extra operation installs native tools.
 
