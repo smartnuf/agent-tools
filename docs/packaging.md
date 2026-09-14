@@ -175,8 +175,29 @@ token.
 
 [Decision 0008](decisions/0008-optional-document-capability-boundary.md) and
 [Decision 0010](decisions/0010-document-extra-and-diagnostics.md) define the
-implemented optional packaging/diagnostic boundary. #109/#57 remain open until
-[#111](https://github.com/smartnuf/agent-tools/issues/111) extends actual-artifact
-migration and preservation evidence. The existing lifecycle described above
-is not evidence of version-changing optional-document upgrades; it still
-qualifies historical releases. No v0.2 publication is claimed.
+optional packaging/diagnostic boundary. The unpublished candidate now has
+version 0.2.0, distinct from public v0.1.2; assigning this build identity does
+not publish or tag a release.
+
+`tests/check_document_lifecycle.py` extends the historical lifecycle with four
+migrations: the checksum-verified GitHub v0.1.1 wheel and published PyPI v0.1.2
+wheel, each into core and documents candidates. Controlled local indexes expose
+these exact artifacts, so this is artifact migration evidence rather than live
+PyPI resolution. It checks versions, distributions, direct-source replacement,
+unpinned upgrade, pin/reinstall, extra removal, resolution failure, both old
+rollback targets and uninstall. Desired state, managed-state metadata and Bash
+are preserved at each boundary. Native Windows also checks a real explicitly
+applied integration in private settings, its ledger and backups; intended
+restoration is explicit before rollback. macOS requires disposable-host
+home-state authority, refuses existing state roots, and preserves changed state
+on cleanup failure.
+
+A separate current-source fixture, labelled as such, supplies an earlier
+0.2.0.dev0 identity to test extra retention across a version change into the
+actual 0.2.0 candidate. It is not a historical document-enabled release. CI runs
+these checks on all three platforms, and the tag workflow repeats the candidate
+contract before publication. GitHub/PyPI smoke checks exercise both shapes,
+exact source/pin reconciliation, extra removal and uninstall after publication;
+historical releases retain their mandatory-stack smoke path. Later exact-tag,
+attestation and public-index qualification remain required before claiming a
+v0.2 release. See the [lifecycle plan](plan/10-v0.2-productisation/05-document-lifecycle.md).

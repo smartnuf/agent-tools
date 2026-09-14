@@ -50,3 +50,25 @@ a historical release. Keep later exact-release/publication qualification open.
    #111/#109/#57 only when their shared implementation/evidence target is met;
    retain provider/platform and final publication gates. Continue with #104
    discovery if circumstances and the authorized boundary allow.
+
+## Evidence and remaining release work
+
+Local Linux aarch64 / Python 3.11 runs pass all four checksum-verified historical
+artifact-to-candidate migrations, including failed-resolution receipt/inventory
+preservation and exact state/Bash checks. A separate source fixture proves a
+version-changing 0.2.0.dev0 → 0.2.0 extra-retaining upgrade. These do not claim
+live PyPI migration or a prior released documents extra. Managed-state fixtures
+contain a valid empty records array plus a preservation marker; no fabricated
+native mutation or ownership claim is recorded. Native Windows adds actual
+integration apply/remove under explicit authority in private settings.
+
+412 unit tests include lifecycle snapshot and safe cleanup failure cases.
+Three-platform CI and exact-head review remain merge gates. The tag workflow
+repeats the candidate checks; published wheel/PyPI smoke checks cover both
+shapes and retain legacy behavior. No tag or publication has occurred.
+
+On merge, #111/#109/#57's implementation/evidence target is complete; milestone
+readiness becomes 4/8. Remaining: #104's two provider/platform gates, final-guide
+reconciliation and exact-release qualification/publication. Recommend #104
+discovery next; its estimate needs its own evidence. This slice retains its
+1–1.5 day estimate (combined implementation 2–3 days), actual effort untracked.

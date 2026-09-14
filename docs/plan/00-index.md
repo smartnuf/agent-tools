@@ -5,6 +5,7 @@
 - Current milestone: v0.2 productisation — in-progress ([GitHub milestone 8](https://github.com/smartnuf/agent-tools/milestone/8))
 - Current state: turn the completed M3 machinery into one minimally useful installed `agent-tools` product before selecting any broader future intent
 - Current user installation: `uv tool install --python 3.13 smartnuf-agent-tools`
+- Current unpublished candidate: 0.2.0 (build identity only; not tagged or published)
 - Current published release: v0.1.2; M3 functionality on `main` remains pending the next feature-bearing release
 - Distribution policy: PyPI via `uv tool` is the sole supported Agent Tools distribution channel; alternative WinGet/Homebrew distribution work is retired as not planned
 - Estimate basis: one experienced contributor; engineering effort, excluding review and external wait time
@@ -20,7 +21,8 @@
 | M3 | Tested update and capability lifecycle | complete | 9/9 | 6.5–11 days | none |
 | v0.2 #103 | Installed CLI and named-only native installation | complete | contributes 2 gates | 1.5–2 days | none |
 | v0.2 #57 specification | Optional-document contract and migration discovery | complete | no additional gate complete | 0.5–1 day | none |
-| v0.2 #109 runtime slice | Optional documents extra, diagnostics and installed shapes | complete | lifecycle evidence pending; still 3/8 overall | 1–1.5 days | #111: 1–1.5 days |
+| v0.2 #109 runtime slice | Optional documents extra, diagnostics and installed shapes | complete | completed with #111; 4/8 overall | 1–1.5 days | none |
+| v0.2 #111 | Optional-document artifact migrations and preservation | complete | 4/8 v0.2 gates complete overall | 1–1.5 days | none |
 | v0.2 #106 | Generated CLI reference and help/docs drift prevention | complete | 3/8 v0.2 gates complete overall | 0.25–0.75 day | none |
 
 Estimated implementation effort through M3: **complete**. Discovery for #103
@@ -32,7 +34,7 @@ human-approved named-only request contract. The forecast above covers #103 and
 [discovery and specification](10-v0.2-productisation/03-document-boundary.md).
 [Implementation discovery](10-v0.2-productisation/04-document-implementation.md)
 revises this to 2–3 days: runtime/installed-shape work (1–1.5 days) and #111
-lifecycle evidence (1–1.5 days);
+lifecycle evidence (1–1.5 days), both implemented;
 remaining #104/release work needs its own discovery-based estimates. Actual effort is untracked.
 
 Former M4a/M4b are historical, cancelled objectives rather than deferred work
@@ -97,14 +99,17 @@ pass and the wheel rebuilt from the restricted sdist passes outside-checkout
 CLI tests. #106 adds the third completed gate: `tests/test_cli_reference.py`,
 `tests/check_cli_docs.py`, installed-help comparisons and pre-publication checks
 keep the generated reference and guide invocations aligned with argparse.
-The suite now has 409 passing tests. These changes await the next feature-bearing
+The suite now has 412 passing tests. These changes await the next feature-bearing
 release. #57 discovery specifies the `documents` extra and explicit
 `doctor --documents` validation in [Decision 0010](../decisions/0010-document-extra-and-diagnostics.md),
 backed by disposable uv selection experiments. #109 now supplies optional
 metadata, explicit diagnostics, updated guides and independent core/documents
-installed-wheel checks. Its acceptance gate remains open until #111 supplies
-the expanded actual-artifact migration/preservation evidence. Next, complete
-#111 (1–1.5 days); parent #109/#57 remain open. The [v0.2 plan](10-v0.2-productisation/README.md) retains the
+installed-wheel checks. #111 supplies old-release artifact migration,
+pin/reinstall/removal/failure/rollback preservation and separately labelled
+source-fixture extra-retention evidence; see [the lifecycle plan](10-v0.2-productisation/05-document-lifecycle.md).
+The optional-document gate is complete on merge (4/8 overall), closing
+#111/#109/#57. Next, discover #104 provider/platform evidence and estimate it
+from current workflow gaps. The [v0.2 plan](10-v0.2-productisation/README.md) retains the
 remaining document-dependency, platform, final-guide and release gates.
 
 The v0.2 goal is deliberately minimal: one installed CLI, `agent-tools install
