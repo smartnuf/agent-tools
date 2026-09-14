@@ -167,16 +167,18 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Configure private mutation fixture environment
-        shell: bash
-        run: |
-          echo "UV_TOOL_DIR=$RUNNER_TEMP/mutation-tools" >> "$GITHUB_ENV"
-          echo "UV_TOOL_BIN_DIR=$RUNNER_TEMP/mutation-bin" >> "$GITHUB_ENV"
-          echo "XDG_CONFIG_HOME=$RUNNER_TEMP/mutation-config" >> "$GITHUB_ENV"
-          echo "XDG_STATE_HOME=$RUNNER_TEMP/mutation-state" >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: "0.12.7"
+      - name: Configure private mutation fixture environment
+        shell: bash
+        run: |
+          {
+            echo "UV_TOOL_DIR=$RUNNER_TEMP/mutation-tools"
+            echo "UV_TOOL_BIN_DIR=$RUNNER_TEMP/mutation-bin"
+            echo "XDG_CONFIG_HOME=$RUNNER_TEMP/mutation-config"
+            echo "XDG_STATE_HOME=$RUNNER_TEMP/mutation-state"
+          } >> "$GITHUB_ENV"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: native-test-dist
@@ -221,8 +223,16 @@ jobs:
         env:
           MUTATION_OUTCOME: ${{ steps.mutation.outcome }}
         run: |
-          python tests/capture_native_evidence.py --phase after --evidence-class native-mutation-observation \
-            --fixture-outcome "$MUTATION_OUTCOME" --output "$RUNNER_TEMP/mutation-evidence/environment-after.json"
+          interpreter="$UV_TOOL_DIR/smartnuf-agent-tools/bin/python"
+          if test "$RUNNER_OS" = Windows; then
+            interpreter="$UV_TOOL_DIR/smartnuf-agent-tools/Scripts/python.exe"
+          fi
+          if test -x "$interpreter"; then
+            "$interpreter" -I "$GITHUB_WORKSPACE/tests/check_native_mutation.py" --capture-after "$RUNNER_TEMP/mutation-evidence/environment-after.json" --fixture-outcome "$MUTATION_OUTCOME"
+          else
+            # Application installation failed before native mutation could start.
+            python tests/capture_native_evidence.py --phase after --evidence-class native-mutation-observation --fixture-outcome "$MUTATION_OUTCOME" --output "$RUNNER_TEMP/mutation-evidence/environment-after.json"
+          fi
       - name: Retain native mutation and failure evidence
         if: always()
         timeout-minutes: 2

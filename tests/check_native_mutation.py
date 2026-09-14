@@ -8,6 +8,7 @@ from email.parser import BytesParser
 import importlib.metadata
 import json
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import sys
@@ -65,7 +66,10 @@ def rediscovery_environment():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--snapshot", nargs="+")
+    read_only = parser.add_mutually_exclusive_group()
+    read_only.add_argument("--snapshot", nargs="+")
+    read_only.add_argument("--capture-after", type=Path)
+    parser.add_argument("--fixture-outcome", default="unknown")
     parser.add_argument("--executable", type=Path)
     parser.add_argument("--wheel", type=Path)
     parser.add_argument("--output", type=Path)
@@ -73,6 +77,15 @@ def main():
     parser.add_argument("--allow-provider-mutation", action="store_true")
     parser.add_argument("capabilities", nargs="*")
     args = parser.parse_args()
+    if args.capture_after:
+        # This separate recorder process uses the same installed refresh policy
+        # as rediscovery/repeat; no persistent or parent PATH is changed.
+        os.environ.update(rediscovery_environment())
+        recorder = Path(__file__).with_name("capture_native_evidence.py")
+        sys.argv = [str(recorder), "--phase", "after", "--evidence-class", "native-mutation-observation",
+                    "--fixture-outcome", args.fixture_outcome, "--output", str(args.capture_after)]
+        runpy.run_path(str(recorder), run_name="__main__")
+        return 0
     if args.snapshot:
         print(json.dumps(snapshot(args.snapshot), default=encode))
         return 0
