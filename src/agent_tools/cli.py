@@ -79,7 +79,7 @@ def _checkout_root(module_path: Path | None = None) -> Path | None:
     return candidate if all(marker.exists() for marker in markers) else None
 
 
-def doctor() -> int:
+def doctor(*, documents: bool = False) -> int:
     checkout = _checkout_root()
     if checkout is None:
         print("mode:       installed")
@@ -92,17 +92,30 @@ def doctor() -> int:
     print(f"python:     {sys.executable} ({platform.python_version()})")
 
     problems = 0
-    print("\nPython packages:")
+    document_problems = 0
+    print("\nOptional document libraries:")
     for module in PACKAGE_PROBES:
         version = _distribution_version(module)
         try:
             importlib.import_module(module)
         except Exception as error:
             print(f"  {module:<12} {version}; import failed: {type(error).__name__}: {error}")
-            problems += 1
+            document_problems += 1
         else:
             print(f"  {module:<12} {version}")
-            problems += version == "not installed"
+            document_problems += version == "not installed"
+
+    if document_problems:
+        print(f"  documents: {document_problems} library check(s) unavailable or failed")
+        print("  Install explicitly: uv tool install --python 3.13 --reinstall "
+              "'smartnuf-agent-tools[documents]'")
+        print("  Verify explicitly: agent-tools doctor --documents")
+        if not documents:
+            print("  Optional results do not affect this diagnostic exit status.")
+    else:
+        print("  documents: all library checks passed")
+    if documents:
+        problems += document_problems
 
     print("\nNative tools:")
     required_capabilities = tuple(
@@ -153,7 +166,7 @@ def doctor() -> int:
     if problems:
         print(f"\n{problems} check(s) need attention.")
         return 1
-    print("\nAll checks passed.")
+    print("\nAll required checks passed.")
     return 0
 
 
@@ -433,8 +446,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true",
         help="display a read-only discovery/plan without execution or provenance writes",
     )
-    _command(subparsers, "doctor", "Inspect Python libraries and default native tools without changing the host.",
-             epilog="Exit status: 0 = all checks pass; 1 = a required library or default native capability needs attention.")
+    doctor_parser = _command(subparsers, "doctor", "Inspect optional document libraries and default native tools without changing the host.",
+        epilog=("Document availability is reported separately and does not affect the "
+                "default exit status. --documents requires all seven document libraries. "
+                "Both modes check default native capabilities (Poppler and Ghostscript); "
+                "no packages or configuration are changed. Exit status: 0 = all required "
+                "checks pass; 1 = a required check needs attention; 2 = invalid syntax."))
+    doctor_parser.add_argument("--documents", action="store_true",
+        help="require the full optional document-library stack (default: %(default)s)")
     tools_parser = _command(subparsers, "tools", "Inspect capabilities or configure optional desired capabilities.")
     tools_subparsers = tools_parser.add_subparsers(dest="tools_command", required=True)
     _command(tools_subparsers, "list", "List the built-in capability catalogue without probing or changing the host.",
@@ -501,7 +520,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
         )
     if args.command == "doctor":
-        return doctor()
+        return doctor(documents=args.documents)
     if args.command == "tools" and args.tools_command == "list":
         return tools_list()
     if args.command == "tools" and args.tools_command == "status":
