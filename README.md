@@ -264,8 +264,8 @@ never install or uninstall Git for Windows. A matching setting not created by
 Agent Tools remains unowned and is not removed. See
 [Decision 0006](https://github.com/smartnuf/agent-tools/blob/main/docs/decisions/0006-claude-code-git-bash-integration.md)
 for the recovery and compatibility contract. Version 0.1.2 is the first packaged
-release containing the read-only commands; desired-state and integration
-commands are currently available from `main` pending the next release.
+release containing the read-only commands. Desired-state and integration
+commands are included in released v0.2.0 and later; no checkout is required.
 
 ## Source checkout and bootstrap
 
