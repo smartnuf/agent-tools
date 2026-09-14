@@ -57,3 +57,25 @@ This stream owns integration. No concurrent implementation stream is active.
 Dependency changes (#57), platform/provider expansion (#104), publication and
 future research remain outside scope. Recommend #57 next; estimate that task
 from its own discovery rather than extrapolating this documentation slice.
+
+## Evidence and remaining work
+
+The parser defines purpose, safety, defaults and exit semantics; its fixed-width
+help generates `docs/cli-reference.md`. Source tests traverse both help aliases
+at every command without operational dispatch, test deterministic generation,
+and prove that option/default changes invalidate old reference text. Thirty-three
+concrete guide invocations are parsed without execution, including inline commands
+and README platform launcher variants. Placeholder syntax and bare command-path
+references remain conceptual prose (command paths are covered by help traversal).
+
+The 406-test suite passes. An isolated wheel rebuilt from the restricted sdist
+passes all installed smoke checks, including semantic source comparison of every
+help page outside a checkout. Required CI and pre-publication release steps run
+the reference/example checker; release also validates installed help before
+attestation/publication. No new runtime dependency is added.
+
+Estimate remains 0.25–0.75 day, actual effort untracked. Implementation remaining:
+none after exact-head review/merge. PowerShell is unavailable locally; local
+POSIX checks and hosted Windows evidence are reported separately. No architecture
+policy choice or new mutation boundary was needed. Recommend #57 discovery next;
+#57/#104/final-guide/release gates remain open and no v0.2 publication is claimed.

@@ -96,6 +96,8 @@ exit statuses.
   integration](#capability-configuration-and-integrations).
 - [Use the source checkout and shared development
   environment](#source-checkout-and-bootstrap).
+- Browse the [CLI reference](https://github.com/smartnuf/agent-tools/blob/main/docs/cli-reference.md)
+  for current command help, arguments, safety requirements, and exit statuses.
 - Read the [platform guide](https://github.com/smartnuf/agent-tools/blob/main/docs/platforms.md),
   [packaging contract](https://github.com/smartnuf/agent-tools/blob/main/docs/packaging.md),
   or [release history](https://github.com/smartnuf/agent-tools/releases).

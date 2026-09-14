@@ -22,3 +22,5 @@ This repository contains reusable, user-level tools for coding agents and humans
 - When repeated exact-head reviews find adjacent valid defects in one decision family, return to characterisation, discovery, mapping, or specification as appropriate; reconcile the model before continuing local corrections.
 - Before treating an architectural review finding as a human halt, run the workflow's evidence-backed architecture adjudication and closure sweep. Continue only for contract completion or independently adjudicated bounded evolution; product, risk, compatibility, persistence, mutation-policy, and roadmap choices remain human-reserved.
 - Respect any more-specific `AGENTS.md` in subdirectories.
+
+- Define public CLI facts once in the argparse command model; regenerate the CLI reference and validate help projections and documented invocations with `tests/check_cli_docs.py` and installed-artifact checks when changing commands.

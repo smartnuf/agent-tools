@@ -60,6 +60,28 @@ capabilities. Provider removal remains outside the command boundary. The separat
 `agent-tools integrations claude-code` command group provides the one supported
 agent-integration lifecycle; it is not a generic plugin surface.
 
+## CLI help and reference
+
+The public argparse tree in `src/agent_tools/cli.py` defines syntax, defaults,
+purposes, safety and exit-status descriptions. Both runtime help and the
+[generated reference](cli-reference.md) render that tree. Curated README and
+platform prose provide examples and context rather than duplicate option tables.
+
+From a bootstrapped development checkout, regenerate the reference with
+`bin/agent-python -m agent_tools.cli_reference --write docs/cli-reference.md`
+(Windows: `bin\agent-python.cmd`). Check it and the concrete guide invocations
+with `bin/agent-python tests/check_cli_docs.py`. This developer-only projection
+does not add an ordinary-user command or operational script to the artifact.
+
+Required CI and release artifact validation check reference/example drift.
+Installed-wheel smoke tests traverse every public root/nested `-h` and `--help`
+and compare semantic help text with source outside a checkout. Unit tests prove
+help cannot dispatch operational handlers and that command/default/help changes
+invalidate stale documentation. Concrete fenced and inline guide commands are
+parsed without execution; inline syntax placeholders and bare command-path
+references are not treated as runnable shell examples. Historical ADR/release
+records are not rewritten or checked as current command guides.
+
 ## Source distribution boundary
 
 The sdist contains the application source, pyproject build metadata, README,

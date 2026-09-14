@@ -86,7 +86,7 @@ requirement after the initial seven gates.
 | README/PyPI front door describes the new core/doc/CLI contract and is builds on merged PR #102 | not-started | #103 / #57 |
 | A reviewed v0.2 candidate passes exact-artifact install, upgrade-from-v0.1.x, pin/reinstall, rollback where supported, and removal/preservation tests before publication | not-started | split during planning |
 
-| CLI help and generated reference share one command model with automated drift prevention | in-progress | #106; [task plan](02-cli-reference.md) |
+| CLI help and generated reference share one command model with automated drift prevention | complete | #106; `tests/test_cli_reference.py`, `tests/check_cli_docs.py`, installed help and release checks; [task plan](02-cli-reference.md) |
 
 ## Likely sequencing
 
