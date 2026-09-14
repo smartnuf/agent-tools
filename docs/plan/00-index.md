@@ -108,13 +108,13 @@ installed-wheel checks. #111 supplies old-release artifact migration,
 pin/reinstall/removal/failure/rollback preservation and separately labelled
 source-fixture extra-retention evidence; see [the lifecycle plan](10-v0.2-productisation/05-document-lifecycle.md).
 The optional-document gate is complete on merge (4/8 overall), closing
-#111/#109/#57. Merged #114 records #104 provider/platform discovery and environment
-capture. #115/PR #117 has real apt/Homebrew mutation evidence, but its WinGet
-proof exposed an App Execution Alias identity defect before mutation. The focused
-[#118 prerequisite](10-v0.2-productisation/08-winget-identity.md) adds 0.5–1.5 days
-for discovery, repair and Windows proof; integrate it before completing #115's
-1–2 day mutation-evidence slice. Both estimates exclude review/CI wait; no extra gate is
-claimed from the discovery experiment.
+#111/#109/#57. Merged #114 records provider/platform discovery and environment
+capture; #118/PR #119 repaired WinGet activation identity with installed Windows
+proof. #115/PR #117 now demonstrates actual WinGet mutation and persisted success
+but its final report failed on a legacy-encoded pipe. The focused
+[#120 reporting prerequisite](10-v0.2-productisation/09-native-reporting.md)
+adds 0.25–0.5 day, excluding review/CI wait, before #115's 1–2 day evidence slice
+can complete. No #104 gate advances until its full proof and matrix pass review.
 See the [native evidence plan](10-v0.2-productisation/06-native-evidence.md).
 Neither #104 gate completes from external-preseed observations. The [v0.2 plan](10-v0.2-productisation/README.md) retains the
 remaining document-dependency, platform, final-guide and release gates.
