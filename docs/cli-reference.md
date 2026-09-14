@@ -151,7 +151,11 @@ options:
 
 Changes require --allow-config-mutation and back up existing configuration. Unrelated
 valid entries are preserved. Exit status: 0 = changed or already enabled; 1 = refused or
-failed (including invalid capability/provider).
+failed (including invalid capability/provider). Ctrl+C: after the supported
+cancellation/recovery path, an uncaught KeyboardInterrupt terminates CPython via SIGINT
+on POSIX (shell status 130; Python subprocess returncode -2). On Windows CPython it
+returns 0xC000013A (3221225786 unsigned or -1073741510 signed). A reported recovery
+failure instead returns 1. A second Ctrl+C may force-abort recovery.
 ```
 
 ## agent-tools tools disable
@@ -171,7 +175,11 @@ options:
 
 Changes require --allow-config-mutation and back up existing configuration. Unrelated
 valid entries are preserved. Exit status: 0 = changed or already disabled; 1 = refused
-or failed (including invalid capability).
+or failed (including invalid capability). Ctrl+C: after the supported
+cancellation/recovery path, an uncaught KeyboardInterrupt terminates CPython via SIGINT
+on POSIX (shell status 130; Python subprocess returncode -2). On Windows CPython it
+returns 0xC000013A (3221225786 unsigned or -1073741510 signed). A reported recovery
+failure instead returns 1. A second Ctrl+C may force-abort recovery.
 ```
 
 ## agent-tools integrations
@@ -239,7 +247,11 @@ options:
 Changes require --allow-config-mutation. Back up existing settings, preserve unrelated
 entries and report recovery evidence. Never install or remove provider packages; an
 unowned setting is not claimed. Exit status: 0 = completed or no changes; 1 = refused or
-failed, including unsupported context or unresolved recovery.
+failed, including unsupported context or unresolved recovery. Ctrl+C: after the
+supported cancellation/recovery path, an uncaught KeyboardInterrupt terminates CPython
+via SIGINT on POSIX (shell status 130; Python subprocess returncode -2). On Windows
+CPython it returns 0xC000013A (3221225786 unsigned or -1073741510 signed). A reported
+recovery failure instead returns 1. A second Ctrl+C may force-abort recovery.
 ```
 
 ## agent-tools integrations claude-code remove
@@ -258,5 +270,9 @@ options:
 Changes require --allow-config-mutation. Back up existing settings, preserve unrelated
 entries and report recovery evidence. Never install or remove provider packages; an
 unowned setting is not claimed. Exit status: 0 = completed or no changes; 1 = refused or
-failed, including unsupported context or unresolved recovery.
+failed, including unsupported context or unresolved recovery. Ctrl+C: after the
+supported cancellation/recovery path, an uncaught KeyboardInterrupt terminates CPython
+via SIGINT on POSIX (shell status 130; Python subprocess returncode -2). On Windows
+CPython it returns 0xC000013A (3221225786 unsigned or -1073741510 signed). A reported
+recovery failure instead returns 1. A second Ctrl+C may force-abort recovery.
 ```

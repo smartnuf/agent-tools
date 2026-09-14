@@ -354,6 +354,15 @@ def _change_claude_code_integration(*, apply: bool, allow_config_mutation: bool)
     return 1 if result.outcome is IntegrationOutcome.REFUSED else 0
 
 
+_CONFIG_INTERRUPTION_HELP = (
+    "Ctrl+C: after the supported cancellation/recovery path, an uncaught "
+    "KeyboardInterrupt terminates CPython via SIGINT on POSIX (shell status 130; "
+    "Python subprocess returncode -2). On Windows CPython it returns 0xC000013A "
+    "(3221225786 unsigned or -1073741510 signed). A reported recovery failure "
+    "instead returns 1. A second Ctrl+C may force-abort recovery."
+)
+
+
 class _HelpFormatter(argparse.HelpFormatter):
     """Keep runtime help and generated reference independent of terminal width."""
 
@@ -442,7 +451,8 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Changes require --allow-config-mutation and back up existing configuration. "
             "Unrelated valid entries are preserved. Exit status: 0 = changed or already "
-            "enabled; 1 = refused or failed (including invalid capability/provider)."
+            "enabled; 1 = refused or failed (including invalid capability/provider). "
+            + _CONFIG_INTERRUPTION_HELP
         ))
     enable_parser.add_argument("capability", help="optional built-in capability identity (see tools list)")
     enable_parser.add_argument("--provider", help="exact built-in provider preference; no fallback (default: catalogue order)")
@@ -452,7 +462,8 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Changes require --allow-config-mutation and back up existing configuration. "
             "Unrelated valid entries are preserved. Exit status: 0 = changed or already "
-            "disabled; 1 = refused or failed (including invalid capability)."
+            "disabled; 1 = refused or failed (including invalid capability). "
+            + _CONFIG_INTERRUPTION_HELP
         ))
     disable_parser.add_argument("capability", help="optional built-in capability identity (see tools list)")
     disable_parser.add_argument("--allow-config-mutation", action="store_true",
@@ -473,7 +484,8 @@ def build_parser() -> argparse.ArgumentParser:
                 "preserve unrelated entries and report recovery evidence. Never install "
                 "or remove provider packages; an unowned setting is not claimed. "
                 "Exit status: 0 = completed or no changes; 1 = refused or failed, "
-                "including unsupported context or unresolved recovery."
+                "including unsupported context or unresolved recovery. "
+                + _CONFIG_INTERRUPTION_HELP
             ))
         change_parser.add_argument("--allow-config-mutation", action="store_true",
             help="authorize Claude Code settings and integration-state writes (default: %(default)s)")
