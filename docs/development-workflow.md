@@ -638,6 +638,29 @@ After merge:
 6. verify local `main` equals `origin/main`; and
 7. report status and preserved stashes or dirty state.
 
+#### Remote branch lifecycle
+
+Remote working branches are temporary coordination state. After a pull request
+is merged or deliberately closed, delete its remote working branch unless an
+explicit documented reason requires retention. Supported release-maintenance
+or continuing integration branches may be long-lived; record their purpose and
+owner.
+
+Before deletion, verify the current remote head, PR disposition, commits not
+represented in `main`, and dependencies from open PRs, milestone tasks, active
+streams, worktrees, releases, or other owners. Retain branches with uncertain
+ownership. For an unmerged branch, first harvest useful knowledge into durable
+repository artifacts or explicitly verify and record its preservation in the
+issue, PR, or history record. Deletion must not replace preservation of
+architectural decisions, research, evidence, or roadmap rationale.
+
+Delete only refs within the authorized cleanup scope, guarding against a
+concurrent head change with an explicit expected-SHA lease. Never include the
+default branch or tags in working-branch cleanup. Fetch/prune within that scope
+and verify the final remote branch set, unchanged integration head during
+cleanup, and preserved local state. This default does not authorize pruning
+unrelated branches during ordinary PR cleanup.
+
 ## Halt conditions
 
 Halt and report the evidence and required decision when:
