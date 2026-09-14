@@ -10,6 +10,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import TextIO
 
 from .capabilities import (
     MachineState,
@@ -226,6 +227,19 @@ def _build_plan(
         )
 
 
+def _print_report(message: str, *, file: TextIO | None = None) -> None:
+    """Keep native outcomes readable on strict legacy-encoded output streams.
+
+    Only display text is escaped; command/provenance evidence remains intact.
+    Preserve the caller's stream configuration and let actual I/O failures raise.
+    """
+    stream = sys.stdout if file is None else file
+    encoding = getattr(stream, "encoding", None)
+    if encoding:
+        message = message.encode(encoding, errors="backslashreplace").decode(encoding)
+    print(message, file=stream)
+
+
 def _render_argv(argv: tuple[str, ...]) -> str:
     return json.dumps(list(argv), ensure_ascii=False)
 
@@ -233,20 +247,20 @@ def _render_argv(argv: tuple[str, ...]) -> str:
 def report_plan(plan: ProviderPlan) -> None:
     """Print the reviewed requested mutations before execution begins."""
 
-    print("Native provider plan:")
-    print(f"  requested capabilities: {', '.join(plan.requested_capabilities)}")
+    _print_report("Native provider plan:")
+    _print_report(f"  requested capabilities: {', '.join(plan.requested_capabilities)}")
     for capability_id, provider_id in plan.provider_preferences:
-        print(f"  exact provider preference: {capability_id} = {provider_id}")
+        _print_report(f"  exact provider preference: {capability_id} = {provider_id}")
     if not plan.actions:
-        print("  no host changes required; all requested capabilities verify")
+        _print_report("  no host changes required; all requested capabilities verify")
         return
     for action in plan.actions:
-        print(
+        _print_report(
             f"  {action.capability_id}: {action.manager} package "
             f"{action.installation_unit}"
         )
         for command in action.commands:
-            print(f"    requested command: {_render_argv(command)}")
+            _print_report(f"    requested command: {_render_argv(command)}")
 
 
 def report_result(result: ManagedExecutionResult) -> None:
@@ -254,33 +268,33 @@ def report_result(result: ManagedExecutionResult) -> None:
 
     execution = result.execution
     if execution is None:
-        print("Host mutation: not attempted")
+        _print_report("Host mutation: not attempted")
     else:
-        print(f"Host mutation: {execution.outcome.value}")
+        _print_report(f"Host mutation: {execution.outcome.value}")
         for action in execution.actions:
-            print(
+            _print_report(
                 f"  {action.capability_id}: {action.outcome.value} "
                 f"({action.manager} {action.installation_unit})"
             )
             if action.detail:
-                print(f"    detail: {action.detail}")
+                _print_report(f"    detail: {action.detail}")
             for command in action.commands:
                 status = "not observed" if command.returncode is None else str(command.returncode)
-                print(f"    command: {_render_argv(command.argv)}")
-                print(f"    return code: {status}")
+                _print_report(f"    command: {_render_argv(command.argv)}")
+                _print_report(f"    return code: {status}")
                 if command.stdout:
-                    print(f"    stdout tail:\n{command.stdout}")
+                    _print_report(f"    stdout tail:\n{command.stdout}")
                 if command.stderr:
-                    print(f"    stderr tail:\n{command.stderr}")
+                    _print_report(f"    stderr tail:\n{command.stderr}")
             for path in action.final_verified_paths:
-                print(f"    verified executable: {path}")
+                _print_report(f"    verified executable: {path}")
         for guidance in execution.recovery_guidance:
-            print(f"  recovery: {guidance}")
-    print(f"Managed provenance: {result.persistence.value}")
+            _print_report(f"  recovery: {guidance}")
+    _print_report(f"Managed provenance: {result.persistence.value}")
     if result.persistence_detail:
-        print(f"  detail: {result.persistence_detail}")
+        _print_report(f"  detail: {result.persistence_detail}")
     for guidance in result.recovery_guidance:
-        print(f"  recovery: {guidance}")
+        _print_report(f"  recovery: {guidance}")
 
 
 def native_setup(
@@ -312,7 +326,7 @@ def install_capabilities(
         report_plan(plan)
         sys.stdout.flush()
         if dry_run:
-            print("Dry run: plan only; no provider execution or provenance write")
+            _print_report("Dry run: plan only; no provider execution or provenance write")
             return None
         return execute_provider_plan(
             plan, allow_provider_mutation=allow_provider_mutation
@@ -367,7 +381,7 @@ def _run_setup(operation: Callable[[], ManagedExecutionResult | None]) -> int:
         result = interruption.managed_result
         if result is not None:
             report_result(result)
-        print(f"Native provider setup interrupted: {interruption}", file=sys.stderr)
+        _print_report(f"Native provider setup interrupted: {interruption}", file=sys.stderr)
         return 130
     except (
         NativeSetupError,
@@ -376,10 +390,10 @@ def _run_setup(operation: Callable[[], ManagedExecutionResult | None]) -> int:
         DesiredStateError,
         ExecutionContractError,
     ) as error:
-        print(f"Native provider setup failed: {error}", file=sys.stderr)
+        _print_report(f"Native provider setup failed: {error}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print("Native provider setup interrupted before managed execution", file=sys.stderr)
+        _print_report("Native provider setup interrupted before managed execution", file=sys.stderr)
         return 130
     if result is None:  # successful read-only plan display
         return 0
