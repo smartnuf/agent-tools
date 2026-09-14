@@ -63,3 +63,12 @@ bodies; both are corrected in README/notes. Release preparation also removed a
 time-sensitive "current stable" assertion from immutable PyPI metadata, keeping
 version-qualified compatibility facts and a release-history link. The final
 head requires fresh CI/review; no publication has occurred.
+
+The second review found adjacent dry-run refusal wording and links to the renamed
+optional-library heading. A contract closure sweep now makes the three existing
+modes explicit across README, release notes and Decision 0009: dry-run planning
+returns 0 when produced; already-satisfied execution is a verified no-op; execution
+requiring changes is refused without mutation authority. This clarifies the
+already accepted dry-run exception without changing behavior. Both maintained
+optional-library links now target the stable unversioned heading. Repository
+search confirms no remaining old heading references.
