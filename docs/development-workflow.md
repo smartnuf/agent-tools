@@ -663,7 +663,11 @@ added after closure. Stale branch names must not serve as archival storage.
 Where GitHub supports automatic deletion of merged PR head branches, enabling
 it is the preferred mechanical default, subject to repository policy and
 documented retention needs. Inspect the current setting before proposing a
-change; administrative access alone is not authorization to change it. If
+change; administrative access alone is not authorization to change it. When
+auto-delete is enabled, perform the remote-head, preservation, dependency,
+ownership, and retention checks above before merging. Before enabling it or
+merging a branch that must be retained, verify an effective protection or
+exemption prevents its automatic deletion; otherwise halt that action. If
 disabled and explicit authority is absent, record the recommendation and report
 the remaining human/admin action. Automatic deletion does not replace the
 preservation and ownership checks, or handle deliberately closed unmerged work.
