@@ -79,10 +79,13 @@ def _check_metadata(metadata: Message) -> str:
     positions = [description.index(item) for item in EXPECTED_DESCRIPTION_SEQUENCE]
     assert positions == sorted(positions), "long description is not product-first"
     dependencies = {
-        requirement.replace(" ", "").lower()
+        requirement.replace(" ", "").replace("'", '"').lower()
         for requirement in metadata.get_all("Requires-Dist", [])
     }
-    assert dependencies == EXPECTED_DEPENDENCIES
+    assert metadata.get_all("Provides-Extra", []) == ["documents"]
+    assert dependencies == {
+        requirement + ';extra=="documents"' for requirement in EXPECTED_DEPENDENCIES
+    }, "document requirements must be optional; core has no runtime dependencies"
     return metadata["Version"]
 
 

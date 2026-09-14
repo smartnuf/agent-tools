@@ -28,7 +28,7 @@ def wheel_version(artifact: Path) -> str:
     return version
 
 
-def run(executable: Path, expected_version: str, require_native: bool) -> None:
+def run(executable: Path, expected_version: str, require_native: bool, documents: bool = False) -> None:
     with TemporaryDirectory() as unrelated_directory:
         check_installed_help(executable, unrelated_directory)
         version = subprocess.run(
@@ -46,6 +46,10 @@ def run(executable: Path, expected_version: str, require_native: bool) -> None:
             check=False,
             capture_output=True,
             text=True,
+        )
+        document_doctor = subprocess.run(
+            [executable, "doctor", "--documents"], cwd=unrelated_directory,
+            check=False, capture_output=True, text=True,
         )
         tools_list = subprocess.run(
             [executable, "tools", "list"],
@@ -117,13 +121,22 @@ def run(executable: Path, expected_version: str, require_native: bool) -> None:
     assert "mode:       installed" in doctor.stdout
     assert "package:" in doctor.stdout
     assert "repository:" not in doctor.stdout
-    python_section = doctor.stdout.split("\nPython packages:\n", 1)[1].split(
+    python_section = doctor.stdout.split("\nOptional document libraries:\n", 1)[1].split(
         "\nNative tools:\n", 1
     )[0]
-    assert "not installed" not in python_section
-    assert "import failed" not in python_section
+    if documents:
+        assert "not installed" not in python_section, python_section
+        assert "import failed" not in python_section, python_section
+        assert "documents: all library checks passed" in python_section
+        assert document_doctor.returncode == doctor.returncode, document_doctor.stdout
+    else:
+        assert python_section.count("not installed; import failed: ModuleNotFoundError") == 7, python_section
+        assert "Optional results do not affect" in python_section
+        assert document_doctor.returncode == 1, document_doctor.stdout
+        assert "smartnuf-agent-tools[documents]" in document_doctor.stdout
+    assert "Traceback" not in document_doctor.stderr
     if require_native:
-        assert "All checks passed." in doctor.stdout
+        assert "All required checks passed." in doctor.stdout
     assert "bash" in tools_list.stdout
     assert "git-bash, system-bash, homebrew-bash, wsl-bash" in tools_list.stdout
     assert bash_status.returncode == 0, bash_status.stderr or bash_status.stdout
@@ -151,8 +164,10 @@ def main() -> int:
         default="allow-missing",
         help="whether Poppler and Ghostscript must be available",
     )
+    parser.add_argument("--documents", action="store_true",
+                        help="expect document-enabled installation; default requires absent libraries")
     args = parser.parse_args()
-    run(args.executable, wheel_version(args.artifact), args.native_tools == "require")
+    run(args.executable, wheel_version(args.artifact), args.native_tools == "require", args.documents)
     print(f"installed CLI passed: {args.executable}")
     return 0
 
