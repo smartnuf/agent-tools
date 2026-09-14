@@ -97,29 +97,24 @@ Ubuntu, and macOS on its available runner architectures; pure fixtures cover
 translated/ARM64 combinations and must not be presented as hosted ARM64
 evidence.
 
-## M4 — Optional discovery channels
+## Retired alternative Agent Tools distribution work
 
-Start only after M3 is complete and user demand justifies the maintenance burden.
+The former M4a WinGet and M4b Homebrew distribution-channel milestones are **not
+planned**. [Decision 0007](../../decisions/0007-v0.2-product-and-distribution-boundary.md)
+retires them from the active roadmap indefinitely so that the next release can
+focus on making the PyPI-installed `agent-tools` CLI minimally useful.
 
-### M4a — WinGet
+PR #71 and issues #59–#70 preserve the historical research and decomposition but
+were closed as not planned on 2026-09-08. They are not latent acceptance gates,
+and agents must not treat them as the automatic successor to M3 or v0.2.
 
-| Acceptance criterion | State | Required evidence |
-|---|---|---|
-| Versioned manifest is generated from a published release | deferred | Generated manifest review |
-| Architecture, URL, and checksum are validated | deferred | Manifest validation output |
-| Install and upgrade work on disposable Windows hosts | deferred | Disposable-host test |
-| Community-repository submission is accepted | deferred | Accepted submission link |
+Reconsider another Agent Tools distribution channel only through a new decision
+record backed by a concrete requirement that PyPI/`uv tool` cannot reasonably
+meet. CI use of apt, WinGet, Homebrew, Chocolatey, dnf, pacman, or another native
+package manager to provision capabilities does not count as such a requirement.
 
-Estimate: **2–4 person-days**, excluding external review time.
-
-### M4b — Homebrew
-
-| Acceptance criterion | State | Required evidence |
-| Formula or tap is generated from a published release | deferred | Formula or tap review |
-| Checksum and version updates are automated | deferred | Update workflow test |
-| Intel and Apple-silicon behaviour is tested where runners are available | deferred | Platform test results |
-| Install and upgrade documentation is verified | deferred | Documentation smoke test |
-
-Estimate: **1.5–3 person-days**.
-
-Do not schedule MSI, macOS package, deb/rpm, standalone binary, self-updater, or bundled native-program work without a new decision record and demonstrated need.
+The next bounded release objective is described in
+[`../10-v0.2-productisation/README.md`](../10-v0.2-productisation/README.md).
+After v0.2 is published, stop and select a new Intent; broader possibilities are
+retained only as research/rediscovery material in
+[`../90-future-product-research.md`](../90-future-product-research.md).
