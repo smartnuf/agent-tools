@@ -19,7 +19,7 @@
 | M2 | Public PyPI release | complete | 5/5 | 1–2 days | none |
 | M3 | Tested update and capability lifecycle | complete | 9/9 | 6.5–11 days | none |
 | v0.2 #103 | Installed CLI and named-only native installation | complete | 2/8 v0.2 gates | 1.5–2 days | none |
-| v0.2 #106 | Generated CLI reference and help/docs drift prevention | not-started | release-quality gate | 0.25–0.75 day | 0.25–0.75 day |
+| v0.2 #106 | Generated CLI reference and help/docs drift prevention | in-progress | release-quality gate | 0.25–0.75 day | 0.25–0.75 day |
 
 Estimated implementation effort through M3: **complete**. Discovery for #103
 is recorded in its [task plan](10-v0.2-productisation/01-installed-cli.md), and
