@@ -24,6 +24,7 @@ NATIVE_PATHS = (
     "src/agent_tools/native_setup.py",
     "src/agent_tools/provider_plans.py",
     "src/agent_tools/provider_execution.py",
+    "src/agent_tools/cooperative_cancellation.py",
     "src/agent_tools/managed_state.py",
     "src/agent_tools/manager_identity.py",
     "src/agent_tools/python_selection.py",
