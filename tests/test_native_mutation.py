@@ -1,7 +1,9 @@
 import copy
 import importlib.util
+import os
 from pathlib import Path
 import unittest
+from unittest import mock
 
 
 SPEC = importlib.util.spec_from_file_location("native_mutation", Path(__file__).with_name("check_native_mutation.py"))
@@ -33,6 +35,15 @@ class NativeMutationOracleTests(unittest.TestCase):
         for record in variants:
             with self.subTest(record=record), self.assertRaises(AssertionError):
                 mutation.validate_mutation_records([record], ["poppler"], "apt")
+
+    def test_windows_rediscovery_refreshes_only_child_environment(self):
+        original = os.environ.get("PATH")
+        with mock.patch.object(mutation.os, "name", "nt"), mock.patch.object(
+            mutation.provider_execution, "_windows_persisted_path", return_value="updated-provider-path"
+        ):
+            refreshed = mutation.rediscovery_environment()
+        self.assertEqual(refreshed["PATH"], "updated-provider-path")
+        self.assertEqual(os.environ.get("PATH"), original)
 
     def test_missing_extra_or_duplicate_requests_do_not_count(self):
         for records, expected in (

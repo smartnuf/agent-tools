@@ -15,7 +15,7 @@ import traceback
 from zipfile import ZipFile
 
 import agent_tools
-from agent_tools import capabilities, desired_state, managed_state, native_setup
+from agent_tools import capabilities, desired_state, managed_state, native_setup, provider_execution
 
 
 def encode(value):
@@ -54,6 +54,13 @@ def validate_mutation_records(records, expected, manager):
         assert record["package_manager"]["name"] == manager
         assert record["command_evidence"]
         assert all(command["returncode"] == 0 for command in record["command_evidence"])
+
+
+def rediscovery_environment():
+    environment = dict(os.environ)
+    if os.name == "nt":
+        environment["PATH"] = provider_execution._windows_persisted_path()
+    return environment
 
 
 def main():
@@ -103,23 +110,15 @@ def main():
               "already_satisfied": [name for name in args.capabilities if name not in unsatisfied]})
         if not unsatisfied:
             raise AssertionError("coverage gap: image has no unsatisfied target; no mutation credit")
-        plan = native_setup.build_install_plan(args.capabilities)
-        write(args.output, "plan", asdict(plan))
-        assert {action.capability_id for action in plan.actions} == set(unsatisfied)
-        assert all(action.manager == args.manager for action in plan.actions)
 
-        def command(label, *operands):
-            try:
-                result = subprocess.run([str(args.executable), *operands],
-                                        stdin=subprocess.DEVNULL, capture_output=True,
-                                        text=True, timeout=1250)
-            except subprocess.TimeoutExpired as error:
-                def text(value):
-                    return value.decode("utf-8", "replace") if isinstance(value, bytes) else value
-                write(args.output, label, {"argv": operands, "timed_out": True,
-                      "stdout": text(error.stdout), "stderr": text(error.stderr),
-                      "certainty": "external driver timeout; native state may be uncertain"})
-                raise
+        def command(label, *operands, environment=None):
+            # M3 owns manager deadlines, cancellation and provenance finalization.
+            # Do not kill that cleanup owner with a second parent-only timeout.
+            # The explicit CI step/job limits remain infrastructure backstops;
+            # their cancellation is incomplete evidence, never mutation success.
+            result = subprocess.run([str(args.executable), *operands],
+                                    stdin=subprocess.DEVNULL, capture_output=True,
+                                    text=True, env=environment)
             write(args.output, label, {"argv": operands, "returncode": result.returncode,
                                       "stdout": result.stdout, "stderr": result.stderr})
             print(result.stdout, flush=True)
@@ -128,17 +127,22 @@ def main():
 
         command("dry-run", "install", *args.capabilities, "--dry-run")
         assert not any(os.path.lexists(path) for path in roots)
+        plan = native_setup.build_install_plan(args.capabilities)
+        write(args.output, "plan", asdict(plan))
+        assert {action.capability_id for action in plan.actions} == set(unsatisfied)
+        assert all(action.manager == args.manager for action in plan.actions)
         command("install", "install", *args.capabilities, "--allow-provider-mutation")
         records = managed_state.load_document(managed)
         write(args.output, "provenance", records)
         validate_mutation_records(records["records"], unsatisfied, args.manager)
         original = managed.read_bytes()
+        refreshed = rediscovery_environment()
         fresh = subprocess.run([sys.executable, "-I", str(Path(__file__).resolve()), "--snapshot", *args.capabilities],
-                               capture_output=True, text=True, check=True, timeout=60)
+                               capture_output=True, text=True, check=True, timeout=60, env=refreshed)
         after = json.loads(fresh.stdout)
         write(args.output, "after", after)
         assert all(state["availability"] == "available" for state in after["capabilities"].values())
-        repeated = command("repeat", "install", *args.capabilities)
+        repeated = command("repeat", "install", *args.capabilities, environment=refreshed)
         assert "no host changes required" in repeated and "    command:" not in repeated
         assert "Managed provenance: not-required" in repeated
         assert managed.read_bytes() == original and not os.path.lexists(desired)
