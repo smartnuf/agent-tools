@@ -1,7 +1,7 @@
 # Installed native mutation evidence — #115
 
 - Base: `042fc28a9b7482fe80368758ec63a21e574aed27` (PR #121), reconciled from PR #116.
-- Milestone 8: open, 4/8 gates complete; #104 remains the end-to-end target.
+- Milestone 8: open; #104 completes on this PR merge, advancing 4/8 to 6/8 gates.
 - Estimate: 1–2 person-days, actual effort untracked; provider/review wait excluded.
 - Merge owner: this stream. No concurrent repository mutation work.
 
@@ -62,8 +62,9 @@ review head; preserve failures and allow at most one inspected same-head retry.
 
 ## Completion
 
-Pending actual runs and review. Update the maintained platform matrix only from
-observed outcomes; close #104 only when both its evidence gates are supported.
+Actual run 34873393511 passes on all three target platforms; its inspected
+artifacts are recorded in the maintained platform matrix. Close #104/#115 on
+merge after the final exact-head validation and review gates pass.
 Final guides and release qualification remain separate tasks afterward.
 
 
@@ -119,3 +120,21 @@ that boundary and merged after 429 tests, green checks and clean review. This
 branch now integrates it; the combined baseline passes 432 tests. The completed
 #117 review also found cancellation-module changes missing from native CI
 selection; the module and selection regression are included in this wave.
+
+[Run 34873393511](https://github.com/smartnuf/agent-tools/actions/runs/34873393511)
+now passes all targeted real mutation jobs: apt/Homebrew Poppler+Ghostscript and
+WinGet Poppler. All three had unsatisfied targets, successful real command
+evidence, verified provenance, fresh installed rediscovery and byte-identical
+provenance after unauthorized no-op repetition. The maintained matrix records
+exact OS/build/image/architecture/manager/provider/interpreter/wheel observations,
+including Windows's preserved Git/Xpdf pdftotext and unavailable Ghostscript
+route. Both #104 gates complete on merge; final guides and release qualification
+remain open. No same-head installer retry or workstation mutation was used.
+
+The third review found the coverage precondition accepted a subset of advertised
+targets. It now fails before mutation if any advertised capability is already
+satisfied, recording the gap and requiring another disposable image without
+removing providers. Partial executable discovery within an unsatisfied capability
+remains valid and preserved. This completes the per-target oracle contract;
+the observed successful three-host run already had every target unsatisfied.
+Full local validation passes 433 tests plus documentation/workflow/POSIX checks.
