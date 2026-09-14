@@ -115,3 +115,8 @@ immutable patch; no limitation waiver is used. Follow the
 [v0.2.1 plan](12-doc-patch-release.md) for current status. The v0.2.0 evidence and
 metadata defect remain historical facts; final gate closure still requires
 the corrected public description and completed qualification/review.
+
+
+The authorized v0.2.1 correction is now published and independently reviewed;
+see the [final distribution record](13-v021-distribution-review.md). The
+historical blocked disposition above no longer describes current readiness.
