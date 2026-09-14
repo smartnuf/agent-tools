@@ -43,16 +43,44 @@ temporary experiment directory, outside the checkout/user tool installation.
 | mandatory-stack prototype install | 17 | bare pinned request |
 | explicit new core reinstall | 1 | bare pinned request |
 | explicit documents reinstall | 17 | `documents` extra |
-| uv tool upgrade of documents selection | 17 | extra retained |
+| uv tool upgrade of exact documents pin (no-op) | 17 | extra retained; no version change |
 | explicit core reinstall | 1 | extra removed |
 
 The experiment used `uv tool install --reinstall --find-links WHEELS` with exact
 prototype requirements and an existing interpreter. Installed distribution
 inventories and uv receipts were inspected after every step; final tool
 uninstall succeeded. No system provider/profile/configuration was changed.
-This proves local selection mechanics only. Actual v0.1.x migration,
-resolution-failure preservation and three-platform exact-candidate qualification
-remain implementation obligations, not claims from this prototype.
+This proves local selection mechanics only. The original upgrade row was a
+pinned no-op and cannot prove retention across a version change.
+
+The review follow-up added a third synthetic wheel, 0.2.1, with the same extra.
+Using a controlled local simple index (the existing lifecycle fixture writer),
+install the unpinned `smartnuf-agent-tools[documents]` while only 0.2.0 is
+available, then add the checksum-linked 0.2.1 wheel to that same index and run
+`uv tool upgrade smartnuf-agent-tools --index INDEX`. Verify actual distribution
+version, installed inventory and receipt, rather than only a success exit:
+
+| Follow-up operation | Verified version | Distributions | Receipt |
+|---|---|---:|---|
+| unpinned documents install | 0.2.0 | 17 | extra, no pin |
+| version-changing tool upgrade | 0.2.1 | 17 | extra, no pin |
+| exact documents reinstall to old version | 0.2.0 | 17 | extra and old pin |
+| exact documents reinstall to new version | 0.2.1 | 17 | extra and new pin |
+
+Exact-pin changes used `uv tool install --reinstall --index INDEX` with the
+selected `[documents]==VERSION` requirement and existing Python. A separate
+failed resolution (`[documents]==9999.0.0`) returned 1 while preserving the
+prior core prototype receipt byte-for-byte and its functioning 0.2.0 CLI.
+Temporary tool uninstall succeeded after both follow-ups. This remains Linux
+prototype evidence; actual v0.1.1 direct-wheel and v0.1.2 PyPI migration,
+failed-resolution preservation with real artifacts, and three-platform
+exact-candidate qualification remain implementation obligations.
+
+The migration closure sweep distinguished unpinned index installs, exact pins,
+direct-wheel sources, extra selection/removal, PyPI rollback, checksum-bound
+GitHub-only rollback, and optional explicit integration restoration. The
+existing README and release records determine these cases; no new product
+policy or provider mutation is introduced by this correction.
 
 ## Mapping, specification and bounded plan
 
