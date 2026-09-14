@@ -127,3 +127,7 @@ with all seven existing document imports healthy. PowerShell is unavailable
 locally; hosted checks remain required. Ranged diff validation, exact-head CI
 and automated review gate the specification merge. No implementation or new
 artifact behavior is claimed by these baseline checks.
+
+Implementation discovery revises the original 1–2 day forecast to two bounded
+slices, 2–3 days total; see [the implementation plan](04-document-implementation.md).
+Runtime and installed-shape work is separate from #111 lifecycle qualification.

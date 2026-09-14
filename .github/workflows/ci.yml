@@ -139,6 +139,11 @@ jobs:
           uv tool install --python 3.13 "$RUNNER_TEMP"/release-dist/*.whl
           python tests/check_installed_cli.py "$(uv tool dir --bin)/agent-tools" "$RUNNER_TEMP/release-dist"
 
+      - name: Verify independent core and documents installed shapes
+        timeout-minutes: 10
+        shell: bash
+        run: python tests/check_document_installs.py "$RUNNER_TEMP/release-dist" --python 3.13
+
       - name: Bootstrap twice (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

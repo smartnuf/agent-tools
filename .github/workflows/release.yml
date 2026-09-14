@@ -54,6 +54,7 @@ jobs:
           uv venv "$RUNNER_TEMP/release-cli-check" --python 3.13
           uv pip install --python "$RUNNER_TEMP/release-cli-check/bin/python" dist/*.whl
           python tests/check_installed_cli.py "$RUNNER_TEMP/release-cli-check/bin/agent-tools" dist
+          python tests/check_document_installs.py dist --python 3.13
       - name: Attest distributions built from the release tag
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:

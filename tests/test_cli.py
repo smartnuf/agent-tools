@@ -43,7 +43,10 @@ class CliTests(unittest.TestCase):
     def test_doctor_command_dispatches(self) -> None:
         with patch.object(cli, "doctor", return_value=0) as doctor:
             self.assertEqual(cli.main(["doctor"]), 0)
-            doctor.assert_called_once_with()
+            doctor.assert_called_once_with(documents=False)
+        with patch.object(cli, "doctor", return_value=1) as doctor:
+            self.assertEqual(cli.main(["doctor", "--documents"]), 1)
+            doctor.assert_called_once_with(documents=True)
 
     def test_tools_commands_dispatch(self) -> None:
         with patch.object(cli, "tools_list", return_value=0) as tools_list:
@@ -399,7 +402,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("mode:       checkout", text)
         self.assertIn(f"repository: {checkout}", text)
         self.assertIn("agent-tools: 2.3.4", text)
-        self.assertIn("All checks passed.", text)
+        self.assertIn("All required checks passed.", text)
 
     def test_doctor_labels_installed_package_without_repository_claim(self) -> None:
         with (
@@ -435,7 +438,7 @@ class CliTests(unittest.TestCase):
             patch.object(capabilities, "locate_executable", return_value=None),
             redirect_stdout(StringIO()) as output,
         ):
-            self.assertEqual(cli.doctor(), 1)
+            self.assertEqual(cli.doctor(documents=True), 1)
         text = output.getvalue()
         self.assertIn("pypdf", text)
         self.assertIn("Poppler", text)
@@ -484,9 +487,53 @@ class CliTests(unittest.TestCase):
             patch.object(capabilities, "read_executable_version", return_value="1.2.3"),
             redirect_stdout(StringIO()) as output,
         ):
-            self.assertEqual(cli.doctor(), 1)
+            self.assertEqual(cli.doctor(documents=True), 1)
         self.assertIn("import failed: OSError: incompatible ABI", output.getvalue())
         self.assertIn("7 check(s) need attention.", output.getvalue())
+
+    def test_document_health_is_explicit_and_independent_of_native_health(self) -> None:
+        # Native checks are tested separately; here only document health varies.
+        for shape in ("absent", "partial", "broken", "metadata-missing", "healthy"):
+            for required in (False, True):
+                with self.subTest(shape=shape, required=required):
+                    def version(module):
+                        if shape in {"absent", "metadata-missing"} or (shape == "partial" and module == "pypdf"):
+                            return "not installed"
+                        return "1.2.3"
+
+                    def imported(module):
+                        if shape == "absent" or (shape == "partial" and module == "pypdf"):
+                            raise ModuleNotFoundError(module)
+                        if shape == "broken" and module == "pypdf":
+                            raise OSError("incompatible ABI")
+
+                    with (
+                        patch.object(cli, "_distribution_version", side_effect=version),
+                        patch.object(cli.importlib, "import_module", side_effect=imported),
+                        patch.object(cli, "detect_capabilities", return_value=()),
+                        redirect_stdout(StringIO()) as output,
+                    ):
+                        result = cli.doctor(documents=required)
+                    self.assertEqual(result, int(required and shape != "healthy"))
+                    text = output.getvalue()
+                    self.assertIn("Optional document libraries:", text)
+                    if shape != "healthy":
+                        self.assertIn("smartnuf-agent-tools[documents]", text)
+                        self.assertIn("agent-tools doctor --documents", text)
+                        self.assertNotIn("documents: all library checks passed", text)
+                    if shape == "broken":
+                        self.assertIn("import failed: OSError: incompatible ABI", text)
+
+    def test_optional_absence_does_not_hide_native_failures(self) -> None:
+        with (
+            patch.object(cli, "_distribution_version", return_value="not installed"),
+            patch.object(cli.importlib, "import_module", side_effect=ModuleNotFoundError("absent")),
+            patch.object(capabilities, "locate_executable", return_value=None),
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(cli.doctor(), 1)
+        self.assertIn("2 check(s) need attention.", output.getvalue())
+        self.assertIn("Optional results do not affect", output.getvalue())
 
     def test_doctor_does_not_probe_optional_bash(self) -> None:
         def locate(

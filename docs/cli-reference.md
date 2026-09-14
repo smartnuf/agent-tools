@@ -18,8 +18,8 @@ positional arguments:
   {install,doctor,tools,integrations}
     install             Install only named native capabilities with explicit
                         authorization.
-    doctor              Inspect Python libraries and default native tools without
-                        changing the host.
+    doctor              Inspect optional document libraries and default native tools
+                        without changing the host.
     tools               Inspect capabilities or configure optional desired capabilities.
     integrations        Inspect or manage explicitly supported agent integrations.
 
@@ -65,15 +65,19 @@ retry.
 ## agent-tools doctor
 
 ```text
-usage: agent-tools doctor [-h]
+usage: agent-tools doctor [-h] [--documents]
 
-Inspect Python libraries and default native tools without changing the host.
+Inspect optional document libraries and default native tools without changing the host.
 
 options:
-  -h, --help  show this help message and exit
+  -h, --help   show this help message and exit
+  --documents  require the full optional document-library stack (default: False)
 
-Exit status: 0 = all checks pass; 1 = a required library or default native capability
-needs attention.
+Document availability is reported separately and does not affect the default exit
+status. --documents requires all seven document libraries. Both modes check default
+native capabilities (Poppler and Ghostscript); no packages or configuration are changed.
+Exit status: 0 = all required checks pass; 1 = a required check needs attention; 2 =
+invalid syntax.
 ```
 
 ## agent-tools tools
