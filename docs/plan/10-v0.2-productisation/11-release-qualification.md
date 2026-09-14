@@ -105,3 +105,13 @@ scoped. The reusable release runbook now requires pre-merge inspection of built
 README metadata and surrounding availability prose before tagging. Actual PR
 commit messages and its revised body contain no issue-closing keyword; merge
 metadata must also preserve #124 as open.
+
+
+## Subsequent human disposition
+
+The human authorized v0.2.1 as the documentation-only correction, through final
+post-distribution review. The decision above is resolved in favor of a new
+immutable patch; no limitation waiver is used. Follow the
+[v0.2.1 plan](12-doc-patch-release.md) for current status. The v0.2.0 evidence and
+metadata defect remain historical facts; final gate closure still requires
+the corrected public description and completed qualification/review.

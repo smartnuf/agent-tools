@@ -66,6 +66,8 @@ qualification; this record does not expand the documented platform matrix.
 Post-publication review found one stale availability sentence in the immutable
 v0.2.0 PyPI README. Source documentation and a GitHub release erratum correct
 the presentation but cannot replace published PyPI metadata. The front-door
-gate remains open pending human disposition; follow the
+gate remains open while the authorized v0.2.1 documentation patch is qualified
+and published; follow its
+[execution plan](plan/10-v0.2-productisation/12-doc-patch-release.md) and the
 [known-limit record](plan/10-v0.2-productisation/11-release-qualification.md#published-text-defect-and-disposition)
-before declaring the milestone complete or selecting another release.
+before declaring the milestone complete.
