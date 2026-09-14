@@ -35,6 +35,15 @@ class NativeEvidenceTests(unittest.TestCase):
         self.assertTrue(result["output_truncated"])
         self.assertEqual(len(result["output_tail"]), evidence.MAX_OUTPUT_BYTES)
 
+    def test_unresolvable_alias_still_gets_read_only_version_probe(self):
+        with mock.patch.object(evidence.shutil, "which", return_value=__file__), mock.patch.object(
+            evidence.Path, "resolve", side_effect=OSError("app alias")
+        ), mock.patch.object(evidence.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+            result = evidence.probe("winget", "--version")
+        self.assertEqual(result["resolution_error"], "app alias")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(run.call_args.args[0], [__file__, "--version"])
+
     def test_timeout_preserves_partial_observation(self):
         def run(argv, **kwargs):
             kwargs["stdout"].write(b"partial output")

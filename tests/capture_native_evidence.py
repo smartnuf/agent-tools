@@ -35,6 +35,11 @@ def probe(command: str, *arguments: str) -> dict:
         return result
     try:
         result["resolved_executable"] = str(Path(executable).resolve(strict=True))
+    except OSError as error:
+        # Windows app-execution aliases can run even when realpath is unavailable.
+        # This is an observation, not the production manager identity verifier.
+        result["resolution_error"] = str(error)
+    try:
         with tempfile.TemporaryFile() as output:
             try:
                 completed = subprocess.run(
