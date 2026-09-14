@@ -14,12 +14,11 @@ canonical product policy.
 
 ## Why research after v0.2
 
-The immediate goal is deliberately small: one installed CLI, explicit
-`agent-tools install <list>`, optional document dependencies, real-provider CI
-evidence, and honest platform coverage. Once that is useful and released, there
-is a much larger possible product space. We should explore it before selecting
-the next Intent rather than allowing individual feature ideas to accrete into
-the product accidentally.
+The completed v0.2 slice delivered one installed CLI, explicit named-capability
+installation, optional document dependencies, real-provider CI evidence and
+honest platform coverage. A much larger possible product space remains. A fresh
+human Intent should select whether and which research to pursue; individual
+feature ideas must not accrete into the product automatically.
 
 A useful research phase should combine primary-source rights/licensing work,
 real tool experiments, agent-workflow observation, and prototype interfaces.
@@ -51,6 +50,76 @@ For every candidate tool or provider, research at least:
 
 Do not equate “available in a package manager” with “appropriate for Agent Tools
 to install”. Rights, provider quality, automation semantics, and evidence matter.
+
+## Windows provider choice by capability
+
+Harvested after v0.2 on 2026-09-14. These are **hypotheses for research**, not
+accepted architecture, a global provider order, supported adapters, or scheduled
+work. Investigate which provider fits each capability instead of assuming one
+package manager per OS. Agent Tools itself remains distributed through PyPI/uv
+under [Decision 0007](../decisions/0007-v0.2-product-and-distribution-boundary.md).
+
+| Candidate | Hypothesis and questions to preserve |
+|---|---|
+| WinGet | Remains important for native Windows, especially conventional applications and publisher-supported installers. |
+| Scoop | Particularly promising for CLI/development/science/document/media tools: its per-user, scriptable archive/shim model may offer relatively low host impact. Verify that hypothesis per manifest, rather than assuming side-effect-free installation. |
+| WinGet and Scoop together | May merit first-class peer status chosen by capability, rather than a simple global fallback order. Research evidence must precede such a decision. |
+| Chocolatey | Potentially useful for broad/long-tail coverage; evaluate privilege, package provenance, community-repository semantics, automation quality and host side effects separately. |
+| MSYS2/pacman | Likely needs a distinct execution-environment/provider-ecosystem model, analogous in architectural significance to WSL, rather than treatment as just another native Windows package source. Its environments and runtime boundaries need explicit research. |
+| Language-native mechanisms | Consider uv, npm, cargo and similar mechanisms where authoritative upstream practice or technical suitability makes them preferable. |
+
+[Scoop's own overview](https://github.com/ScoopInstaller/Scoop#what-does-scoop-do)
+and [MSYS2's environment documentation](https://www.msys2.org/docs/environments/)
+are discovery starting points, not evidence that Agent Tools supports them.
+Provider selection belongs in construction of an explicit provider plan. A
+failed chosen provider must remain a reported failure; this research does not
+authorize silent runtime fallback to another provider or relax the existing
+[installed planning/authorization contract](../decisions/0009-installed-capability-install.md).
+
+### Ghostscript as a concrete research case
+
+As checked on 2026-09-14, the current WinGet Ghostscript route remains unavailable
+upstream; the [package request](https://github.com/microsoft/winget-pkgs/issues/267547)
+is marked interactive-only/blocked, and the
+[publisher explains the silent-installer change](https://artifex.com/blog/ghostscript-10.01.0-disabling-silent-install-option).
+The [Scoop Main manifest at `488822b`](https://github.com/ScoopInstaller/Main/blob/488822be67fa1ece5875165e9b80bb3fa862e6a0/bucket/ghostscript.json)
+(version 10.08.0) instead declares publisher-hosted executable downloads for
+archive extraction and exposes the CLI through shims, including `gs`, without
+using the interactive installer. This is manifest inspection, not a new
+Agent Tools installation test or support claim.
+
+That technique makes Scoop technically interesting, but requires explicit
+research into licensing/automation rights, provenance, supportability, update
+semantics, architecture coverage, and whether Agent Tools should rely on it.
+The manifest includes checksums, registry install/uninstall hooks and a PATH
+addition; inspect those effects and shared-state ownership too. Its observed
+32-bit/x86 and 64-bit/x64 entries do **not** establish Windows ARM64 support.
+Package availability or extraction success alone does not establish rights or
+an acceptable integration contract.
+
+### Candidate empirical provider/tool survey
+
+If a fresh Intent selects this research, assemble roughly **50–100 representative
+tools** CLI agents plausibly need across software development, scientific
+research, engineering, document/PDF work, media/artwork, archives,
+networking/inspection and other common workflows. Compare WinGet, Scoop,
+Chocolatey, MSYS2 and relevant language-native mechanisms per capability.
+
+Record availability and version freshness; x64/ARM64 evidence; privilege and
+unattended/noninteractive behavior; source/provenance, licence and automation
+rights, signatures/checksums; host side effects and PATH/environment behavior;
+discovery/version verification; idempotence, partial failure and retry safety;
+uninstall/ownership semantics; CI/disposable-host testability; and maintenance
+and security burden. Distinguish inspected manifests from actual experiments,
+and name the provider/tool/host versions behind each observation.
+
+Where useful, use controlled tasks to observe what Codex, Claude and other
+agents choose, and whether availability changes success, quality, latency,
+token use or recovery behavior. Connect results to the
+[agent-preference research](#agent-preference-and-task-to-tool-research), not an
+automatically adopted catalogue. The survey itself is a candidate programme,
+not the selected next Intent. See also the separate
+[release-engineering learning](../releasing.md#post-v02-release-engineering-learning).
 
 ## Candidate installation interfaces
 
