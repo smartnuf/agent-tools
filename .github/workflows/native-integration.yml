@@ -74,8 +74,24 @@ jobs:
           name: native-test-dist
           path: ${{ runner.temp }}/native-test-dist
       - name: Install native tools through external providers
+        id: native-fixtures
         timeout-minutes: 10
         uses: ./.github/actions/install-native
+      - name: Capture native fixture outcome even after installer timeout
+        if: always() && steps.native-fixtures.outcome != 'skipped'
+        timeout-minutes: 5
+        uses: ./.github/actions/capture-native
+        with:
+          fixture-outcome: ${{ steps.native-fixtures.outcome }}
+      - name: Retain native fixture evidence even after capture failure
+        if: always() && steps.native-fixtures.outcome != 'skipped'
+        timeout-minutes: 2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-environment-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-environment/
+          if-no-files-found: error
+          retention-days: 90
       - name: Preseed clone bootstrap Python
         run: uv python install 3.11
       - name: Exercise delegated clone native setup twice (Windows)

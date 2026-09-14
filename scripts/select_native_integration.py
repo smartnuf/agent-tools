@@ -9,6 +9,7 @@ import subprocess
 
 NATIVE_PATHS = (
     ".github/actions/install-native/**",
+    ".github/actions/capture-native/**",
     ".github/workflows/native-integration.yml",
     ".github/workflows/release.yml",
     "scripts/bootstrap.ps1",
