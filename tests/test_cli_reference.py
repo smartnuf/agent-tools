@@ -4,6 +4,9 @@ import argparse
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from io import StringIO
 import os
+import signal
+import subprocess
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -64,6 +67,38 @@ class CliReferenceTests(unittest.TestCase):
             with patch("agent_tools.cli_reference.build_parser", return_value=parser):
                 with self.assertRaisesRegex(ValueError, "stale CLI reference"):
                     check_reference(path)
+
+    def test_configuration_interrupt_status_matches_help_on_each_platform(self):
+        # This tests only CLI propagation/CPython exit translation. The existing
+        # cooperative-cancellation fixtures test mutation recovery itself.
+        cases = (
+            (["tools", "enable", "bash", "--allow-config-mutation"], "set_capability"),
+            (["tools", "disable", "bash", "--allow-config-mutation"], "set_capability"),
+            (["integrations", "claude-code", "apply", "--allow-config-mutation"], "apply_git_bash_integration"),
+            (["integrations", "claude-code", "remove", "--allow-config-mutation"], "remove_git_bash_integration"),
+        )
+        for args, target in cases:
+            with self.subTest(args=args):
+                code = (
+                    "import signal, sys\n"
+                    "from unittest.mock import patch\n"
+                    "from agent_tools import cli\n"
+                    "def interrupt(*args, **kwargs): signal.raise_signal(signal.SIGINT)\n"
+                    f"with patch.object(cli, {target!r}, side_effect=interrupt):\n"
+                    f"    raise SystemExit(cli.main({args!r}))\n"
+                )
+                result = subprocess.run([sys.executable, "-c", code],
+                    capture_output=True, text=True, timeout=15)
+                if sys.platform == "win32":
+                    self.assertEqual(result.returncode & 0xFFFFFFFF, 0xC000013A)
+                else:
+                    self.assertEqual(result.returncode, -signal.SIGINT)
+                self.assertIn("KeyboardInterrupt", result.stderr)
+        text = render_reference()
+        # Wrapping is incidental: check the common facts after normalization.
+        normalized = " ".join(text.split())
+        self.assertEqual(normalized.count("shell status 130"), 4)
+        self.assertEqual(normalized.count("0xC000013A"), 4)
 
     def test_examples_are_extracted_from_guides_without_executing_shell(self):
         guide = '''```sh

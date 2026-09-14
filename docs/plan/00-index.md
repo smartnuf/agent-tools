@@ -91,7 +91,7 @@ pass and the wheel rebuilt from the restricted sdist passes outside-checkout
 CLI tests. #106 adds the third completed gate: `tests/test_cli_reference.py`,
 `tests/check_cli_docs.py`, installed-help comparisons and pre-publication checks
 keep the generated reference and guide invocations aligned with argparse.
-The suite now has 406 passing tests. These changes await the next feature-bearing
+The suite now has 407 passing tests. These changes await the next feature-bearing
 release. Next, discover/specify #57's accepted optional-document boundary;
 its implementation estimate remains to be determined from import, packaging and
 upgrade evidence. The [v0.2 plan](10-v0.2-productisation/README.md) retains the

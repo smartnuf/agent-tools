@@ -68,7 +68,7 @@ concrete guide invocations are parsed without execution, including inline comman
 and README platform launcher variants. Placeholder syntax and bare command-path
 references remain conceptual prose (command paths are covered by help traversal).
 
-The 406-test suite passes. An isolated wheel rebuilt from the restricted sdist
+The 407-test suite passes. An isolated wheel rebuilt from the restricted sdist
 passes all installed smoke checks, including semantic source comparison of every
 help page outside a checkout. Required CI and pre-publication release steps run
 the reference/example checker; release also validates installed help before
@@ -79,3 +79,17 @@ none after exact-head review/merge. PowerShell is unavailable locally; local
 POSIX checks and hosted Windows evidence are reported separately. No architecture
 policy choice or new mutation boundary was needed. Recommend #57 discovery next;
 #57/#104/final-guide/release gates remain open and no v0.2 publication is claimed.
+
+The first review found missing mutation-interruption status documentation.
+This is completion of the existing public help contract, not a change to
+cancellation or exit policy. The closure check covered desired enable/disable,
+integration apply/remove, recovery failures, force-abort and the separately
+handled install interruption. CPython 3.11–3.13 `Modules/main.c` (`exit_sigint`)
+returns Windows `STATUS_CONTROL_C_EXIT` for an unhandled KeyboardInterrupt;
+on POSIX it re-raises SIGINT (shell 130, direct subprocess -2). See the
+[CPython source](https://github.com/python/cpython/blob/3.13/Modules/main.c).
+A subprocess test delivers SIGINT in each CLI mutation handler without writing
+configuration; it verifies platform exit translation while the existing M3
+fixtures remain responsible for actual recovery correctness. Parser help shares
+one interruption paragraph across the affected commands. No new policy, engine
+change or architecture decision is needed.
