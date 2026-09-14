@@ -1,6 +1,6 @@
 # Installed native mutation evidence — #115
 
-- Base: `6ae3bec9b40602cdba844faa6fc26f61fe371794` (PR #119), reconciled from PR #116.
+- Base: `042fc28a9b7482fe80368758ec63a21e574aed27` (PR #121), reconciled from PR #116.
 - Milestone 8: open, 4/8 gates complete; #104 remains the end-to-end target.
 - Estimate: 1–2 person-days, actual effort untracked; provider/review wait excluded.
 - Merge owner: this stream. No concurrent repository mutation work.
@@ -111,3 +111,11 @@ unpublished after-capture/validation corrections. Native path selection now
 includes the shared manager-identity module and its tests. The combined baseline
 passes 429 tests; installed-wheel snapshots, mutation authorization refusal and
 after-capture pass locally. New real mutation evidence remains pending.
+
+Run 34872132255 proved successful WinGet Poppler mutation, verification and
+persisted provenance but failed final public reporting with UnicodeEncodeError
+on a redirected cp1252 stream. No retry was made. Focused #120/PR #121 repaired
+that boundary and merged after 429 tests, green checks and clean review. This
+branch now integrates it; the combined baseline passes 432 tests. The completed
+#117 review also found cancellation-module changes missing from native CI
+selection; the module and selection regression are included in this wave.
