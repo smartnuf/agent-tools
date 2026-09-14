@@ -61,40 +61,58 @@ Uninstalling removes uv's isolated application environment and launcher. It
 does not remove user-owned desired state, reverse an active agent integration,
 or uninstall external native providers such as Bash, Poppler, or Ghostscript.
 
-## Install native capabilities (next release)
+## Install native capabilities (v0.2+)
 
-The installed CLI built from current `main` provides native installation;
-this command is not in the published v0.1.2 release yet. After making the
-installed launcher available on `PATH` (or using its absolute path above):
+These commands require v0.2 or later; published v0.1.2 does not include them.
+Use the installed launcher from the quick start. Names come from
+`agent-tools tools list`; they are capabilities such as `poppler`, not arbitrary
+package names, files or named sets.
 
-```sh
-agent-tools install poppler ghostscript --dry-run
-agent-tools install poppler ghostscript --allow-provider-mutation
-agent-tools install bash
-agent-tools install --help
+PowerShell — install Poppler:
+
+```powershell
+& $agentTools install poppler --dry-run
+& $agentTools install poppler --allow-provider-mutation
+& $agentTools install --help
 ```
 
-The first command displays a read-only plan. The second authorizes its native
-package-manager actions and managed provenance recording. Only named
-capabilities are requested; enabling Bash in configuration does not add it to
-an installation of Poppler. Stored exact preferences for requested capabilities
-are honored. Already-satisfied requests are verified no-ops; otherwise a command
-without the mutation flag displays the plan and refuses installation.
+Linux or macOS — install Poppler and Ghostscript:
 
-A usable platform package manager and its existing privileges are prerequisites.
-The command reports partial execution and provenance failures separately, with
-recovery guidance; do not blindly retry an uncertain result. It does not enable
-capabilities, remove shared providers, or alter your shell profile. See the
-[platform guide](https://github.com/smartnuf/agent-tools/blob/main/docs/platforms.md)
-for provider and privilege requirements; `install --help` describes options and
-exit statuses.
+```sh
+"$agent_tools" install poppler ghostscript --dry-run
+"$agent_tools" install poppler ghostscript --allow-provider-mutation
+"$agent_tools" install --help
+```
 
-## Optional document libraries (next release)
+The dry run displays a read-only plan. The mutation flag authorizes the displayed
+native package-manager actions and managed provenance recording. There is no
+interactive confirmation prompt. Only named capabilities are requested; enabling
+Bash in configuration does not add it to an installation of Poppler. Stored exact
+preferences for requested capabilities are honored. Already-satisfied requests
+are verified no-ops; otherwise a command without the mutation flag displays the
+plan and refuses installation.
 
-The wheel built from current `main` installs a core CLI without third-party
-Python dependencies. To include the existing PDF, image, Word and Excel library
-bundle, explicitly select the `documents` extra. This extra and diagnostic flag
-are next-release functionality; published v0.1.2 still bundles the libraries.
+The supported package manager and its existing privileges must already be
+available. On Windows, the catalogue's Ghostscript WinGet package is currently
+unavailable upstream; there is no automatic fallback. Existing verified
+Ghostscript can still satisfy discovery. See the [platform guide](https://github.com/smartnuf/agent-tools/blob/main/docs/platforms.md)
+for provider requirements, exact tested combinations and known gaps.
+
+Status 0 requires verified success or no-op and successful or unnecessary
+provenance recording. Status 1 means planning, authorization, execution,
+verification or persistence did not finish successfully; invalid requests return
+2 and interruption returns 130. Read the separate host-mutation and provenance
+results: a nonzero status does not mean that nothing changed. Follow the reported
+recovery guidance and do not blindly retry a partial or uncertain result.
+Installation does not enable capabilities, remove shared providers or alter your
+shell profile.
+
+## Optional document libraries (v0.2+)
+
+Version 0.2 installs a core CLI without third-party Python dependencies. To
+include the existing PDF, image, Word and Excel library bundle, explicitly select
+the `documents` extra. The extra and diagnostic flag require v0.2 or later;
+published v0.1.2 still bundles the libraries.
 
 ```sh
 uv tool install --python 3.13 --reinstall 'smartnuf-agent-tools[documents]'
@@ -312,8 +330,8 @@ stays untracked.
 
 - **Python and packages:** use [`uv`](https://docs.astral.sh/uv/) to create and
   update `.venv` from `requirements.txt`.
-- **Windows native tools:** prefer WinGet; use Chocolatey or Scoop only where
-  WinGet is unsuitable.
+- **Windows native tools:** the installed CLI uses WinGet. External Chocolatey
+  fixtures in CI do not establish a supported Agent Tools adapter or fallback.
 - **Debian/Ubuntu:** use `apt`; Fedora/RHEL use `dnf`; Arch uses `pacman`.
 - **macOS:** use Homebrew and exercise automation on hosted macOS runners.
 - **Poppler and Ghostscript:** install them through the native package manager;
@@ -340,7 +358,7 @@ This is a convenience environment, not a substitute for project-specific depende
 
 Keep changes small and portable. Develop reusable behaviour in `src/agent_tools/`, unit-test it without modifying the host, then exercise bootstrap and native installations on disposable GitHub-hosted Windows, Ubuntu, and macOS runners. CI bootstraps twice to catch common idempotency failures and runs `doctor` against real Poppler, Ghostscript, and Python packages. Native installation on a workstation remains explicitly opt-in.
 
-For routine operation:
+For source-checkout maintenance:
 
 1. Pull reviewed changes.
 2. Run the platform update script to refresh `.venv`.
