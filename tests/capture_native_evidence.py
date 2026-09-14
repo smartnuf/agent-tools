@@ -116,8 +116,11 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--phase", choices=("before", "after"), required=True)
     parser.add_argument("--fixture-outcome", default="not-started")
+    parser.add_argument("--evidence-class", choices=("external-preseed-observation", "native-mutation-observation"),
+                        default="external-preseed-observation")
     args = parser.parse_args()
     data = collect(args.phase, args.fixture_outcome)
+    data["evidence_class"] = args.evidence_class
     args.output.parent.mkdir(parents=True, exist_ok=True)
     # A duplicate capture is a configuration error, not overwrite authority.
     with args.output.open("x", encoding="utf-8") as stream:
@@ -129,8 +132,8 @@ def main() -> int:
         with open(summary, "a", encoding="utf-8") as stream:
             stream.write(
                 f"\nNative fixture environment capture ({args.phase}): "
-                f"`{args.output.name}`. This is external-preseed evidence, "
-                "not installed-CLI mutation proof. See the native-environment artifact.\n"
+                f"`{args.output.name}` ({args.evidence_class}). Environment observations "
+                "alone are not installed-CLI mutation proof; inspect the job's result artifact.\n"
             )
     return 0
 

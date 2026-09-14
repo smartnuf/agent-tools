@@ -24,6 +24,10 @@
 | v0.2 #109 runtime slice | Optional documents extra, diagnostics and installed shapes | complete | completed with #111; 4/8 overall | 1–1.5 days | none |
 | v0.2 #111 | Optional-document artifact migrations and preservation | complete | 4/8 v0.2 gates complete overall | 1–1.5 days | none |
 | v0.2 #106 | Generated CLI reference and help/docs drift prevention | complete | 3/8 v0.2 gates complete overall | 0.25–0.75 day | none |
+| v0.2 #104/#114 | Provider/platform discovery and retained environment capture | complete | no additional gate complete | 0.5–1 day | none |
+| v0.2 #118 | WinGet activation identity prerequisite | complete | no additional gate complete | 0.5–1.5 days | none |
+| v0.2 #120 | Legacy-encoded native reporting prerequisite | complete | no additional gate complete | 0.25–0.5 day | none |
+| v0.2 #104/#115 | Real installed-CLI native mutation and explicit platform matrix | complete on #117 merge | 6/8 v0.2 gates complete overall on merge | 1–2 days | exact-head review/integration only |
 
 Estimated implementation effort through M3: **complete**. Discovery for #103
 is recorded in its [task plan](10-v0.2-productisation/01-installed-cli.md), and
@@ -35,7 +39,9 @@ human-approved named-only request contract. The forecast above covers #103 and
 [Implementation discovery](10-v0.2-productisation/04-document-implementation.md)
 revises this to 2–3 days: runtime/installed-shape work (1–1.5 days) and #111
 lifecycle evidence (1–1.5 days), both implemented;
-remaining #104/release work needs its own discovery-based estimates. Actual effort is untracked.
+the #104 discovery/evidence work and its bounded prerequisites are implemented
+as recorded above. Final guide and release qualification work still needs
+discovery-based estimates. Actual effort is untracked.
 
 Former M4a/M4b are historical, cancelled objectives rather than deferred work
 or completed implementation. Their GitHub milestones are closed as not planned
@@ -99,7 +105,7 @@ pass and the wheel rebuilt from the restricted sdist passes outside-checkout
 CLI tests. #106 adds the third completed gate: `tests/test_cli_reference.py`,
 `tests/check_cli_docs.py`, installed-help comparisons and pre-publication checks
 keep the generated reference and guide invocations aligned with argparse.
-The suite now has 429 passing tests. These changes await the next feature-bearing
+The suite now has 433 passing tests. These changes await the next feature-bearing
 release. #57 discovery specifies the `documents` extra and explicit
 `doctor --documents` validation in [Decision 0010](../decisions/0010-document-extra-and-diagnostics.md),
 backed by disposable uv selection experiments. #109 now supplies optional
@@ -108,16 +114,19 @@ installed-wheel checks. #111 supplies old-release artifact migration,
 pin/reinstall/removal/failure/rollback preservation and separately labelled
 source-fixture extra-retention evidence; see [the lifecycle plan](10-v0.2-productisation/05-document-lifecycle.md).
 The optional-document gate is complete on merge (4/8 overall), closing
-#111/#109/#57. Merged #114 records provider/platform discovery and environment
-capture; #118/PR #119 repaired WinGet activation identity with installed Windows
-proof. #115/PR #117 now demonstrates actual WinGet mutation and persisted success
-but its final report failed on a legacy-encoded pipe. The focused
-[#120 reporting prerequisite](10-v0.2-productisation/09-native-reporting.md)
-adds 0.25–0.5 day, excluding review/CI wait, before #115's 1–2 day evidence slice
-can complete. No #104 gate advances until its full proof and matrix pass review.
-See the [native evidence plan](10-v0.2-productisation/06-native-evidence.md).
-Neither #104 gate completes from external-preseed observations. The [v0.2 plan](10-v0.2-productisation/README.md) retains the
-remaining document-dependency, platform, final-guide and release gates.
+#111/#109/#57. #114/#116 supplied provider/platform discovery and environment
+capture; #118/#119 repaired WinGet activation identity, and #120/#121 repaired
+legacy-encoded native reporting. #115/PR #117 now supplies inspected real apt,
+Homebrew and WinGet mutation, provenance, fresh rediscovery and byte-preserving
+no-op evidence plus the [maintained platform matrix](../platforms.md#observed-installed-cli-native-mutations).
+Its two #104 gates complete on merge (6/8 overall); Windows Ghostscript and
+untested common variants remain explicit gaps, not fallback success. See the
+[native evidence plan](10-v0.2-productisation/06-native-evidence.md) and
+[mutation implementation record](10-v0.2-productisation/07-native-mutation.md).
+The 1–2 day evidence slice and focused 0.5–1.5 day identity / 0.25–0.5 day
+reporting prerequisites are implemented, excluding review/CI wait. Final guide
+reconciliation and exact-artifact release qualification remain open; discover
+and estimate those next, preserving public v0.1.2 until authorized publication.
 
 The v0.2 goal is deliberately minimal: one installed CLI, `agent-tools install
 <list>`, optional document dependencies, real-provider evidence where practical,

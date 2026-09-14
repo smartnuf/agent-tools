@@ -147,3 +147,98 @@ jobs:
         run: |
           uv tool install --python 3.13 "$RUNNER_TEMP"/native-test-dist/*.whl
           python tests/check_installed_cli.py "$(uv tool dir --bin)/agent-tools" "$RUNNER_TEMP/native-test-dist" --native-tools require
+
+  installed-cli-native-mutation:
+    needs: build-native-test-artifact
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            manager: apt
+            capabilities: poppler ghostscript
+          - os: macos-latest
+            manager: brew
+            capabilities: poppler ghostscript
+          - os: windows-latest
+            manager: winget
+            capabilities: poppler
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.7"
+      - name: Configure private mutation fixture environment
+        shell: bash
+        run: |
+          {
+            echo "UV_TOOL_DIR=$RUNNER_TEMP/mutation-tools"
+            echo "UV_TOOL_BIN_DIR=$RUNNER_TEMP/mutation-bin"
+            echo "XDG_CONFIG_HOME=$RUNNER_TEMP/mutation-config"
+            echo "XDG_STATE_HOME=$RUNNER_TEMP/mutation-state"
+          } >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: native-test-dist
+          path: ${{ runner.temp }}/mutation-dist
+      - name: Capture fresh host before CLI mutation
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          python tests/capture_native_evidence.py --phase before --evidence-class native-mutation-observation \
+            --output "$RUNNER_TEMP/mutation-evidence/environment-before.json"
+      - name: Install isolated application wheel
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          mkdir "$RUNNER_TEMP/mutation-work"
+          cd "$RUNNER_TEMP/mutation-work"
+          uv --no-config tool install --python 3.13 "$RUNNER_TEMP"/mutation-dist/*.whl
+      - name: Prove installed CLI mutation, rediscovery, provenance and no-op repeat
+        id: mutation
+        timeout-minutes: 23
+        shell: bash
+        env:
+          EXPECTED_MANAGER: ${{ matrix.manager }}
+          CAPABILITIES: ${{ matrix.capabilities }}
+        run: |
+          interpreter="$UV_TOOL_DIR/smartnuf-agent-tools/bin/python"
+          executable="$UV_TOOL_BIN_DIR/agent-tools"
+          if test "$RUNNER_OS" = Windows; then
+            interpreter="$UV_TOOL_DIR/smartnuf-agent-tools/Scripts/python.exe"
+            executable="$UV_TOOL_BIN_DIR/agent-tools.exe"
+          fi
+          cd "$RUNNER_TEMP/mutation-work"
+          read -r -a capabilities <<< "$CAPABILITIES"
+          "$interpreter" -I "$GITHUB_WORKSPACE/tests/check_native_mutation.py" \
+            --executable "$executable" --wheel "$RUNNER_TEMP"/mutation-dist/*.whl \
+            --output "$RUNNER_TEMP/mutation-evidence/driver" --manager "$EXPECTED_MANAGER" \
+            --allow-provider-mutation "${capabilities[@]}"
+      - name: Capture host after mutation or failure
+        if: always()
+        timeout-minutes: 3
+        shell: bash
+        env:
+          MUTATION_OUTCOME: ${{ steps.mutation.outcome }}
+        run: |
+          interpreter="$UV_TOOL_DIR/smartnuf-agent-tools/bin/python"
+          if test "$RUNNER_OS" = Windows; then
+            interpreter="$UV_TOOL_DIR/smartnuf-agent-tools/Scripts/python.exe"
+          fi
+          if test -x "$interpreter"; then
+            "$interpreter" -I "$GITHUB_WORKSPACE/tests/check_native_mutation.py" --capture-after "$RUNNER_TEMP/mutation-evidence/environment-after.json" --fixture-outcome "$MUTATION_OUTCOME"
+          else
+            # Application installation failed before native mutation could start.
+            python tests/capture_native_evidence.py --phase after --evidence-class native-mutation-observation --fixture-outcome "$MUTATION_OUTCOME" --output "$RUNNER_TEMP/mutation-evidence/environment-after.json"
+          fi
+      - name: Retain native mutation and failure evidence
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-mutation-${{ runner.os }}-${{ runner.arch }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mutation-evidence/
+          if-no-files-found: error
+          retention-days: 90

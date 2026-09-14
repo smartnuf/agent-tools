@@ -171,7 +171,7 @@ package managers below install prerequisites, not Agent Tools.
 | Installed artifact | CI `install-and-test`, core/documents and lifecycle drivers | Public CLI and optional dependency shapes outside a checkout; real old-release artifact migrations against a controlled local index |
 | External native preseed | Native `external-preseed-and-test`, shared `install-native` action | Direct manager fixture preparation, discovery and all-satisfied CLI/bootstrap behaviour |
 | Simulated provider mutation | Unit tests and `test_provider_execution_integration.py` | Planner/executor/provenance/failure contracts on fixtures and disposable subprocesses; no real native manager installation |
-| Real installed-CLI mutation | #115, not yet complete | Required future proof of actual supported provider requests, final rediscovery/provenance and no-op repeat |
+| Real installed-CLI mutation | Native `installed-cli-native-mutation`, #115/PR #117 | Actual apt/Homebrew Poppler+Ghostscript and WinGet Poppler commands through the installed wheel, verified provenance, fresh rediscovery and byte-preserving no-op repeat; exact observations below |
 | Published artifact lifecycle | GitHub release smoke, PyPI smoke | Published artifact install/upgrade/reinstall/removal with externally seeded prerequisites; not native mutation by Agent Tools |
 
 [PR #113's native run](https://github.com/smartnuf/agent-tools/actions/runs/34864622805)
@@ -181,9 +181,9 @@ and setup log rather than carrying these versions forward.
 
 | Observed host/image | Evidence | Limitation |
 |---|---|---|
-| Ubuntu 24.04.5 LTS; image `ubuntu-24.04`, `20260907.300.1` | apt-preseeded Poppler/Ghostscript, installed discovery/no-op | Not Debian, other Ubuntu releases, ARM64 or CLI-driven apt mutation |
+| Ubuntu 24.04.5 LTS; image `ubuntu-24.04`, `20260907.300.1` | apt-preseeded Poppler/Ghostscript, installed discovery/no-op | Not Debian, other Ubuntu releases or ARM64; this baseline used external fixtures |
 | Windows Server 2025; image `windows-2025-vs2026`, `20260907.229.1` | WinGet-preseeded Poppler, Chocolatey-preseeded Ghostscript, installed discovery/no-op | Not Windows 10/11 or Windows ARM64; Chocolatey is not an Agent Tools adapter |
-| macOS 26.6.2 build 25G83; image `macos-26-arm64`, `20260907.0351.1` | Homebrew-preseeded Poppler/Ghostscript, installed discovery/no-op on the ARM64 image | Not Intel macOS or older releases; no CLI-driven Homebrew mutation yet |
+| macOS 26.6.2 build 25G83; image `macos-26-arm64`, `20260907.0351.1` | Homebrew-preseeded Poppler/Ghostscript, installed discovery/no-op on the ARM64 image | Not Intel macOS or older releases; this baseline used external fixtures |
 
 The shared external fixture now captures before/after JSON observations in
 `native-environment-*` artifacts (90-day requested retention) and the job log.
@@ -195,6 +195,39 @@ or version observations remain unknown. Context indicators do not prove the
 absence of virtualization or emulation. Artifact expiry is not durable release
 qualification: the release coverage record must retain the relevant observed
 matrix and link its exact qualification run.
+
+### Observed installed-CLI native mutations
+
+[Run 34873393511](https://github.com/smartnuf/agent-tools/actions/runs/34873393511)
+on 2026-09-14 passed separate fresh hosted jobs for PR #117 head
+`7a765064153f3bf8364d220438f7e9f3650657a9`, tested as merge commit
+`0db9850cd2b4a7cc15a9525ab644e8b0850c749f`. All three consumed the same 0.2.0
+candidate wheel, SHA-256
+`3dbf6f5fde622f00e6285efee825489d47194b432ed52df519f879f24370a080`, installed
+through uv 0.12.7 with Python 3.13.15 outside the checkout. This is candidate
+provider evidence, not a published PyPI release or exact-tag qualification.
+The matrix retains a dated observation; the PR review record separately links
+the required successful native run for its exact current head before merge.
+
+| Observed OS/image and architecture | Actual installed-CLI provider requests | Observed versions and result |
+|---|---|---|
+| Ubuntu 24.04.5 LTS, kernel 6.17.0-1022-azure; `ubuntu24` image `20260907.300.1`; x86_64, 64-bit Python | apt 2.8.3: `poppler-utils`, `ghostscript`; both capabilities initially unsatisfied | Poppler 24.02.0, Ghostscript 10.02.1; successful commands, final verification/provenance, fresh rediscovery and no-op repeat |
+| Windows Server 2025, build 26100; `win25-vs2026` image `20260907.229.1`; AMD64, 64-bit Python | WinGet 1.11.510: `oschwartz10612.Poppler`; Poppler initially unsatisfied | Poppler 25.07.0; successful command, final verification/provenance, fresh rediscovery and no-op repeat; Ghostscript not targeted |
+| macOS 26.6.2 build 25G83, Darwin 25.6.0; `macos26` image `20260907.0351.1`; ARM64, 64-bit Python, translation probe 0 | Homebrew 6.0.22: `poppler`, `ghostscript`; both capabilities initially unsatisfied | Poppler 26.09.0, Ghostscript 10.07.1; successful commands, final verification/provenance, fresh rediscovery and no-op repeat |
+
+Each driver retained the real command results and production provenance, then
+used a fresh installed process for rediscovery. Repeating the same public request
+without mutation authorization reported no changes and preserved provenance
+bytes. Existing providers were not removed to manufacture absence. Windows
+retained its earlier Git/Xpdf `pdftotext` 4.06 on PATH; `pdfinfo` and `pdftoppm`
+came from the installed WinGet Poppler package. The capture records this mixed
+executable discovery rather than attributing every executable to the new package.
+
+`native-mutation-*` artifacts contain before/after environments, the wheel
+identity, plans, command results, provenance, rediscovery and repeat results.
+Retain these observed combinations in release notes before artifact expiry.
+The table does not qualify Windows clients/ARM64, Intel macOS, other Linux
+distributions, WSL integration or Windows Ghostscript; those gaps remain below.
 
 ### Windows Ghostscript provider gap
 
@@ -225,9 +258,9 @@ installer. A change of provider or installer policy needs its own decision.
 | WSL | WSL-local versus Windows-host separation fixtures | Dedicated Windows/WSL qualification; ordinary Linux container evidence cannot prove Windows/WSL integration |
 | Cross-host Windows installation from WSL; Claude adapter outside native Windows | Explicitly outside the accepted contracts | Do not treat as an evidence gap to fill without a new product decision |
 
-#115 first targets fresh, separate apt/Homebrew Poppler+Ghostscript and WinGet
-Poppler jobs through the installed CLI. Initially present providers must be
-reported as no-op evidence, never removed or hidden to manufacture a mutation
-result. The maintained matrix will gain mutation credit only from observed
-successful provider requests and final verification. See the
+#115 exercises separate apt/Homebrew Poppler+Ghostscript and WinGet Poppler jobs
+through the installed CLI. Initially present providers remain no-op evidence;
+the target job fails before mutation if any advertised capability is already
+satisfied, requiring another disposable image for full coverage.
+It never removes or hides providers to manufacture a result. See the
 [native evidence contract](plan/10-v0.2-productisation/06-native-evidence.md).

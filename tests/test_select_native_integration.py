@@ -10,6 +10,8 @@ class NativeIntegrationSelectionTests(unittest.TestCase):
             "src/agent_tools/claude_code_integration.py",
             "src/agent_tools/desired_state.py",
             "src/agent_tools/native_setup.py",
+            "src/agent_tools/cooperative_cancellation.py",
+            "src/agent_tools/manager_identity.py",
             "scripts/bootstrap.ps1",
             ".github/actions/install-native/action.yml",
             ".github/workflows/native-integration.yml",
