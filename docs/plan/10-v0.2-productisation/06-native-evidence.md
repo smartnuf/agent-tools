@@ -103,7 +103,7 @@ require crossing those boundaries.
 ## Completion and next task
 
 #114 implementation is complete on merge after exact-head review/CI and
-three-host capture artifact inspection. Local validation: 416 unit tests,
+three-host capture artifact inspection. Local validation: 417 unit tests,
 36 parsed guide invocations, POSIX syntax/PATH tests and read-only environment
 capture pass. Local doctor reports only the known absent Poppler/Ghostscript;
 PowerShell validation and real hosted observations require Windows CI. No
@@ -111,3 +111,12 @@ product/native host changes or additional acceptance gates are claimed.
 #104 stays open across both slices; neither of its two gates is claimed here.
 Next: #115, using the recorded contract and actual runner conditions. Final
 v0.2 guides and release qualification remain separate after #104.
+
+
+Artifact inspection of [run 34865728204](https://github.com/smartnuf/agent-tools/actions/runs/34865728204)
+confirmed before/after captures on x64 Ubuntu/Windows and native ARM64 macOS.
+It also exposed a recorder defect: resolving the Windows WinGet app alias
+failed before its version probe. The correction records realpath failure
+separately and still executes the fixed read-only version command; this does
+not weaken production manager-identity checks. A regression test preserves
+that distinction. The corrected head requires a fresh three-host capture run.
