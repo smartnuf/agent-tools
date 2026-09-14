@@ -43,7 +43,7 @@ changes `PATH`. `tools list` shows the packaged capability catalogue;
 versions, execution environments, and architectures where observable. A
 missing required native executable makes `doctor` report the gap and return a
 nonzero status. Published v0.1.2 also requires its bundled Python libraries; the
-next-release optional-library behavior is described below.
+v0.2 optional-library behavior is described below.
 
 Upgrade an unpinned installation:
 
@@ -98,8 +98,10 @@ unavailable upstream; there is no automatic fallback. Existing verified
 Ghostscript can still satisfy discovery. See the [platform guide](https://github.com/smartnuf/agent-tools/blob/main/docs/platforms.md)
 for provider requirements, exact tested combinations and known gaps.
 
-Status 0 requires verified success or no-op and successful or unnecessary
-provenance recording. Status 1 means planning, authorization, execution,
+A successful dry run returns status 0 for producing a plan; it does not prove
+installation or final verification. For execution, status 0 requires verified
+success or no-op and successful or unnecessary provenance recording. Status 1
+means planning, authorization, execution,
 verification or persistence did not finish successfully; invalid requests return
 2 and interruption returns 130. Read the separate host-mutation and provenance
 results: a nonzero status does not mean that nothing changed. Follow the reported
@@ -161,10 +163,10 @@ capability accepted by `agent-tools install`.
 
 ## Installed release details
 
-The current stable release is
-[v0.1.2](https://github.com/smartnuf/agent-tools/releases/tag/v0.1.2) and
-supports Python 3.11 through 3.13. Verify it without assuming uv's executable
-directory is already on `PATH`:
+Choose a published version from the
+[release history](https://github.com/smartnuf/agent-tools/releases). Packaged
+releases support Python 3.11 through 3.13. Verify your installed version without
+assuming uv's executable directory is already on `PATH`:
 
 ```powershell
 & "$(uv tool dir --bin)\agent-tools.exe" --version
@@ -188,8 +190,9 @@ recorded direct-wheel requirement while upgrading to the current release:
 uv tool install --python 3.13 --upgrade smartnuf-agent-tools
 ```
 
-Pin the current release when reproducibility matters, or reinstall that exact
-version if its isolated environment is damaged:
+Pin the published version you intend when reproducibility matters, or reinstall
+that exact version if its isolated environment is damaged. For example, to pin
+the earlier v0.1.2 release:
 
 ```sh
 uv tool install --python 3.13 --reinstall "smartnuf-agent-tools==0.1.2"
