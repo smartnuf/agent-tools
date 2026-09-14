@@ -56,3 +56,10 @@ POSIX syntax/PATH, actionlint with ShellCheck, wheel/sdist contents and installe
 CLI checks pass. The wheel's UTF-8 Markdown description exactly matches README.md.
 Doctor reports only the known missing native workstation tools. The front-door
 gate completes on merge after exact-head CI/review; no release gate is claimed.
+
+First-head CI passed all required/native jobs. Review correctly requested explicit
+status-zero dry-run semantics and absolute URLs that work in GitHub release
+bodies; both are corrected in README/notes. Release preparation also removed a
+time-sensitive "current stable" assertion from immutable PyPI metadata, keeping
+version-qualified compatibility facts and a release-history link. The final
+head requires fresh CI/review; no publication has occurred.
