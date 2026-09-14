@@ -4,9 +4,9 @@
 
 | Platform | Python environment | Native tools | Notes |
 |---|---|---|---|
-| Windows 10/11 | `uv` via WinGet | WinGet | Invoke the installed `agent-tools` launcher from uv's tool directory; native package locations remain manager-owned. |
+| Windows 10/11 | `uv` via WinGet | WinGet for Poppler; Ghostscript route currently unavailable | The catalogue's Ghostscript WinGet package is absent upstream; see the evidence and provider gap below. |
 | Debian/Ubuntu | `uv` standalone installer | `apt` | Poppler package is `poppler-utils`; Ghostscript is `ghostscript`. |
-| Fedora/RHEL | `uv` standalone installer | `dnf` | Both packages are available by their distribution names. |
+| Fedora/RHEL | `uv` standalone installer | `dnf` | Package availability must be checked for the specific distribution/release; current evidence is fixtures only. |
 | Arch Linux | `uv` standalone installer | `pacman` | Use `poppler` and `ghostscript`. |
 | macOS | `uv` via Homebrew or standalone installer | Homebrew | `brew install poppler ghostscript`. |
 
@@ -63,8 +63,8 @@ Process-only discovery refresh, final verification, cancellation and uncertain
 recovery follow [Decision 0002](decisions/0002-native-capability-provider-model.md)
 and [Decision 0009](decisions/0009-installed-capability-install.md).
 No provider upgrade/removal, shell-profile change or cross-process coordination
-is added. Real-provider and architecture coverage remains explicitly tracked
-in #104; installed no-op CI must not be described as empty-host mutation proof.
+is added. Real-provider and architecture coverage is classified below and remains tracked
+in #104; installed no-op CI is not empty-host mutation proof.
 
 ## Clone native setup
 
@@ -157,3 +157,77 @@ Use these options instead:
 3. A local Apple-silicon Mac with native virtualization if sustained macOS development becomes necessary.
 
 The CI matrix is the sensible initial route: it costs little for a small private-repository workload, requires no local emulator, and tests on real supported macOS runner images.
+
+
+## Evidence classes and current coverage
+
+These describe observed evidence, not a guarantee for every version in a
+platform family. Agent Tools itself remains a PyPI/uv product. The native
+package managers below install prerequisites, not Agent Tools.
+
+| Evidence class | Current owner | What it proves |
+|---|---|---|
+| Isolated package build | CI `package-artifacts`, release build | Restricted sdist rebuild, wheel contents/metadata and checksum identity |
+| Installed artifact | CI `install-and-test`, core/documents and lifecycle drivers | Public CLI and optional dependency shapes outside a checkout; real old-release artifact migrations against a controlled local index |
+| External native preseed | Native `external-preseed-and-test`, shared `install-native` action | Direct manager fixture preparation, discovery and all-satisfied CLI/bootstrap behaviour |
+| Simulated provider mutation | Unit tests and `test_provider_execution_integration.py` | Planner/executor/provenance/failure contracts on fixtures and disposable subprocesses; no real native manager installation |
+| Real installed-CLI mutation | #115, not yet complete | Required future proof of actual supported provider requests, final rediscovery/provenance and no-op repeat |
+| Published artifact lifecycle | GitHub release smoke, PyPI smoke | Published artifact install/upgrade/reinstall/removal with externally seeded prerequisites; not native mutation by Agent Tools |
+
+[PR #113's native run](https://github.com/smartnuf/agent-tools/actions/runs/34864622805)
+provides this dated baseline (2026-09-14). Its generic runner labels resolved to
+the following images. Later runs may differ; use each run's environment artifact
+and setup log rather than carrying these versions forward.
+
+| Observed host/image | Evidence | Limitation |
+|---|---|---|
+| Ubuntu 24.04.5 LTS; image `ubuntu-24.04`, `20260907.300.1` | apt-preseeded Poppler/Ghostscript, installed discovery/no-op | Not Debian, other Ubuntu releases, ARM64 or CLI-driven apt mutation |
+| Windows Server 2025; image `windows-2025-vs2026`, `20260907.229.1` | WinGet-preseeded Poppler, Chocolatey-preseeded Ghostscript, installed discovery/no-op | Not Windows 10/11 or Windows ARM64; Chocolatey is not an Agent Tools adapter |
+| macOS 26.6.2 build 25G83; image `macos-26-arm64`, `20260907.0351.1` | Homebrew-preseeded Poppler/Ghostscript, installed discovery/no-op on the ARM64 image | Not Intel macOS or older releases; no CLI-driven Homebrew mutation yet |
+
+The shared external fixture now captures before/after JSON observations in
+`native-environment-*` artifacts (90-day requested retention) and the job log.
+They include OS/version/build, distinct host/process architecture indicators,
+runner image/version, recording Python, uv, manager and executable versions,
+and failure/missing-command observations. The recording Python is explicitly
+not a claim about an installed application's interpreter. Missing architecture
+or version observations remain unknown. Context indicators do not prove the
+absence of virtualization or emulation. Artifact expiry is not durable release
+qualification: the release coverage record must retain the relevant observed
+matrix and link its exact qualification run.
+
+### Windows Ghostscript provider gap
+
+As checked on 2026-09-14, `ArtifexSoftware.GhostScript` is absent from the
+[WinGet Artifex manifests](https://github.com/microsoft/winget-pkgs/tree/master/manifests/a/ArtifexSoftware).
+The [upstream request](https://github.com/microsoft/winget-pkgs/issues/267547)
+is blocked on interactive installation; [Artifex describes its removal of
+silent installation](https://artifex.com/blog/ghostscript-10.01.0-disabling-silent-install-option).
+The current catalogue still names this route, so planning can display it but
+installation of a missing Windows Ghostscript is not currently demonstrated
+as usable. Treat a provider failure as a failure and inspect the CLI's reported
+outcome; there is no automatic fallback. Existing verified Ghostscript can
+still satisfy discovery and no-op installation.
+
+The CI Chocolatey fixture does not establish a supported Chocolatey adapter.
+This evidence work neither adds one nor rebuilds or bypasses the publisher's
+installer. A change of provider or installer policy needs its own decision.
+
+### Untested variants and sensible follow-up
+
+| Context | Current evidence class | Recommended way to close the gap |
+|---|---|---|
+| Windows 10/11 x64 | Code/fixtures; hosted evidence is Server | Periodic disposable client-OS VM or hardware qualification; do not relabel Server results |
+| Windows ARM64 and x64 emulation | Architecture/selection fixtures; local Python 3.14 dependency failure reported, not a supported-range success | Periodic native hardware covering Python 3.11–3.13, native provider architecture and documents wheels |
+| Debian, other Ubuntu versions | apt adapter plus fixtures; only the recorded Ubuntu runner exercised | Container matrix for package/discovery behaviour, labelled container evidence rather than full desktop/host integration |
+| Fedora/RHEL and Arch | dnf/pacman adapters plus fixtures; no current hosted native mutation proof | Disposable distribution containers first; record package availability per release rather than promise an entire family |
+| macOS Intel and older macOS | Code/fixtures; current recorded hosted image is ARM64 | Explicit Intel hosted runner when available, plus periodic older-version qualification if warranted |
+| WSL | WSL-local versus Windows-host separation fixtures | Dedicated Windows/WSL qualification; ordinary Linux container evidence cannot prove Windows/WSL integration |
+| Cross-host Windows installation from WSL; Claude adapter outside native Windows | Explicitly outside the accepted contracts | Do not treat as an evidence gap to fill without a new product decision |
+
+#115 first targets fresh, separate apt/Homebrew Poppler+Ghostscript and WinGet
+Poppler jobs through the installed CLI. Initially present providers must be
+reported as no-op evidence, never removed or hidden to manufacture a mutation
+result. The maintained matrix will gain mutation credit only from observed
+successful provider requests and final verification. See the
+[native evidence contract](plan/10-v0.2-productisation/06-native-evidence.md).

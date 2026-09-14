@@ -99,7 +99,7 @@ pass and the wheel rebuilt from the restricted sdist passes outside-checkout
 CLI tests. #106 adds the third completed gate: `tests/test_cli_reference.py`,
 `tests/check_cli_docs.py`, installed-help comparisons and pre-publication checks
 keep the generated reference and guide invocations aligned with argparse.
-The suite now has 412 passing tests. These changes await the next feature-bearing
+The suite now has 416 passing tests. These changes await the next feature-bearing
 release. #57 discovery specifies the `documents` extra and explicit
 `doctor --documents` validation in [Decision 0010](../decisions/0010-document-extra-and-diagnostics.md),
 backed by disposable uv selection experiments. #109 now supplies optional
@@ -108,8 +108,10 @@ installed-wheel checks. #111 supplies old-release artifact migration,
 pin/reinstall/removal/failure/rollback preservation and separately labelled
 source-fixture extra-retention evidence; see [the lifecycle plan](10-v0.2-productisation/05-document-lifecycle.md).
 The optional-document gate is complete on merge (4/8 overall), closing
-#111/#109/#57. Next, discover #104 provider/platform evidence and estimate it
-from current workflow gaps. The [v0.2 plan](10-v0.2-productisation/README.md) retains the
+#111/#109/#57. Next, #114 records #104 provider/platform discovery and environment capture
+(0.5–1 day); #115 supplies real installed-CLI mutation evidence (1–2 days).
+See the [native evidence plan](10-v0.2-productisation/06-native-evidence.md).
+Neither #104 gate completes from external-preseed observations. The [v0.2 plan](10-v0.2-productisation/README.md) retains the
 remaining document-dependency, platform, final-guide and release gates.
 
 The v0.2 goal is deliberately minimal: one installed CLI, `agent-tools install
