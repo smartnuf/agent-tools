@@ -88,9 +88,10 @@ The dry run displays a read-only plan. The mutation flag authorizes the displaye
 native package-manager actions and managed provenance recording. There is no
 interactive confirmation prompt. Only named capabilities are requested; enabling
 Bash in configuration does not add it to an installation of Poppler. Stored exact
-preferences for requested capabilities are honored. Already-satisfied requests
-are verified no-ops; otherwise a command without the mutation flag displays the
-plan and refuses installation.
+preferences for requested capabilities are honored. For execution, requests that are already
+satisfied are verified no-ops; if changes are needed, a request without the
+mutation flag displays the plan and refuses installation. Dry runs display
+the plan without entering execution or requiring that flag.
 
 The supported package manager and its existing privileges must already be
 available. On Windows, the catalogue's Ghostscript WinGet package is currently
@@ -102,14 +103,14 @@ A successful dry run returns status 0 for producing a plan; it does not prove
 installation or final verification. For execution, status 0 requires verified
 success or no-op and successful or unnecessary provenance recording. Status 1
 means planning, authorization, execution,
-verification or persistence did not finish successfully; invalid requests return
-2 and interruption returns 130. Read the separate host-mutation and provenance
+verification or persistence did not finish successfully; invalid syntax or
+capability names return 2 and interruption returns 130. Read the separate host-mutation and provenance
 results: a nonzero status does not mean that nothing changed. Follow the reported
 recovery guidance and do not blindly retry a partial or uncertain result.
 Installation does not enable capabilities, remove shared providers or alter your
 shell profile.
 
-## Optional document libraries (v0.2+)
+## Optional document libraries
 
 Version 0.2 installs a core CLI without third-party Python dependencies. To
 include the existing PDF, image, Word and Excel library bundle, explicitly select

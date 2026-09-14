@@ -30,8 +30,9 @@ only their request membership differs.
 The parser definition is authoritative for syntax and help. The public command
 uses `--allow-provider-mutation`, the existing dedicated noninteractive authority
 for its displayed provider plan. Confirmation alone is not authority and no
-interactive prompt is introduced. Without the flag a nonempty plan is displayed
-and refused with status 1; already-satisfied requests are verified no-ops.
+interactive prompt is introduced. For execution requests (without `--dry-run`),
+a nonempty plan without the mutation flag is displayed and refused with status 1;
+already-satisfied requests are verified no-ops.
 
 `--dry-run` performs discovery and planning, displays the requested capabilities,
 exact preferences and manager actions, and returns 0 when a plan can be
