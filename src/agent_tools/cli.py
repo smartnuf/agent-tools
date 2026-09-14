@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .native_setup import install_capabilities
 from .capabilities import (
     CAPABILITY_CATALOGUE,
     Availability,
@@ -357,6 +358,39 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-tools")
     parser.add_argument("--version", action="version", version=f"%(prog)s {_application_version()}")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    install_parser = subparsers.add_parser(
+        "install",
+        help="install only named native capabilities with explicit authorization",
+        description=(
+            "Discover and plan only the named capabilities, honoring their exact "
+            "stored provider preferences. Other enabled capabilities are not added. "
+            "Print the plan before execution; configuration is never changed. "
+            "Already-satisfied capabilities are verified no-ops."
+        ),
+        epilog=(
+            "Exit status: 0 = verified success/no-op (or a produced dry-run plan); "
+            "1 = planning, authorization, execution, verification or provenance "
+            "failure; 2 = invalid arguments; 130 = interrupted. "
+            "Partial or uncertain results include recovery guidance; do not blindly retry."
+        ),
+    )
+    install_parser.add_argument(
+        "capability", nargs="+",
+        choices=tuple(item.capability_id for item in CAPABILITY_CATALOGUE),
+        help="built-in capability identities; repeated names are requested once",
+    )
+    install_mode = install_parser.add_mutually_exclusive_group()
+    install_mode.add_argument(
+        "--allow-provider-mutation", action="store_true",
+        help=(
+            "authorize the displayed native package-manager plan and managed provenance "
+            "write; without this flag, a nonempty plan is refused (default: no authorization)"
+        ),
+    )
+    install_mode.add_argument(
+        "--dry-run", action="store_true",
+        help="display a read-only discovery/plan without execution or provenance writes",
+    )
     subparsers.add_parser("doctor", help="show Python and native-tool availability")
     tools_parser = subparsers.add_parser("tools", help="list capabilities or detect host state")
     tools_subparsers = tools_parser.add_subparsers(dest="tools_command", required=True)
@@ -409,6 +443,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "install":
+        return install_capabilities(
+            args.capability,
+            allow_provider_mutation=args.allow_provider_mutation,
+            dry_run=args.dry_run,
+        )
     if args.command == "doctor":
         return doctor()
     if args.command == "tools" and args.tools_command == "list":

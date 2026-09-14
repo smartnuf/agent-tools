@@ -9,6 +9,7 @@ import posixpath
 import stat
 import tempfile
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -504,12 +505,20 @@ def _request_spec(
 def desired_capabilities(
     document: dict[str, Any],
     machine: MachineState | None = None,
+    *,
+    capability_ids: Sequence[str] | None = None,
 ) -> tuple[DesiredCapability, ...]:
-    """Interpret every enabled v1 entry against the current built-in catalogue."""
+    """Interpret enabled entries, optionally scoped to an explicit install request.
+
+    The document reader validates the entire schema first. Unrequested entries
+    are not interpreted against the catalogue in a scoped consumer.
+    """
 
     machine = machine or current_machine()
     desired: list[DesiredCapability] = []
     for capability_id, entry in document["capabilities"].items():
+        if capability_ids is not None and capability_id not in capability_ids:
+            continue
         try:
             capability = get_capability(capability_id)
         except KeyError as error:
