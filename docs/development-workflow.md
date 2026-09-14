@@ -654,7 +654,11 @@ repository artifacts or explicitly verify and record its preservation in the
 issue, PR, or history record. Deletion must not replace preservation of
 architectural decisions, research, evidence, or roadmap state and rationale.
 PRs, issues, commits, tags, ADRs, research notes, and canonical planning documents
-provide durable records; stale branch names must not serve as archival storage.
+provide durable records only when retained independently of the deleted branch.
+Verify that needed commits remain reachable through retained repository history
+or refs, or preserve their useful content in another persistent artifact. A
+recorded SHA alone is insufficient; a retained PR ref may not include commits
+added after closure. Stale branch names must not serve as archival storage.
 
 Where GitHub supports automatic deletion of merged PR head branches, enabling
 it is the preferred mechanical default, subject to repository policy and
