@@ -24,6 +24,10 @@
 | v0.2 #109 runtime slice | Optional documents extra, diagnostics and installed shapes | complete | completed with #111; 4/8 overall | 1–1.5 days | none |
 | v0.2 #111 | Optional-document artifact migrations and preservation | complete | 4/8 v0.2 gates complete overall | 1–1.5 days | none |
 | v0.2 #106 | Generated CLI reference and help/docs drift prevention | complete | 3/8 v0.2 gates complete overall | 0.25–0.75 day | none |
+| v0.2 #104/#114 | Provider/platform discovery and retained environment capture | complete | no additional gate complete | 0.5–1 day | none |
+| v0.2 #118 | WinGet activation identity prerequisite | complete | no additional gate complete | 0.5–1.5 days | none |
+| v0.2 #120 | Legacy-encoded native reporting prerequisite | complete | no additional gate complete | 0.25–0.5 day | none |
+| v0.2 #104/#115 | Real installed-CLI native mutation and explicit platform matrix | complete on #117 merge | 6/8 v0.2 gates complete overall on merge | 1–2 days | exact-head review/integration only |
 
 Estimated implementation effort through M3: **complete**. Discovery for #103
 is recorded in its [task plan](10-v0.2-productisation/01-installed-cli.md), and
@@ -35,7 +39,9 @@ human-approved named-only request contract. The forecast above covers #103 and
 [Implementation discovery](10-v0.2-productisation/04-document-implementation.md)
 revises this to 2–3 days: runtime/installed-shape work (1–1.5 days) and #111
 lifecycle evidence (1–1.5 days), both implemented;
-remaining #104/release work needs its own discovery-based estimates. Actual effort is untracked.
+the #104 discovery/evidence work and its bounded prerequisites are implemented
+as recorded above. Final guide and release qualification work still needs
+discovery-based estimates. Actual effort is untracked.
 
 Former M4a/M4b are historical, cancelled objectives rather than deferred work
 or completed implementation. Their GitHub milestones are closed as not planned
