@@ -652,7 +652,17 @@ streams, worktrees, releases, or other owners. Retain branches with uncertain
 ownership. For an unmerged branch, first harvest useful knowledge into durable
 repository artifacts or explicitly verify and record its preservation in the
 issue, PR, or history record. Deletion must not replace preservation of
-architectural decisions, research, evidence, or roadmap rationale.
+architectural decisions, research, evidence, or roadmap state and rationale.
+PRs, issues, commits, tags, ADRs, research notes, and canonical planning documents
+provide durable records; stale branch names must not serve as archival storage.
+
+Where GitHub supports automatic deletion of merged PR head branches, enabling
+it is the preferred mechanical default, subject to repository policy and
+documented retention needs. Inspect the current setting before proposing a
+change; administrative access alone is not authorization to change it. If
+disabled and explicit authority is absent, record the recommendation and report
+the remaining human/admin action. Automatic deletion does not replace the
+preservation and ownership checks, or handle deliberately closed unmerged work.
 
 Delete only refs within the authorized cleanup scope, guarding against a
 concurrent head change with an explicit expected-SHA lease. Never include the
