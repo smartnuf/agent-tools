@@ -79,3 +79,10 @@ jobs:
           uv tool install --python 3.13 --reinstall "$pin"
           uv tool uninstall smartnuf-agent-tools
           test ! -e "$tool_bin/agent-tools"
+
+      - name: Verify published PyPI optional-document lifecycle
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          python tests/check_published_documents.py --pypi-version "$RELEASE_VERSION" \
+            --python 3.13 --allow-home-config-mutation
