@@ -28,6 +28,7 @@ NATIVE_PATHS = (
     "tests/test_cli.py",
     "tests/test_desired_state.py",
     "tests/test_native_setup.py",
+    "tests/test_install.py",
     "tests/test_select_native_integration.py",
 )
 

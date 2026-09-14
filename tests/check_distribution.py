@@ -125,6 +125,15 @@ def check_sdist(sdist: Path) -> str:
                 unsafe.append(member.name)
             if FORBIDDEN_PARTS.intersection(path.parts) or path.suffix == ".pyc":
                 forbidden.append(member.name)
+        unexpected = [name for name in names
+                      if PurePosixPath(name).parts[1:2] not in
+                      [("src",), ("pyproject.toml",), ("README.md",),
+                       ("LICENSE",), ("PKG-INFO",), (".gitignore",)]]
+        assert not unexpected, f"unexpected sdist content: {unexpected}"
+        assert not any(
+            {"bin", "scripts"}.intersection(PurePosixPath(name).parts[1:])
+            for name in names
+        ), "repository operational entry points must not ship"
         assert not unsafe, f"unsafe sdist members: {unsafe}"
         assert not forbidden, f"machine-local sdist members: {forbidden}"
         assert {PurePosixPath(name).parts[0] for name in names} == {expected_root}

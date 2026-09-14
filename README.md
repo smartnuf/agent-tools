@@ -60,6 +60,34 @@ Uninstalling removes uv's isolated application environment and launcher. It
 does not remove user-owned desired state, reverse an active agent integration,
 or uninstall external native providers such as Bash, Poppler, or Ghostscript.
 
+## Install native capabilities (next release)
+
+The installed CLI built from current `main` provides native installation;
+this command is not in the published v0.1.2 release yet. After making the
+installed launcher available on `PATH` (or using its absolute path above):
+
+```sh
+agent-tools install poppler ghostscript --dry-run
+agent-tools install poppler ghostscript --allow-provider-mutation
+agent-tools install bash
+agent-tools install --help
+```
+
+The first command displays a read-only plan. The second authorizes its native
+package-manager actions and managed provenance recording. Only named
+capabilities are requested; enabling Bash in configuration does not add it to
+an installation of Poppler. Stored exact preferences for requested capabilities
+are honored. Already-satisfied requests are verified no-ops; otherwise a command
+without the mutation flag displays the plan and refuses installation.
+
+A usable platform package manager and its existing privileges are prerequisites.
+The command reports partial execution and provenance failures separately, with
+recovery guidance; do not blindly retry an uncertain result. It does not enable
+capabilities, remove shared providers, or alter your shell profile. See the
+[platform guide](https://github.com/smartnuf/agent-tools/blob/main/docs/platforms.md)
+for provider and privilege requirements; `install --help` describes options and
+exit statuses.
+
 ## Advanced use and source development
 
 - [Verify the installed version and optionally update `PATH`](#installed-release-details).
@@ -130,8 +158,8 @@ Remove an integration explicitly before rollback or application uninstall
 when restoration of its managed setting is intended; older releases may not
 have the integration-removal command.
 
-Poppler and Ghostscript are not bundled. Install them through the operating
-system package manager before expecting `agent-tools doctor` to pass
+Poppler and Ghostscript are not bundled. For v0.1.2, install them through the
+operating system package manager before expecting `agent-tools doctor` to pass
 completely. See the
 [v0.1.2 release notes](https://github.com/smartnuf/agent-tools/blob/main/docs/releases/v0.1.2.md)
 for current limitations.
@@ -225,7 +253,10 @@ or:
 ./scripts/update.sh
 ```
 
-The `agent-python` wrapper runs the shared interpreter. The `agent-tools` wrapper runs the maintenance CLI. Agents can invoke either by absolute path without relying on `PATH`.
+The `agent-python` wrapper runs the shared development interpreter. The checkout
+`agent-tools` wrapper runs the same packaged CLI. These are development and
+compatibility helpers; ordinary installed workflows use `agent-tools` without
+a checkout. Clone bootstrap retains its explicit-plus-enabled native request.
 
 ## Repository policy and layout
 
@@ -245,7 +276,7 @@ stays untracked.
   Windows-hosted Bash provider; WSL is reported as a separate environment.
 
 ```text
-bin/                    stable user-facing wrappers
+bin/                    development and compatibility wrappers
 docs/packaging.md       public distribution and dependency contract
 docs/platforms.md       platform policy and macOS testing notes
 scripts/                bootstrap, update, PATH, and validation scripts
@@ -284,5 +315,5 @@ bootstrap delegation through the explicitly authorized managed provider
 lifecycle, reversible desired-capability configuration, the native-Windows
 Claude Code Git Bash adapter, and exact-artifact upgrade, pin, rollback, and
 removal evidence. See the maintained roadmap for the acceptance record. The
-packaged release and clone-based shared development environment remain
-supported entry points.
+installed `agent-tools` CLI is the ordinary-user product; the clone-based
+shared environment remains development/compatibility infrastructure.

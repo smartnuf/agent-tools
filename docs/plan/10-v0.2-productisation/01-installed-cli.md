@@ -65,3 +65,27 @@ No dependency-boundary (#57), real-provider/platform expansion (#104), release
 publication, or future-research work is included. Recommend #106 after #103 so
 the reference reflects the final command surface. Actual effort is not tracked;
 update remaining effort when implementation evidence exists.
+
+## Implementation evidence
+
+The CLI now delegates named requests to the same provider planner, managed
+executor and result handler as bootstrap. Scoped desired-state interpretation
+preserves exact requested preferences without consuming unrelated entries.
+`tests/test_install.py` covers the request and failure contracts, including an
+actual subprocess in the existing disposable-provider style and idempotent
+managed provenance. The complete suite passes 401 tests.
+
+`uv build` rebuilds the wheel from the restricted sdist. Artifact metadata and
+content checks and the installed-wheel CLI checks pass outside the checkout;
+CI also exercises all-satisfied installed native requests on seeded runners.
+Hatch includes `.gitignore` as build metadata; the allowed payload explicitly
+accounts for it. Operational scripts remain excluded with no exceptions.
+The local doctor reports missing Poppler/Ghostscript, not a Python/CLI failure.
+PowerShell is unavailable locally; hosted Windows checks provide native evidence.
+
+Original estimate remains 1.5–2 days; actual effort was not tracked. No #103
+implementation remains once the exact-head review/merge gate completes. Next
+recommended task: #106 (0.25–0.75 day), generated reference and help/example
+drift prevention on the existing argparse model. Broader #57/#104/release gates
+remain open. No new architectural adaptation beyond the explicitly accepted
+named-only membership decision was required; existing M3 invariants are reused.

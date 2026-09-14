@@ -12,9 +12,9 @@ produce distribution metadata.
 This section describes the current implementation. For v0.2,
 [Decision 0007](decisions/0007-v0.2-product-and-distribution-boundary.md)
 establishes `agent-tools` as the sole ordinary-user CLI and PyPI through
-`uv tool` as the sole Agent Tools distribution channel. Issue #103 must expose
-installed native installation through the existing M3 lifecycle and reconcile
-artifact contents; checkout helpers remain development/compatibility infrastructure.
+`uv tool` as the sole Agent Tools distribution channel. Issue #103 exposes
+installed native installation through the existing M3 lifecycle; checkout
+helpers remain development/compatibility infrastructure.
 
 The wheel is the ordinary-user command-line application. It contains portable Python code from `src/agent_tools/`; it does not contain the repository's clone-oriented `bin/`, `scripts/`, configuration, exact environment lock, or `.venv`.
 
@@ -24,8 +24,9 @@ orchestration belong in packaged Python. Clone-oriented scripts are thin front
 ends rather than a second implementation. Their explicit native-install flags
 invoke the internal packaged bootstrap module after editable installation, so
 planning, execution, provenance, and final verification use the same reviewed
-implementation. This clone-only entry point is not a public `tools install`
-command or a compatibility promise for direct module callers.
+implementation. The internal bootstrap module is not a compatibility promise for direct module
+callers. The public `agent-tools install` command uses the same orchestration,
+with named-only scope under [Decision 0009](decisions/0009-installed-capability-install.md).
 
 [Decision 0005](decisions/0005-desired-capability-state.md) adds a public,
 versioned desired-capability document and `tools enable`/`tools disable`
@@ -53,10 +54,22 @@ provider, normal system Bash serves Linux and macOS, and the default WSL
 distribution is reported separately rather than satisfying Windows-hosted
 Bash. `agent-tools tools enable bash [--provider PROVIDER]
 --allow-config-mutation` and `tools disable bash --allow-config-mutation`
-manage the separate desired-state document. Public provider installation and
-removal remain outside this console-command boundary. The separately named
+manage the separate desired-state document. `agent-tools install CAPABILITY [CAPABILITY ...]` exposes explicitly authorized
+provider installation, honoring stored exact preferences only for named
+capabilities. Provider removal remains outside the command boundary. The separately named
 `agent-tools integrations claude-code` command group provides the one supported
 agent-integration lifecycle; it is not a generic plugin surface.
+
+## Source distribution boundary
+
+The sdist contains the application source, pyproject build metadata, README,
+license, build-backend-included `.gitignore`, and generated PKG-INFO. It excludes `bin/`, `scripts/`, checkout tests,
+configuration and maintenance documentation. No operational-script exception is
+needed to rebuild the wheel. Repository CI runs the full checkout tests and
+`uv build` builds the wheel from the sdist; artifact checks enforce both payloads.
+[Hatch's file-selection contract](https://hatch.pypa.io/latest/config/build/#file-selection)
+provides the target-specific include list. Use the Git repository for source
+maintenance/tests; installing the sdist is not a clone-bootstrap route.
 
 ## Dependencies
 

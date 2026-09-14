@@ -4,7 +4,7 @@
 
 | Platform | Python environment | Native tools | Notes |
 |---|---|---|---|
-| Windows 10/11 | `uv` via WinGet | WinGet | User-level PATH entry points only to `~/.agent-tools/bin`; package locations remain manager-owned. |
+| Windows 10/11 | `uv` via WinGet | WinGet | Invoke the installed `agent-tools` launcher from uv's tool directory; native package locations remain manager-owned. |
 | Debian/Ubuntu | `uv` standalone installer | `apt` | Poppler package is `poppler-utils`; Ghostscript is `ghostscript`. |
 | Fedora/RHEL | `uv` standalone installer | `dnf` | Both packages are available by their distribution names. |
 | Arch Linux | `uv` standalone installer | `pacman` | Use `poppler` and `ghostscript`. |
@@ -17,6 +17,39 @@ wheel for that architecture or that a compatible native compiler is installed.
 Bootstrap reports the selected interpreter before package synchronization and
 lets `uv pip` report an unavailable wheel or build-tool failure; it does not
 silently retry under an emulated interpreter.
+
+## Installed native setup
+
+The CLI built from current `main` supports `agent-tools install poppler
+ghostscript --dry-run` and the explicitly authorized form
+`agent-tools install poppler ghostscript --allow-provider-mutation`. This is
+next-release functionality, absent from published v0.1.2. `agent-tools` is the
+sole ordinary-user command surface; Agent Tools itself is installed/updated by
+`uv tool`, independently of these native providers.
+
+Only named capabilities enter the request. Exact stored preferences for those
+names apply; other enabled or unknown, structurally valid entries are ignored.
+The whole configuration file still passes schema/path integrity checks.
+Installation never changes desired configuration or agent settings. Plan/help
+are read-only, no-op installation verifies existing providers, and host and
+provenance outcomes are reported separately. Use `agent-tools install --help`
+for the authoritative option and exit-status contract.
+
+The supported manager must already be available: WinGet on Windows; apt, dnf
+or pacman on their supported Linux environments; native Homebrew on macOS.
+Agent Tools does not install a manager or configure privilege policy. Linux
+system actions require verified GNU `timeout` and either root or existing
+noninteractive sudo authorization for the exact supervised commands; an
+interactive password prompt is not offered. Missing privileges or supervision
+fail closed. Windows and macOS retain the existing M3 executor checks.
+WSL-local requests operate inside Linux, not on the Windows host.
+
+Process-only discovery refresh, final verification, cancellation and uncertain
+recovery follow [Decision 0002](decisions/0002-native-capability-provider-model.md)
+and [Decision 0009](decisions/0009-installed-capability-install.md).
+No provider upgrade/removal, shell-profile change or cross-process coordination
+is added. Real-provider and architecture coverage remains explicitly tracked
+in #104; installed no-op CI must not be described as empty-host mutation proof.
 
 ## Clone native setup
 

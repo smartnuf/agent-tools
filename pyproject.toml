@@ -52,5 +52,8 @@ agent-tools = "agent_tools.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_tools"]
 
+[tool.hatch.build.targets.sdist]
+include = ["/src/agent_tools", "/pyproject.toml", "/README.md", "/LICENSE"]
+
 [tool.hatch.version]
 path = "src/agent_tools/__init__.py"

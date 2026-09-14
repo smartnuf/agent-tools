@@ -78,8 +78,8 @@ requirement after the initial seven gates.
 
 | Gate | Initial state | Primary tracker |
 |---|---|---|
-| Installed `agent-tools` is the sole supported ordinary-user command surface; repository operational scripts are not required by released workflows | in-progress | #103 |
-| `agent-tools install <capability> [<capability> ...]` reuses the existing managed provider lifecycle and works from an installed artifact | in-progress | #103 |
+| Installed `agent-tools` is the sole supported ordinary-user command surface; repository operational scripts are not required by released workflows | complete | #103; `tests/test_install.py`, `tests/check_installed_cli.py`, `tests/check_distribution.py` |
+| `agent-tools install <capability> [<capability> ...]` reuses the existing managed provider lifecycle and works from an installed artifact | complete | #103; `tests/test_install.py`, `tests/check_installed_cli.py`, `tests/check_distribution.py` |
 | Core installation no longer requires document libraries; a separately requested document install has a specified compatibility contract | not-started | #57 |
 | CI evidence distinguishes seeded/simulated/native mutation paths and exercises primary real provider mutations through the installed CLI where practical | not-started | #104 |
 | Maintained platform evidence reports OS/distribution version, architecture, provider path, evidence class, and important common gaps without overclaiming | not-started | #104 |
