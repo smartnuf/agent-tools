@@ -65,5 +65,27 @@ A failure to establish identity returns to discovery, not weaker verification.
 
 ## Status
 
-Discovery experiment pending. No product implementation or new readiness gate
-is claimed. The broader #104 acceptance stays open.
+The [read-only experiment](https://github.com/smartnuf/agent-tools/actions/runs/34869512816)
+on Windows Server 2025 observed WinGet v1.11.510's actual DesktopAppInstaller
+image through its owned process handle; the image is regular and strictly
+resolvable. Independent closure adjudication accepted the bounded repair as
+completion of Decision 0002, with no new product/persistence/mutation policy.
+
+The implementation shares strict manager resolution between discovery and
+executor revalidation. Only positively tagged Windows WinGet activation aliases
+use a fixed bounded version probe and documented process-image query. The
+existing supervisor owns observation failure cleanup and elapsed-time accounting.
+Normal files and symlinks retain strict filesystem resolution. The installed
+Windows experiment now also checks production identity revalidation and public
+CLI dry-run. Exact-head hosted validation and review remain pending; #104 remains
+open and no readiness gate advances here.
+
+First-head review found a missing roadmap dependency (reconciled in the index)
+and reliance on setup-uv's exported tool directory (the observed run passed, but
+the workflow now derives it explicitly with `uv tool dir`).
+
+Local validation: 425 unit tests, generated reference/36 guide invocations, POSIX
+syntax/PATH checks, actionlint with ShellCheck, wheel/sdist contents and installed
+CLI checks pass. Doctor reports only this workstation's known absent Poppler and
+Ghostscript. Independent implementation closure found no blocking architecture
+defect; requested observation-path interruption/force-abort tests now pass.

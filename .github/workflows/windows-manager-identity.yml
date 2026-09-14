@@ -32,7 +32,9 @@ jobs:
         timeout-minutes: 2
         shell: bash
         run: |
-          "$UV_TOOL_DIR/smartnuf-agent-tools/Scripts/python.exe" -I \
+          identity_tool_dir="$(uv tool dir)"
+          cd "$RUNNER_TEMP"
+          "$identity_tool_dir/smartnuf-agent-tools/Scripts/python.exe" -I \
             "$GITHUB_WORKSPACE/tests/probe_windows_manager_image.py" \
             --output "$RUNNER_TEMP/windows-manager-image.json"
       - name: Retain identity observations even on failure

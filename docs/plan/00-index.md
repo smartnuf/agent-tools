@@ -99,7 +99,7 @@ pass and the wheel rebuilt from the restricted sdist passes outside-checkout
 CLI tests. #106 adds the third completed gate: `tests/test_cli_reference.py`,
 `tests/check_cli_docs.py`, installed-help comparisons and pre-publication checks
 keep the generated reference and guide invocations aligned with argparse.
-The suite now has 417 passing tests. These changes await the next feature-bearing
+The suite now has 425 passing tests. These changes await the next feature-bearing
 release. #57 discovery specifies the `documents` extra and explicit
 `doctor --documents` validation in [Decision 0010](../decisions/0010-document-extra-and-diagnostics.md),
 backed by disposable uv selection experiments. #109 now supplies optional
@@ -108,8 +108,13 @@ installed-wheel checks. #111 supplies old-release artifact migration,
 pin/reinstall/removal/failure/rollback preservation and separately labelled
 source-fixture extra-retention evidence; see [the lifecycle plan](10-v0.2-productisation/05-document-lifecycle.md).
 The optional-document gate is complete on merge (4/8 overall), closing
-#111/#109/#57. Next, #114 records #104 provider/platform discovery and environment capture
-(0.5–1 day); #115 supplies real installed-CLI mutation evidence (1–2 days).
+#111/#109/#57. Merged #114 records #104 provider/platform discovery and environment
+capture. #115/PR #117 has real apt/Homebrew mutation evidence, but its WinGet
+proof exposed an App Execution Alias identity defect before mutation. The focused
+[#118 prerequisite](10-v0.2-productisation/08-winget-identity.md) adds 0.5–1.5 days
+for discovery, repair and Windows proof; integrate it before completing #115's
+1–2 day mutation-evidence slice. Both estimates include review; no extra gate is
+claimed from the discovery experiment.
 See the [native evidence plan](10-v0.2-productisation/06-native-evidence.md).
 Neither #104 gate completes from external-preseed observations. The [v0.2 plan](10-v0.2-productisation/README.md) retains the
 remaining document-dependency, platform, final-guide and release gates.

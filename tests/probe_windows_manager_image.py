@@ -11,7 +11,8 @@ import shutil
 import subprocess
 from unittest import mock
 
-from agent_tools import provider_execution
+from agent_tools import native_setup, provider_execution
+from agent_tools.capabilities import current_machine
 
 
 def process_image(process):
@@ -59,7 +60,18 @@ def main():
         assert completed.returncode == 0, "version probe failed"
         assert "observation_error" not in result, result
         assert result.get("image_is_file") and result.get("resolved_image"), result
-        result["status"] = "observed"
+        # Exercise installed production discovery/revalidation and the public CLI.
+        state, = native_setup.detect_package_managers(current_machine())
+        assert state.executable_path.casefold() == alias.casefold(), state
+        assert provider_execution._verify_manager(state, current_machine()), state
+        result["production_identity"] = state.resolved_executable_path
+        executable = Path(__import__("sys").executable).with_name("agent-tools.exe")
+        dry_run = subprocess.run((str(executable), "install", "poppler", "--dry-run"),
+                                 capture_output=True, text=True, timeout=60)
+        result["installed_dry_run"] = {"returncode": dry_run.returncode,
+                                      "stdout": dry_run.stdout, "stderr": dry_run.stderr}
+        assert dry_run.returncode == 0, result["installed_dry_run"]
+        result["status"] = "observed-and-production-verified"
     except Exception as error:
         result.update(status="failed", error=str(error))
         raise
