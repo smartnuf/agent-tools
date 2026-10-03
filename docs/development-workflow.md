@@ -431,9 +431,11 @@ intermediate pushes.
 
 Record the candidate SHA and wait for completed review of that exact commit.
 Explicitly disposition material findings with fixes or evidence-backed reasons.
-After material changes, rerun affected validation, self-review, push the new
-candidate and request fresh `@codex review`; an older review is not evidence for
-the new HEAD. Avoid duplicate requests while review is running. A clean review
+After material changes, rerun affected validation and self-review. Every commit
+pushed after review creates a new candidate HEAD and requires fresh
+`@codex review`, including a non-material edit; an older review is not evidence
+for the new HEAD. Inspect and check non-material edits proportionately before
+pushing them. Avoid duplicate requests while review is running. A clean review
 does not replace tests, CI, domain validation or owner-reserved approval. Merge
 only with the repository's required evidence and owner/authorised merge authority.
 
