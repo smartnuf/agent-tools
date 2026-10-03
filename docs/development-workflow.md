@@ -419,6 +419,28 @@ Do not push:
 Every push creates a new head and invalidates prior-head CI and review as merge
 evidence.
 
+### Explicit candidate-HEAD review request
+
+Automatic Codex review is not assumed. After implementation, affected validation
+and self-review of the complete diff, push a genuine candidate HEAD and ensure
+its PR is open and ready for review. The authoring agent should post
+`@codex review` itself when it has comment permission; otherwise report that
+permission gap. This request means the author considers this exact commit ready
+for independent integration review. Do not request review for routine
+intermediate pushes.
+
+Record the candidate SHA and wait for completed review of that exact commit.
+Explicitly disposition material findings with fixes or evidence-backed reasons.
+After material changes, rerun affected validation, self-review, push the new
+candidate and request fresh `@codex review`; an older review is not evidence for
+the new HEAD. Avoid duplicate requests while review is running. A clean review
+does not replace tests, CI, domain validation or owner-reserved approval. Merge
+only with the repository's required evidence and owner/authorised merge authority.
+
+The request above is part of each candidate review wave, including a wave after
+incorporating a newer base. Existing exact-head gates and correction-wave limits
+remain in force regardless of account-level automatic-review settings.
+
 ### 5. Wait for exact-head evidence
 
 Record the remote PR head SHA. Wait for all required CI jobs and automated
